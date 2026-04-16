@@ -826,12 +826,23 @@ def _apply_ducking(bgm: np.ndarray, dubbed: np.ndarray, sr: int,
     - When voice detected → BGM fades down to duck_level
     - When voice stops → BGM fades back up (release time)
     """
+    # Handle stereo BGM → convert to mono for processing, remix later
+    bgm_stereo = None
+    if bgm.ndim == 2:
+        bgm_stereo = bgm.copy()
+        bgm = np.mean(bgm, axis=1)
+    if dubbed.ndim == 2:
+        dubbed = np.mean(dubbed, axis=1)
+
     # Ensure same length
     max_len = max(len(bgm), len(dubbed))
     if len(bgm) < max_len:
         bgm = np.pad(bgm, (0, max_len - len(bgm)))
     if len(dubbed) < max_len:
         dubbed = np.pad(dubbed, (0, max_len - len(dubbed)))
+    if bgm_stereo is not None:
+        if len(bgm_stereo) < max_len:
+            bgm_stereo = np.pad(bgm_stereo, ((0, max_len - len(bgm_stereo)), (0, 0)))
 
     # Create voice presence envelope from dubbed audio
     envelope = np.abs(dubbed).astype(np.float64)
@@ -853,10 +864,15 @@ def _apply_ducking(bgm: np.ndarray, dubbed: np.ndarray, sr: int,
 
     # Apply gain curve: 1.0 when no voice → duck_level when voice present
     gain = 1.0 - smoothed * (1.0 - duck_level)
-    ducked_bgm = bgm * gain
 
-    # Mix dubbed voice + ducked BGM
-    mixed = ducked_bgm + dubbed
+    # Apply ducking to stereo or mono BGM
+    if bgm_stereo is not None:
+        ducked_bgm = bgm_stereo * gain[:, np.newaxis]
+        # Mix: stereo BGM + mono dubbed (broadcast to both channels)
+        mixed = ducked_bgm + dubbed[:, np.newaxis]
+    else:
+        ducked_bgm = bgm * gain
+        mixed = ducked_bgm + dubbed
     # Normalize to prevent clipping
     mix_peak = np.max(np.abs(mixed))
     if mix_peak > 0.95:
