@@ -1,0 +1,89 @@
+"""TTS business logic."""
+
+import logging
+import time
+
+from omnivoice import OmniVoiceGenerationConfig
+
+from app.config import TTS_DEFAULT_GUIDANCE, TTS_DEFAULT_STEPS
+from app.core.gpu_manager import gpu
+from app.core.storage import load_voice, save_audio
+
+logger = logging.getLogger(__name__)
+
+
+def generate(
+    text: str,
+    voice_id: str = None,
+    language: str = None,
+    speed: float = 1.0,
+    num_step: int = None,
+    guidance_scale: float = None,
+    t_shift: float = None,
+    layer_penalty_factor: float = None,
+    position_temperature: float = None,
+    class_temperature: float = None,
+    denoise: bool = None,
+    preprocess_prompt: bool = None,
+    postprocess_output: bool = None,
+    audio_chunk_duration: float = None,
+    duration: float = None,
+) -> dict:
+    """Generate TTS audio. Returns {"audio_url", "duration", "sample_rate"}."""
+    steps = num_step or TTS_DEFAULT_STEPS
+    logger.info("TTS generate: text=%r voice=%s steps=%d", text[:50], voice_id, steps)
+
+    t0 = time.time()
+
+    # Load saved voice if provided
+    voice_prompt = None
+    if voice_id:
+        voice_prompt = load_voice(voice_id)
+        if voice_prompt is None:
+            raise ValueError(f"Voice '{voice_id}' not found")
+
+    # Build generation config with all provided params
+    config_kwargs = {
+        "num_step": steps,
+        "guidance_scale": guidance_scale if guidance_scale is not None else TTS_DEFAULT_GUIDANCE,
+    }
+    if t_shift is not None:
+        config_kwargs["t_shift"] = t_shift
+    if layer_penalty_factor is not None:
+        config_kwargs["layer_penalty_factor"] = layer_penalty_factor
+    if position_temperature is not None:
+        config_kwargs["position_temperature"] = position_temperature
+    if class_temperature is not None:
+        config_kwargs["class_temperature"] = class_temperature
+    if denoise is not None:
+        config_kwargs["denoise"] = denoise
+    if preprocess_prompt is not None:
+        config_kwargs["preprocess_prompt"] = preprocess_prompt
+    if postprocess_output is not None:
+        config_kwargs["postprocess_output"] = postprocess_output
+    if audio_chunk_duration is not None:
+        config_kwargs["audio_chunk_duration"] = audio_chunk_duration
+
+    gen_config = OmniVoiceGenerationConfig(**config_kwargs)
+
+    kwargs = {"generation_config": gen_config}
+    if language:
+        kwargs["language"] = language
+    if duration:
+        kwargs["duration"] = duration
+    elif speed and speed != 1.0:
+        kwargs["speed"] = speed
+
+    waveform = gpu.generate_tts(text, voice_prompt=voice_prompt, **kwargs)
+
+    file_id, file_path = save_audio(waveform, gpu.sampling_rate)
+    duration = waveform.shape[-1] / gpu.sampling_rate
+    elapsed = time.time() - t0
+
+    logger.info("TTS done in %.1fs, duration=%.1fs, file=%s", elapsed, duration, file_id)
+
+    return {
+        "audio_url": f"/api/v1/tts/audio/{file_id}",
+        "duration": round(duration, 2),
+        "sample_rate": gpu.sampling_rate,
+    }

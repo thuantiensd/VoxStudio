@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+*.egg
+.venv/
+venv/
+env/
+
+# Server data (runtime — don't commit)
+server/dubbing_projects/
+server/voices/
+server/audio_output/
+server/*.wav
+server/*.mp3
+
+# Node / Frontend
+desktop/node_modules/
+desktop/dist/
+desktop/.vite/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Env / secrets
+.env
+.env.local
+*.key
+
+# Logs
+*.log
