@@ -8,3 +8,5 @@ demucs
 google-generativeai
 faster-whisper
 scipy
+ffmpeg-python
+edge-tts
