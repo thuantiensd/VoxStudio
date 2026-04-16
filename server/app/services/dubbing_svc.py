@@ -23,6 +23,16 @@ logger = logging.getLogger(__name__)
 
 # ── Helpers ─────────────────────────────────────────
 
+def _detect_tts_engine() -> str:
+    """Auto-detect best TTS engine: OmniVoice if installed, else Edge TTS."""
+    try:
+        import omnivoice
+        return "omnivoice"
+    except ImportError:
+        logger.info("OmniVoice not installed, falling back to Edge TTS")
+        return "edge"
+
+
 def _project_dir(project_id: str) -> Path:
     return DUBBING_DIR / project_id
 
@@ -99,7 +109,7 @@ def create_project(video_data: bytes, video_filename: str,
         "source_language_input": source_language,
         "target_language": target_language,
         "voice_id": voice_id,
-        "tts_engine": "omnivoice",  # "omnivoice" (local GPU) or "edge" (cloud, free)
+        "tts_engine": _detect_tts_engine(),
         "edge_voice": None,    # Edge TTS voice name, auto-selected if None
         "enable_dubbing": enable_dubbing,
         "enable_subtitle": enable_subtitle,
