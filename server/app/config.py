@@ -44,7 +44,7 @@ TTS_DEFAULT_STEPS = 8 if DEV_MODE else 32
 TTS_DEFAULT_GUIDANCE = 2.0
 
 # LLM for translation
-LLM_MODEL = os.getenv("LLM_MODEL", "Qwen/Qwen2.5-3B-Instruct")
+LLM_MODEL = os.getenv("LLM_MODEL", "Qwen/Qwen2.5-7B-Instruct")
 
 # Gemini API for context-aware translation
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")

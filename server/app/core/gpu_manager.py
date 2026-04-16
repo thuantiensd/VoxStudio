@@ -196,11 +196,27 @@ class GPUManager:
         logger.info("Loading LLM %s (this won't block TTS/Whisper)...", LLM_MODEL)
         try:
             self._llm_tokenizer = AutoTokenizer.from_pretrained(LLM_MODEL)
-            self._llm_model = AutoModelForCausalLM.from_pretrained(
-                LLM_MODEL,
-                torch_dtype=torch.float16 if DEVICE != "cpu" else torch.float32,
-                device_map=DEVICE,
-            )
+            # Use 4-bit quantization to fit 7B model in limited VRAM
+            try:
+                from transformers import BitsAndBytesConfig
+                quant_config = BitsAndBytesConfig(
+                    load_in_4bit=True,
+                    bnb_4bit_compute_dtype=torch.float16,
+                    bnb_4bit_quant_type="nf4",
+                )
+                self._llm_model = AutoModelForCausalLM.from_pretrained(
+                    LLM_MODEL,
+                    quantization_config=quant_config,
+                    device_map="auto",
+                )
+                logger.info("LLM loaded with 4-bit quantization")
+            except ImportError:
+                logger.warning("bitsandbytes not available, loading in float16")
+                self._llm_model = AutoModelForCausalLM.from_pretrained(
+                    LLM_MODEL,
+                    torch_dtype=torch.float16 if DEVICE != "cpu" else torch.float32,
+                    device_map=DEVICE,
+                )
             self._llm_model.eval()
             self._llm_loaded = True
             logger.info("LLM loaded on %s.", DEVICE)
