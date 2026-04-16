@@ -1200,10 +1200,24 @@ def auto_dub(project_id: str, engine: str = "google"):
         transcribe_project(project_id)
         yield {"step": "transcribing", "label": steps[0][1], "progress": 30}
 
-        # Step 2: Translate
-        yield {"step": "translating", "label": steps[1][1], "progress": 35}
-        translate_project(project_id, engine=engine)
-        yield {"step": "translating", "label": steps[1][1], "progress": 50}
+        # Step 2: Translate (Google) + Rewrite (Qwen)
+        yield {"step": "translating", "label": "Đang dịch thuật (Google Translate)...", "progress": 35}
+        translate_project(project_id, engine="google")
+        yield {"step": "translating", "label": "Đang viết lại lời thoại (Qwen AI)...", "progress": 42}
+        try:
+            project = _load_meta(project_id)
+            translated = [seg.get("translated_text", "") for seg in project["segments"]]
+            target_lang = project["target_language"]
+            polished = llm_translate_svc.polish_for_speech(translated, target_lang)
+            for seg, result in zip(project["segments"], polished):
+                if result.get("speech_text"):
+                    seg["speech_text"] = result["speech_text"]
+                    seg["emotion"] = result.get("emotion", "neutral")
+            _save_meta(project)
+            logger.info("Qwen rewrote %d segments for natural dialogue", len(polished))
+        except Exception as e:
+            logger.warning("Qwen rewrite failed, using Google Translate only: %s", e)
+        yield {"step": "translating", "label": "Dịch thuật hoàn tất!", "progress": 50}
 
         # Step 3: Generate TTS for all segments
         yield {"step": "generating_tts", "label": steps[2][1], "progress": 55}

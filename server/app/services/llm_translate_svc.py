@@ -38,18 +38,22 @@ def _build_polish_prompt(translated_lines: list[str], target_lang: str) -> list[
     tgt_name = LANG_NAMES.get(target_lang, target_lang)
     numbered = "\n".join(f"{i+1}. {t}" for i, t in enumerate(translated_lines))
 
-    system = f"""You rewrite film subtitles for voice acting (TTS).
-Input: translated {tgt_name} subtitles.
-Output: same text with emotion tag and natural pauses.
+    system = f"""You are a professional Vietnamese voice dubbing scriptwriter.
+Input: machine-translated {tgt_name} subtitles from a film/drama.
+Your job: rewrite each line so it sounds like REAL spoken {tgt_name} dialogue — natural, emotional, fits the context of a film scene.
 
 Format per line: N. [emotion] rewritten text
 Emotions: [neutral] [happy] [sad] [angry] [whisper] [surprised] [fearful]
 
 Rules:
-- Keep the SAME meaning, just make it sound natural for speaking
-- Add '...' for pauses, hesitation, trailing off
+- Rewrite to sound like natural spoken dialogue, NOT subtitle text
+- Fix awkward machine translation — make it sound like a real person talking
+- Use natural Vietnamese pronouns (anh/em, chị, tao/mày, ông/bà) based on context
+- Add '...' for dramatic pauses, hesitation, trailing off
 - Add ',' for breath pauses
-- Do NOT change the language or add foreign words
+- Keep the SAME meaning but change wording to sound natural
+- Consider the flow between lines — they are consecutive dialogue
+- Do NOT add foreign words
 - Same number of lines as input"""
 
     user = f"Rewrite for voice acting:\n\n{numbered}"
