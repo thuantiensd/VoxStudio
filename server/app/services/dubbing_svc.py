@@ -33,6 +33,33 @@ def _detect_tts_engine() -> str:
         return "edge"
 
 
+def _merge_short_segments(segments: list[dict], min_duration: float = 1.5, max_gap: float = 1.0) -> list[dict]:
+    """Merge short segments with their neighbors for better dubbing timing.
+
+    - Segments shorter than min_duration get merged with the next/prev segment
+    - Only merge if the gap between segments is < max_gap seconds
+    """
+    if not segments:
+        return segments
+
+    merged = [dict(segments[0])]
+
+    for seg in segments[1:]:
+        prev = merged[-1]
+        prev_dur = prev["end"] - prev["start"]
+        cur_dur = seg["end"] - seg["start"]
+        gap = seg["start"] - prev["end"]
+
+        # Merge if: previous too short, or current too short, AND gap is small
+        if (prev_dur < min_duration or cur_dur < min_duration) and gap < max_gap:
+            prev["end"] = seg["end"]
+            prev["text"] = (prev["text"] + " " + seg["text"]).strip()
+        else:
+            merged.append(dict(seg))
+
+    return merged
+
+
 def _project_dir(project_id: str) -> Path:
     return DUBBING_DIR / project_id
 
@@ -231,8 +258,13 @@ def transcribe_project(project_id: str) -> dict:
     src_lang = project.get("source_language_input", "auto")
     result = whisper_svc.transcribe(audio_to_transcribe, language=src_lang if src_lang != "auto" else None)
 
+    raw_segs = result.get("segments", [])
+
+    # Post-process: merge short segments (< 1.5s) with neighbors
+    merged = _merge_short_segments(raw_segs, min_duration=1.5, max_gap=1.0)
+
     segments = []
-    for i, seg in enumerate(result.get("segments", [])):
+    for i, seg in enumerate(merged):
         segments.append({
             "id": uuid.uuid4().hex[:8],
             "index": i,

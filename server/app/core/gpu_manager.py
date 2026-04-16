@@ -111,7 +111,16 @@ class GPUManager:
     def transcribe_faster(self, audio_path: str, language: str = None) -> dict:
         """Faster-Whisper STT — returns {"text", "segments", "language"}."""
         with self._lock:
-            kwargs = {"beam_size": 5, "vad_filter": True}
+            kwargs = {
+                "beam_size": 5,
+                "vad_filter": True,
+                "vad_parameters": {
+                    "min_speech_duration_ms": 500,    # tối thiểu 0.5s mỗi segment
+                    "max_speech_duration_s": 15,       # tối đa 15s
+                    "min_silence_duration_ms": 300,    # ngắt khi im ≥ 0.3s
+                    "speech_pad_ms": 200,              # đệm 0.2s mỗi bên
+                },
+            }
             if language:
                 kwargs["language"] = language
             segments_gen, info = self._fw_model.transcribe(audio_path, **kwargs)
