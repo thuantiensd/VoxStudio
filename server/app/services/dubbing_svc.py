@@ -99,7 +99,7 @@ def create_project(video_data: bytes, video_filename: str,
         "source_language_input": source_language,
         "target_language": target_language,
         "voice_id": voice_id,
-        "tts_engine": "edge",  # "edge" (cloud, free) or "omnivoice" (local GPU)
+        "tts_engine": "omnivoice",  # "omnivoice" (local GPU) or "edge" (cloud, free)
         "edge_voice": None,    # Edge TTS voice name, auto-selected if None
         "enable_dubbing": enable_dubbing,
         "enable_subtitle": enable_subtitle,
