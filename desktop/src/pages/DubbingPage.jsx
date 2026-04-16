@@ -286,6 +286,16 @@ function ProjectEditor({ project: initialProject, setProject: setParentProject, 
     }
   }, [segments.length]);
 
+  // Auto-dub: tự động chạy pipeline khi mở project mới (chưa có segments)
+  const autoDubTriggered = useRef(false);
+  useEffect(() => {
+    if (!autoDubTriggered.current && segments.length === 0 && !autoDubbing && project.status === 'created') {
+      autoDubTriggered.current = true;
+      const engine = geminiAvailable ? 'gemini' : 'google';
+      handleAutoDub(engine);
+    }
+  }, [project.status, segments.length, geminiAvailable]);
+
   // Video time tracking + continuous dubbed track sync
   useEffect(() => {
     const v = videoRef.current;
