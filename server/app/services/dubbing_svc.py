@@ -33,6 +33,31 @@ def _detect_tts_engine() -> str:
         return "edge"
 
 
+_default_voice_cache = None
+
+def _get_default_voice():
+    """Load BLV_Bóng_Đá voice as default. Cached after first load."""
+    global _default_voice_cache
+    if _default_voice_cache is not None:
+        return _default_voice_cache
+
+    # Search for BLV voice in known locations
+    import torch as _torch
+    search_paths = [
+        Path("/content/OmniVoice-master/voices/BLV_Bóng_Đá.pt"),
+        Path(__file__).parent.parent.parent.parent / "OmniVoice-master" / "voices" / "BLV_Bóng_Đá.pt",
+        VOICES_DIR / "BLV_Bóng_Đá.pt",
+    ]
+    for p in search_paths:
+        if p.exists():
+            _default_voice_cache = _torch.load(str(p), map_location="cpu", weights_only=True)
+            logger.info("Loaded default voice: %s", p.name)
+            return _default_voice_cache
+
+    logger.warning("Default BLV voice not found, using no voice prompt")
+    return None
+
+
 def _extract_segment_audio(source_path: str, out_path: str, start: float, end: float):
     """Extract a time slice from an audio file using soundfile."""
     audio_np, sr = sf.read(source_path)
@@ -550,40 +575,21 @@ def generate_segment(project_id: str, seg_id: str) -> dict:
                 stretched.unlink(missing_ok=True)
 
         else:
-            # ── OmniVoice (local GPU) with per-segment voice cloning ──
+            # ── OmniVoice (local GPU) ──
             voice_prompt = None
 
-            # Priority 1: Clone from original segment audio (best emotion match)
-            pdir = _project_dir(project_id)
-            vocals_path = pdir / "vocals.wav"
-            if vocals_path.exists() and seg["start"] < seg["end"]:
-                try:
-                    ref_path = _segments_dir(project_id) / f"{seg_id}_ref.wav"
-                    _extract_segment_audio(
-                        str(vocals_path), str(ref_path),
-                        seg["start"], seg["end"],
-                    )
-                    voice_prompt = gpu.create_voice_prompt(
-                        str(ref_path),
-                        ref_text=seg.get("original_text", ""),
-                    )
-                    ref_path.unlink(missing_ok=True)  # cleanup temp file
-                    logger.info("Cloned voice from segment %s [%.1f-%.1fs]",
-                                seg_id, seg["start"], seg["end"])
-                except Exception as e:
-                    logger.warning("Per-segment voice clone failed for %s: %s", seg_id, e)
-                    voice_prompt = None
-
-            # Priority 2: Use saved voice_id
-            if voice_prompt is None:
-                voice_id = seg.get("voice_id") or project.get("voice_id")
-                if voice_id:
-                    voice_prompt = load_voice(voice_id)
+            # Use saved voice or default BLV voice
+            voice_id = seg.get("voice_id") or project.get("voice_id")
+            if voice_id:
+                voice_prompt = load_voice(voice_id)
+            else:
+                # Auto-load default BLV voice from OmniVoice-master/voices/
+                voice_prompt = _get_default_voice()
 
             from omnivoice import OmniVoiceGenerationConfig
             gen_config = OmniVoiceGenerationConfig(
                 num_step=TTS_DEFAULT_STEPS,
-                guidance_scale=TTS_DEFAULT_GUIDANCE if voice_prompt is None else 3.0,
+                guidance_scale=3.0 if voice_prompt else TTS_DEFAULT_GUIDANCE,
             )
             kwargs = {"generation_config": gen_config, "duration": target_duration}
             if project["target_language"]:
