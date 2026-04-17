@@ -1,17 +1,58 @@
 """TTS API endpoints."""
 
 import uuid
+from pathlib import Path
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Form, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-from app.config import AUDIO_OUTPUT_DIR
+from app.config import AUDIO_OUTPUT_DIR, VOICES_DIR
 from app.core.storage import get_audio_path
 from app.models.schemas import TTSRequest, TTSResponse
 from app.services import tts_svc, edge_tts_svc
 
 router = APIRouter(prefix="/tts", tags=["TTS"])
+
+
+@router.post("/xtts-test")
+async def xtts_test(
+    voice_id: str = Form(...),
+    text: str = Form("Xin chào, đây là giọng nói tiếng Việt được sinh bởi XTTS v2."),
+    language: str = Form("vi"),
+):
+    """Generate a single XTTS utterance using an already-cloned voice — for sanity testing.
+
+    Reuses the server's loaded XTTS model (no extra VRAM).
+    """
+    from app.services import xtts_svc
+
+    ref_wav = VOICES_DIR / f"{voice_id}.wav"
+    if not ref_wav.exists():
+        raise HTTPException(status_code=404, detail=f"Voice WAV not found: {voice_id}")
+
+    out_id = uuid.uuid4().hex[:12]
+    out_path = AUDIO_OUTPUT_DIR / f"{out_id}.wav"
+
+    try:
+        xtts_svc.xtts.generate(
+            text=text,
+            ref_wav_path=str(ref_wav),
+            out_wav_path=str(out_path),
+            language=language,
+        )
+    except Exception as e:
+        import traceback
+        raise HTTPException(
+            status_code=500,
+            detail=f"{type(e).__name__}: {e}\n{traceback.format_exc()}",
+        )
+
+    return {
+        "audio_url": f"/api/v1/tts/audio/{out_id}",
+        "file_id": out_id,
+        "size_bytes": out_path.stat().st_size,
+    }
 
 
 @router.post("/generate", response_model=TTSResponse)
