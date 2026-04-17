@@ -30,17 +30,36 @@ VALID_EMOTIONS = {"neutral", "happy", "sad", "angry", "fearful", "surprised", "d
 BATCH_SIZE = 10
 
 
-def _build_polish_prompt(translated_lines: list[str], target_lang: str) -> list[dict]:
-    """Build a simple prompt for Qwen: just add emotion + pauses to already-translated text.
+def _build_polish_prompt(
+    translated_lines: list[str],
+    target_lang: str,
+    durations: list[float] = None,
+) -> list[dict]:
+    """Build a prompt for Qwen: rewrite translated text for natural spoken dubbing.
 
-    This is a MUCH easier task for a 3B model than full translation.
+    If durations provided, include per-line word budget so Qwen controls output length
+    to match original audio timing (avoids over-long TTS that gets stretched awkwardly).
     """
     tgt_name = LANG_NAMES.get(target_lang, target_lang)
-    numbered = "\n".join(f"{i+1}. {t}" for i, t in enumerate(translated_lines))
 
-    system = f"""You are a professional Vietnamese voice dubbing scriptwriter.
+    if durations and len(durations) == len(translated_lines):
+        # Vietnamese speech rate ~2.5 words/sec — give Qwen a soft word budget per line
+        numbered = "\n".join(
+            f"{i+1}. [{durations[i]:.1f}s, ~{max(2, int(durations[i] * 2.5))} words] {t}"
+            for i, t in enumerate(translated_lines)
+        )
+        duration_rule = (
+            "- Each line has [Xs, ~N words] — output must stay CLOSE to that word budget.\n"
+            "- Short lines stay short; long lines can be more expressive.\n"
+            "- Do NOT include the [Xs, ~N words] prefix in your output."
+        )
+    else:
+        numbered = "\n".join(f"{i+1}. {t}" for i, t in enumerate(translated_lines))
+        duration_rule = ""
+
+    system = f"""You are a professional {tgt_name} voice dubbing scriptwriter.
 Input: machine-translated {tgt_name} subtitles from a film/drama.
-Your job: rewrite each line so it sounds like REAL spoken {tgt_name} dialogue — natural, emotional, fits the context of a film scene.
+Your job: rewrite each line so it sounds like REAL spoken {tgt_name} dialogue — natural, emotional, fits a film scene.
 
 Format per line: N. [emotion] rewritten text
 Emotions: [neutral] [happy] [sad] [angry] [whisper] [surprised] [fearful]
@@ -48,13 +67,14 @@ Emotions: [neutral] [happy] [sad] [angry] [whisper] [surprised] [fearful]
 Rules:
 - Rewrite to sound like natural spoken dialogue, NOT subtitle text
 - Fix awkward machine translation — make it sound like a real person talking
-- Use natural Vietnamese pronouns (anh/em, chị, tao/mày, ông/bà) based on context
+- Use natural {tgt_name} pronouns (Vietnamese: anh/em, chị, tao/mày, ông/bà based on context)
 - Add '...' for dramatic pauses, hesitation, trailing off
 - Add ',' for breath pauses
 - Keep the SAME meaning but change wording to sound natural
 - Consider the flow between lines — they are consecutive dialogue
 - Do NOT add foreign words
-- Same number of lines as input"""
+- Keep the SAME number of lines as input — do NOT merge or split
+{duration_rule}"""
 
     user = f"Rewrite for voice acting:\n\n{numbered}"
 
@@ -197,13 +217,16 @@ def translate_segments(
 def polish_for_speech(
     translated_texts: list[str],
     target_language: str,
+    durations: list[float] = None,
 ) -> list[dict]:
     """Add emotion tags + natural pauses to already-translated text.
 
-    Input: list of translated subtitle strings (from Google Translate)
-    Output: list of {"speech_text": ..., "emotion": ...}
+    Input:
+      translated_texts: list of translated subtitle strings (from Google Translate)
+      durations: optional per-segment duration in seconds — used to give Qwen
+                 a word budget so output length matches original audio timing.
 
-    This is the ONLY job for Qwen — no translation needed.
+    Output: list of {"speech_text": ..., "emotion": ...}
     """
     if not translated_texts:
         return []
@@ -213,11 +236,12 @@ def polish_for_speech(
     for batch_start in range(0, len(translated_texts), BATCH_SIZE):
         batch_end = min(batch_start + BATCH_SIZE, len(translated_texts))
         batch_texts = translated_texts[batch_start:batch_end]
+        batch_durs = durations[batch_start:batch_end] if durations else None
 
         if not any(t.strip() for t in batch_texts):
             continue
 
-        messages = _build_polish_prompt(batch_texts, target_language)
+        messages = _build_polish_prompt(batch_texts, target_language, batch_durs)
 
         try:
             response = gpu.llm_generate(messages, max_new_tokens=1024, temperature=0.3)
@@ -227,7 +251,8 @@ def polish_for_speech(
                 if result["speech_text"]:
                     all_results[batch_start + i] = result
 
-            logger.info("Qwen polished batch %d-%d", batch_start + 1, batch_end)
+            logger.info("Qwen polished batch %d-%d (with durations=%s)",
+                        batch_start + 1, batch_end, bool(batch_durs))
 
         except Exception as e:
             logger.error("Qwen polish failed for batch %d-%d: %s", batch_start + 1, batch_end, e)

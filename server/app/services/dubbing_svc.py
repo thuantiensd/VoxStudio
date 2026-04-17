@@ -13,10 +13,10 @@ import ffmpeg
 import numpy as np
 import soundfile as sf
 
-from app.config import DUBBING_DIR, TTS_DEFAULT_GUIDANCE, TTS_DEFAULT_STEPS
+from app.config import DUBBING_DIR, VOICES_DIR, TTS_DEFAULT_GUIDANCE, TTS_DEFAULT_STEPS, IS_CUDA
 from app.core.gpu_manager import gpu
 from app.core.storage import load_voice
-from app.services import whisper_svc, translate_svc, llm_translate_svc, edge_tts_svc, vocal_separator_svc, gemini_translate_svc
+from app.services import whisper_svc, translate_svc, llm_translate_svc, edge_tts_svc, vocal_separator_svc, gemini_translate_svc, xtts_svc
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +43,8 @@ def _get_default_voice():
 
     # Search for BLV voice in known locations
     import torch as _torch
+    from omnivoice.models.omnivoice import VoiceClonePrompt
+    _torch.serialization.add_safe_globals([VoiceClonePrompt])
     search_paths = [
         Path("/content/OmniVoice-master/voices/BLV_Bóng_Đá.pt"),
         Path(__file__).parent.parent.parent.parent / "OmniVoice-master" / "voices" / "BLV_Bóng_Đá.pt",
@@ -377,17 +379,20 @@ def translate_project(project_id: str, use_llm: bool = False, engine: str = "goo
                 seg["speech_text"] = trans
                 seg["emotion"] = "neutral"
 
-        if use_llm:
-            logger.info("Step 2: Qwen polish (emotion + pauses)...")
+        if use_llm and IS_CUDA:
+            logger.info("Step 2: Qwen polish (emotion + pauses) with duration hints...")
             try:
-                polished = llm_translate_svc.polish_for_speech(translated, target_lang)
+                durations = [seg["end"] - seg["start"] for seg in project["segments"]]
+                polished = llm_translate_svc.polish_for_speech(translated, target_lang, durations=durations)
                 for seg, result in zip(project["segments"], polished):
                     if result.get("speech_text"):
                         seg["speech_text"] = result["speech_text"]
                         seg["emotion"] = result.get("emotion", "neutral")
             except Exception as e:
                 logger.warning("Qwen polish failed, using Google Translate only: %s", e)
-        method = "Google + Qwen" if use_llm else "Google"
+        elif use_llm and not IS_CUDA:
+            logger.info("Skipping Qwen polish (no CUDA, model too heavy for MPS/CPU)")
+        method = "Google + Qwen" if (use_llm and IS_CUDA) else "Google"
 
     _save_meta(project)
     logger.info("Translated %d segments for project %s → %s (%s)",
@@ -540,7 +545,51 @@ def generate_segment(project_id: str, seg_id: str) -> dict:
     out_path = _segments_dir(project_id) / f"{seg_id}.wav"
 
     try:
-        if tts_engine == "edge":
+        if tts_engine == "xtts":
+            # ── XTTS v2 Vietnamese (Nhat1106/xtts-vietnamese finetune) ──
+            voice_id = seg.get("voice_id") or project.get("voice_id")
+            if not voice_id:
+                raise ValueError("XTTS engine requires a voice_id (raw WAV reference)")
+            ref_wav = VOICES_DIR / f"{voice_id}.wav"
+            if not ref_wav.exists():
+                raise ValueError(
+                    f"Raw reference WAV not found for voice {voice_id}. "
+                    "Re-clone the voice to regenerate the WAV file."
+                )
+
+            # XTTS language code (model expects ISO "vi", "en", etc., not "vietnamese")
+            lang_map = {
+                "vietnamese": "vi", "english": "en", "chinese": "zh-cn",
+                "japanese": "ja", "korean": "ko", "french": "fr",
+                "german": "de", "spanish": "es",
+            }
+            xtts_lang = lang_map.get(project["target_language"], "vi")
+
+            xtts_svc.xtts.generate(
+                text=tts_text,
+                ref_wav_path=str(ref_wav),
+                out_wav_path=str(out_path),
+                language=xtts_lang,
+            )
+            audio_np, sr = sf.read(str(out_path))
+
+            # Auto-align: stretch/compress to match target_duration
+            actual_dur = len(audio_np) / sr
+            if target_duration > 0 and actual_dur > 0.1:
+                ratio = actual_dur / target_duration
+                if abs(ratio - 1.0) > 0.05:
+                    ratio_clamped = max(0.7, min(1.5, ratio))
+                    logger.info("XTTS align: actual=%.2fs target=%.2fs ratio=%.2f (clamped=%.2f)",
+                                actual_dur, target_duration, ratio, ratio_clamped)
+                    seg_dir = _segments_dir(project_id)
+                    stretched_wav = seg_dir / f"{seg_id}_stretched.wav"
+                    try:
+                        _atempo_stretch(out_path, stretched_wav, ratio_clamped)
+                        audio_np, sr = sf.read(str(stretched_wav))
+                    finally:
+                        stretched_wav.unlink(missing_ok=True)
+
+        elif tts_engine == "edge":
             # ── Edge TTS with smart speed matching ──
             seg_dir = _segments_dir(project_id)
             mp3_path = seg_dir / f"{seg_id}.mp3"
@@ -598,6 +647,26 @@ def generate_segment(project_id: str, seg_id: str) -> dict:
             waveform = gpu.generate_tts(tts_text, voice_prompt=voice_prompt, **kwargs)
             sr = gpu.sampling_rate
             audio_np = waveform.cpu().numpy()
+
+            # ── Auto-align: stretch/compress to match target_duration ──
+            actual_dur = len(audio_np) / sr
+            if target_duration > 0 and actual_dur > 0.1:
+                ratio = actual_dur / target_duration
+                # Only stretch when noticeably off (>5%), clamp to reasonable range
+                if abs(ratio - 1.0) > 0.05:
+                    ratio_clamped = max(0.7, min(1.5, ratio))
+                    logger.info("OmniVoice align: actual=%.2fs target=%.2fs ratio=%.2f (clamped=%.2f)",
+                                actual_dur, target_duration, ratio, ratio_clamped)
+                    seg_dir = _segments_dir(project_id)
+                    raw_wav = seg_dir / f"{seg_id}_raw.wav"
+                    stretched_wav = seg_dir / f"{seg_id}_stretched.wav"
+                    sf.write(str(raw_wav), audio_np, sr)
+                    try:
+                        _atempo_stretch(raw_wav, stretched_wav, ratio_clamped)
+                        audio_np, sr = sf.read(str(stretched_wav))
+                    finally:
+                        raw_wav.unlink(missing_ok=True)
+                        stretched_wav.unlink(missing_ok=True)
 
         # Apply volume
         if seg.get("volume", 1.0) != 1.0:
@@ -994,17 +1063,37 @@ def export_video(project_id: str, keep_original_audio: bool = False,
             total_samples = int(video_duration * sr)
             full_audio = np.zeros(total_samples, dtype=np.float32)
 
-            for seg in project["segments"]:
-                seg_audio_path = _segments_dir(project_id) / f"{seg['id']}.wav"
-                if not seg_audio_path.exists():
-                    continue
-                seg_audio, _ = sf.read(str(seg_audio_path), dtype="float32")
-                start_sample = int(seg["start"] * sr)
-                end_sample = start_sample + len(seg_audio)
-                end_sample = min(end_sample, total_samples)
-                seg_len = end_sample - start_sample
-                if seg_len > 0:
-                    full_audio[start_sample:end_sample] += seg_audio[:seg_len]
+            # Prefer the continuous dubbed_track.wav produced by batch mode (Edge TTS)
+            dubbed_track_path = pdir / "dubbed_track.wav"
+            if dubbed_track_path.exists():
+                track_audio, track_sr = sf.read(str(dubbed_track_path), dtype="float32")
+                if track_audio.ndim > 1:
+                    track_audio = track_audio.mean(axis=1)
+                # Resample if sr differs
+                if track_sr != sr:
+                    from scipy.signal import resample
+                    track_audio = resample(
+                        track_audio, int(len(track_audio) * sr / track_sr)
+                    ).astype(np.float32)
+                # Fit to target length
+                copy_len = min(len(track_audio), total_samples)
+                full_audio[:copy_len] = track_audio[:copy_len]
+                logger.info("Export using dubbed_track.wav (%.1fs)", copy_len / sr)
+            else:
+                # Fallback: build from individual segment files (per-segment TTS mode)
+                for seg in project["segments"]:
+                    seg_audio_path = _segments_dir(project_id) / f"{seg['id']}.wav"
+                    if not seg_audio_path.exists():
+                        continue
+                    seg_audio, _ = sf.read(str(seg_audio_path), dtype="float32")
+                    start_sample = int(seg["start"] * sr)
+                    end_sample = start_sample + len(seg_audio)
+                    end_sample = min(end_sample, total_samples)
+                    seg_len = end_sample - start_sample
+                    if seg_len > 0:
+                        full_audio[start_sample:end_sample] += seg_audio[:seg_len]
+                logger.info("Export built full_audio from %d individual segment files",
+                            len(project["segments"]))
 
             if keep_original_audio:
                 # Use accompaniment (no vocals) if available, otherwise full original
@@ -1276,20 +1365,26 @@ def auto_dub(project_id: str, engine: str = "google"):
         # Step 2: Translate (Google) + Rewrite (Qwen)
         yield {"step": "translating", "label": "Đang dịch thuật (Google Translate)...", "progress": 35}
         translate_project(project_id, engine="google")
-        yield {"step": "translating", "label": "Đang viết lại lời thoại (Qwen AI)...", "progress": 42}
-        try:
-            project = _load_meta(project_id)
-            translated = [seg.get("translated_text", "") for seg in project["segments"]]
-            target_lang = project["target_language"]
-            polished = llm_translate_svc.polish_for_speech(translated, target_lang)
-            for seg, result in zip(project["segments"], polished):
-                if result.get("speech_text"):
-                    seg["speech_text"] = result["speech_text"]
-                    seg["emotion"] = result.get("emotion", "neutral")
-            _save_meta(project)
-            logger.info("Qwen rewrote %d segments for natural dialogue", len(polished))
-        except Exception as e:
-            logger.warning("Qwen rewrite failed, using Google Translate only: %s", e)
+        # Qwen rewrite: only on CUDA (7B model too heavy for MPS/CPU)
+        if IS_CUDA:
+            yield {"step": "translating", "label": "Đang viết lại lời thoại (Qwen AI)...", "progress": 42}
+            try:
+                project = _load_meta(project_id)
+                translated = [seg.get("translated_text", "") for seg in project["segments"]]
+                # Pass segment durations so Qwen fits output to original timing
+                durations = [seg["end"] - seg["start"] for seg in project["segments"]]
+                target_lang = project["target_language"]
+                polished = llm_translate_svc.polish_for_speech(translated, target_lang, durations=durations)
+                for seg, result in zip(project["segments"], polished):
+                    if result.get("speech_text"):
+                        seg["speech_text"] = result["speech_text"]
+                        seg["emotion"] = result.get("emotion", "neutral")
+                _save_meta(project)
+                logger.info("Qwen rewrote %d segments with duration-aware word budget", len(polished))
+            except Exception as e:
+                logger.warning("Qwen rewrite failed, using Google Translate only: %s", e)
+        else:
+            logger.info("Skipping Qwen rewrite (no CUDA). Using Google Translate only.")
         yield {"step": "translating", "label": "Dịch thuật hoàn tất!", "progress": 50}
 
         # Step 3: Generate TTS for all segments
