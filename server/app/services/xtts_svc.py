@@ -10,8 +10,10 @@ Notes:
 - Model file (~1.8GB) is downloaded on first use — best run on Colab/CUDA.
 """
 
+import glob
 import logging
 import os
+import sys
 import threading
 from pathlib import Path
 from typing import Optional
@@ -19,6 +21,38 @@ from typing import Optional
 import torch
 
 logger = logging.getLogger(__name__)
+
+
+def _patch_tts_for_transformers5():
+    """Coqui TTS uses `isin_mps_friendly` which was removed in transformers 5.x.
+
+    Patch the source file on disk (idempotent) so `from TTS.api import TTS` works.
+    Must run BEFORE any `from TTS...` import.
+    """
+    for site in sys.path:
+        hits = glob.glob(f"{site}/TTS/tts/layers/tortoise/autoregressive.py")
+        if not hits:
+            continue
+        file_path = hits[0]
+        try:
+            with open(file_path) as f:
+                code = f.read()
+            if "isin_mps_friendly" not in code:
+                return  # already patched
+            code = code.replace(
+                "from transformers.pytorch_utils import isin_mps_friendly as isin",
+                "from torch import isin",
+            )
+            with open(file_path, "w") as f:
+                f.write(code)
+            logger.info("Auto-patched Coqui TTS for transformers 5.x at %s", file_path)
+        except Exception as e:
+            logger.warning("Could not auto-patch TTS: %s", e)
+        return
+
+
+# Apply patch at module import time so subsequent `from TTS...` calls work
+_patch_tts_for_transformers5()
 
 # HuggingFace repo for Vietnamese finetune
 VN_REPO_ID = os.getenv("XTTS_VN_REPO", "Nhat1106/xtts-vietnamese")
