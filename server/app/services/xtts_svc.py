@@ -192,18 +192,13 @@ class XTTSService:
         from TTS.tts.configs.xtts_config import XttsConfig
         from TTS.tts.models.xtts import Xtts
 
-        # Free VRAM first — unload OmniVoice so we don't OOM loading XTTS too
+        # Free VRAM first — unload other models so we don't OOM loading XTTS
         try:
             from app.core.gpu_manager import gpu
-            if gpu.tts_model is not None:
-                logger.info("Unloading OmniVoice to free VRAM for XTTS...")
-                del gpu.tts_model
-                gpu.tts_model = None
-                if torch.cuda.is_available():
-                    torch.cuda.empty_cache()
-                    torch.cuda.synchronize()
+            gpu.unload_tts()    # OmniVoice ~2-3GB
+            gpu.unload_llm()    # Qwen ~5-6GB (might still be loaded from translate phase)
         except Exception as e:
-            logger.warning("Could not unload OmniVoice: %s", e)
+            logger.warning("Could not pre-free VRAM: %s", e)
 
         vn_dir = self._download_vn_model()
 

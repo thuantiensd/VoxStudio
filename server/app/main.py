@@ -52,3 +52,23 @@ async def health():
         "status": "ok" if gpu.ready else "loading",
         "device": DEVICE,
     }
+
+
+@app.get("/system/vram")
+async def vram():
+    """Report current VRAM usage + which models are loaded."""
+    return gpu.vram_stats()
+
+
+@app.post("/system/unload")
+async def unload(models: str = "llm,tts"):
+    """Free specified models from VRAM. models=comma-list of: llm, tts, whisper."""
+    targets = [m.strip() for m in models.split(",") if m.strip()]
+    freed = []
+    if "llm" in targets:
+        gpu.unload_llm(); freed.append("llm")
+    if "tts" in targets:
+        gpu.unload_tts(); freed.append("tts")
+    if "whisper" in targets:
+        gpu.unload_whisper(); freed.append("whisper")
+    return {"unloaded": freed, "vram": gpu.vram_stats()}

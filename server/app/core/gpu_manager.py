@@ -114,6 +114,9 @@ class GPUManager:
         Two-pass strategy: try with VAD first (cleaner segmentation).
         If VAD removes all audio → retry without VAD as fallback.
         """
+        # Re-load if Whisper was unloaded to free VRAM
+        if self._fw_model is None and self._use_faster_whisper:
+            self._load_faster_whisper()
         with self._lock:
             def _run(vad: bool):
                 kwargs = {"beam_size": 5, "vad_filter": vad}
@@ -156,6 +159,9 @@ class GPUManager:
 
     def transcribe(self, audio_path: str, return_timestamps: bool = False, language: str = None) -> dict:
         """HuggingFace Whisper STT — returns {"text": ..., "chunks": [...]}."""
+        # Re-load if Whisper was unloaded to free VRAM
+        if self.whisper_pipe is None and not self._use_faster_whisper:
+            self._load_hf_whisper()
         with self._lock:
             kwargs = {"return_timestamps": return_timestamps}
             if language:
@@ -169,6 +175,96 @@ class GPUManager:
             torch.mps.empty_cache()
         elif DEVICE == "cuda":
             torch.cuda.empty_cache()
+
+    # ------------------------------------------------------------------
+    # VRAM management — unload models between pipeline phases
+    # ------------------------------------------------------------------
+    def vram_stats(self) -> dict:
+        """Return current VRAM usage in MB (CUDA only)."""
+        if not torch.cuda.is_available():
+            return {"device": DEVICE, "cuda": False}
+        free, total = torch.cuda.mem_get_info()
+        used = total - free
+        return {
+            "device": "cuda",
+            "total_mb": round(total / 1024 / 1024, 1),
+            "used_mb": round(used / 1024 / 1024, 1),
+            "free_mb": round(free / 1024 / 1024, 1),
+            "allocated_mb": round(torch.cuda.memory_allocated() / 1024 / 1024, 1),
+            "reserved_mb": round(torch.cuda.memory_reserved() / 1024 / 1024, 1),
+            "models_loaded": {
+                "whisper_hf": self.whisper_pipe is not None,
+                "whisper_faster": self._fw_model is not None,
+                "omnivoice_tts": self.tts_model is not None,
+                "llm": self._llm_loaded,
+            },
+        }
+
+    def _log_vram(self, tag: str):
+        """Log current VRAM state with a tag."""
+        if torch.cuda.is_available():
+            s = self.vram_stats()
+            logger.info("[VRAM %s] used=%.1fMB/%.1fMB, allocated=%.1fMB",
+                        tag, s["used_mb"], s["total_mb"], s["allocated_mb"])
+
+    def unload_llm(self):
+        """Free Qwen 7B from VRAM (~5-6GB). Safe to call after translation is done."""
+        with self._llm_lock:
+            if self._llm_model is None and self._llm_tokenizer is None:
+                return
+            logger.info("Unloading LLM (freeing ~5-6GB VRAM)...")
+            del self._llm_model
+            del self._llm_tokenizer
+            self._llm_model = None
+            self._llm_tokenizer = None
+            self._llm_loaded = False
+            import gc
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                torch.cuda.synchronize()
+            self._log_vram("after unload_llm")
+
+    def unload_tts(self):
+        """Free OmniVoice from VRAM (~2-3GB). Reloads lazily on next generate."""
+        with self._lock:
+            if self.tts_model is None:
+                return
+            logger.info("Unloading OmniVoice TTS...")
+            del self.tts_model
+            self.tts_model = None
+            import gc
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                torch.cuda.synchronize()
+            self._log_vram("after unload_tts")
+
+    def unload_whisper(self):
+        """Free Whisper from VRAM. Re-loads lazily on next transcribe."""
+        with self._lock:
+            if self.whisper_pipe is None and self._fw_model is None:
+                return
+            logger.info("Unloading Whisper...")
+            del self.whisper_pipe
+            del self._fw_model
+            self.whisper_pipe = None
+            self._fw_model = None
+            self._ready = False  # will reload on next transcribe call
+            import gc
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                torch.cuda.synchronize()
+            self._log_vram("after unload_whisper")
+
+    def ensure_whisper(self):
+        """Lazy-reload Whisper if it was unloaded."""
+        with self._lock:
+            if self._use_faster_whisper and self._fw_model is None:
+                self._load_faster_whisper()
+            elif not self._use_faster_whisper and self.whisper_pipe is None:
+                self._load_hf_whisper()
 
     def create_voice_prompt(self, ref_audio: str, ref_text: str = None):
         """Create a reusable VoiceClonePrompt from reference audio."""

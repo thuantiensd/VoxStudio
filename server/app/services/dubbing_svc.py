@@ -1396,6 +1396,10 @@ def auto_dub(project_id: str, engine: str = "google"):
                 logger.info("Qwen rewrote %d segments with duration-aware word budget", len(polished))
             except Exception as e:
                 logger.warning("Qwen rewrite failed, using Google Translate only: %s", e)
+            finally:
+                # Free ~5-6GB VRAM — Qwen not needed for TTS/export phases
+                yield {"step": "translating", "label": "Giải phóng VRAM (Qwen)...", "progress": 48}
+                gpu.unload_llm()
         else:
             logger.info("Skipping Qwen rewrite (no CUDA). Using Google Translate only.")
         yield {"step": "translating", "label": "Dịch thuật hoàn tất!", "progress": 50}
@@ -1412,6 +1416,12 @@ def auto_dub(project_id: str, engine: str = "google"):
         # Step 4: Export video with ducking
         yield {"step": "exporting", "label": steps[3][1], "progress": 88}
         export_video(project_id, keep_original_audio=True, enable_ducking=True)
+
+        # Step 5: Free TTS VRAM (ready for next project or voice test)
+        gpu._log_vram("end of pipeline (before TTS unload)")
+        gpu.unload_tts()
+        gpu._log_vram("end of pipeline (after TTS unload)")
+
         yield {"step": "done", "label": "Hoàn tất!", "progress": 100}
 
     except Exception as e:
