@@ -33,14 +33,16 @@ def _meta_path(voice_id: str) -> Path:
 
 
 def save_voice(voice_id: str, name: str, prompt, ref_text: str = None, tags: list = None):
-    """Save voice prompt (.pt) and metadata (.json)."""
-    torch.save(prompt, VOICES_DIR / f"{voice_id}.pt")
+    """Save voice prompt (.pt, optional) and metadata (.json)."""
+    if prompt is not None:
+        torch.save(prompt, VOICES_DIR / f"{voice_id}.pt")
     meta = {
         "id": voice_id,
         "name": name,
         "ref_text": ref_text,
         "tags": tags or [],
         "created_at": datetime.now().isoformat(),
+        "has_prompt": prompt is not None,
     }
     _meta_path(voice_id).write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
     return meta

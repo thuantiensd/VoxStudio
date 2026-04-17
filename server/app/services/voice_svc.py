@@ -19,30 +19,57 @@ logger = logging.getLogger(__name__)
 def clone(audio_path: str, name: str, ref_text: str = None, tags: list = None) -> dict:
     """Clone voice from audio file. Returns voice metadata.
 
-    Saves two artifacts per voice:
-      - {voice_id}.pt  (OmniVoice prompt tensor)
-      - {voice_id}.wav (raw reference — used by XTTS v2 and other engines)
+    Saves up to three artifacts per voice:
+      - {voice_id}.wav  (raw reference — always saved; used by XTTS v2)
+      - {voice_id}.pt   (OmniVoice prompt — best-effort, may fail if OmniVoice TTS
+                          can't load or Whisper auto-transcribe unavailable)
+      - {voice_id}.json (metadata)
+
+    Even if OmniVoice prompt creation fails, the voice is still usable by XTTS.
     """
     voice_id = uuid.uuid4().hex[:12]
     logger.info("Cloning voice '%s' (id=%s) from %s", name, voice_id, audio_path)
 
-    prompt = gpu.create_voice_prompt(ref_audio=audio_path, ref_text=ref_text)
-
-    # Save raw WAV ref for engines that need direct audio (e.g. XTTS v2)
+    # 1) ALWAYS save raw WAV first — required for XTTS, doesn't depend on any model
+    ref_wav_path = VOICES_DIR / f"{voice_id}.wav"
     try:
-        ref_wav_path = VOICES_DIR / f"{voice_id}.wav"
         _copy_as_wav(audio_path, str(ref_wav_path))
     except Exception as e:
-        logger.warning("Could not save raw ref WAV for %s: %s", voice_id, e)
+        logger.error("Failed to save raw ref WAV: %s", e)
+        raise
 
+    # 2) Auto-transcribe ref_text if missing — use faster-whisper fallback when
+    #    HF whisper_pipe isn't available (USE_FASTER_WHISPER=true setup)
+    if not ref_text:
+        try:
+            if gpu.whisper_pipe is not None:
+                ref_text = gpu.whisper_pipe(audio_path)["text"].strip()
+            elif gpu._fw_model is not None:
+                result = gpu.transcribe_faster(audio_path)
+                ref_text = result.get("text", "").strip()
+            logger.info("Auto-transcribed ref_text: %s", (ref_text or "")[:80])
+        except Exception as e:
+            logger.warning("Auto-transcribe failed: %s (continuing without ref_text)", e)
+            ref_text = ""
+
+    # 3) Try to create OmniVoice prompt — optional (needed only if engine=omnivoice)
+    prompt = None
+    try:
+        prompt = gpu.create_voice_prompt(ref_audio=audio_path, ref_text=ref_text or None)
+    except Exception as e:
+        logger.warning("OmniVoice create_voice_prompt failed for %s: %s "
+                       "(voice still usable for XTTS via raw WAV)", voice_id, e)
+
+    # 4) Save metadata (+ .pt file if prompt was created)
     meta = save_voice(
         voice_id=voice_id,
         name=name,
         prompt=prompt,
-        ref_text=ref_text or (prompt.ref_text if hasattr(prompt, "ref_text") else None),
+        ref_text=ref_text or (prompt.ref_text if prompt and hasattr(prompt, "ref_text") else None),
         tags=tags,
     )
-    logger.info("Voice saved: %s", voice_id)
+    logger.info("Voice saved: %s (omnivoice_prompt=%s, raw_wav=yes)",
+                voice_id, bool(prompt))
     return meta
 
 
