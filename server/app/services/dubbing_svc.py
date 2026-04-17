@@ -16,7 +16,7 @@ import soundfile as sf
 from app.config import DUBBING_DIR, VOICES_DIR, TTS_DEFAULT_GUIDANCE, TTS_DEFAULT_STEPS, IS_CUDA
 from app.core.gpu_manager import gpu
 from app.core.storage import load_voice
-from app.services import whisper_svc, translate_svc, llm_translate_svc, edge_tts_svc, vocal_separator_svc, gemini_translate_svc, xtts_svc
+from app.services import whisper_svc, translate_svc, llm_translate_svc, edge_tts_svc, vocal_separator_svc, gemini_translate_svc, xtts_svc, vieneu_svc
 
 logger = logging.getLogger(__name__)
 
@@ -555,7 +555,49 @@ def generate_segment(project_id: str, seg_id: str) -> dict:
     out_path = _segments_dir(project_id) / f"{seg_id}.wav"
 
     try:
-        if tts_engine == "xtts":
+        if tts_engine == "vieneu":
+            # ── VieNeu-TTS (native Vietnamese, lightweight) ──
+            voice_id = seg.get("voice_id") or project.get("voice_id")
+            ref_wav = None
+            ref_text = None
+            if voice_id:
+                rw = VOICES_DIR / f"{voice_id}.wav"
+                if rw.exists():
+                    ref_wav = str(rw)
+                    # Read ref_text from voice meta
+                    import json as _json
+                    meta_path = VOICES_DIR / f"{voice_id}.json"
+                    if meta_path.exists():
+                        try:
+                            ref_text = _json.loads(meta_path.read_text(encoding="utf-8")).get("ref_text")
+                        except Exception:
+                            pass
+
+            vieneu_svc.vieneu.generate(
+                text=tts_text,
+                ref_wav_path=ref_wav,
+                ref_text=ref_text,
+                out_wav_path=str(out_path),
+            )
+            audio_np, sr = sf.read(str(out_path))
+
+            # Auto-align to target duration
+            actual_dur = len(audio_np) / sr
+            if target_duration > 0 and actual_dur > 0.1:
+                ratio = actual_dur / target_duration
+                if abs(ratio - 1.0) > 0.05:
+                    ratio_clamped = max(0.7, min(1.5, ratio))
+                    logger.info("VieNeu align: actual=%.2fs target=%.2fs ratio=%.2f (clamped=%.2f)",
+                                actual_dur, target_duration, ratio, ratio_clamped)
+                    seg_dir = _segments_dir(project_id)
+                    stretched_wav = seg_dir / f"{seg_id}_stretched.wav"
+                    try:
+                        _atempo_stretch(out_path, stretched_wav, ratio_clamped)
+                        audio_np, sr = sf.read(str(stretched_wav))
+                    finally:
+                        stretched_wav.unlink(missing_ok=True)
+
+        elif tts_engine == "xtts":
             # ── XTTS v2 Vietnamese (Nhat1106/xtts-vietnamese finetune) ──
             voice_id = seg.get("voice_id") or project.get("voice_id")
             if not voice_id:

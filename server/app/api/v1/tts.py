@@ -15,6 +15,57 @@ from app.services import tts_svc, edge_tts_svc
 router = APIRouter(prefix="/tts", tags=["TTS"])
 
 
+@router.post("/vieneu-test")
+async def vieneu_test(
+    voice_id: str = Form(None),
+    text: str = Form("Xin chào, đây là giọng nói tiếng Việt được sinh bởi VieNeu-TTS."),
+):
+    """Generate a single VieNeu-TTS utterance — for sanity testing.
+
+    If voice_id provided, clones the voice from that voice's raw WAV.
+    Otherwise uses VieNeu's default voice.
+    """
+    from app.services import vieneu_svc
+
+    ref_wav = None
+    ref_text = None
+    if voice_id:
+        ref_wav_path = VOICES_DIR / f"{voice_id}.wav"
+        if not ref_wav_path.exists():
+            raise HTTPException(status_code=404, detail=f"Voice WAV not found: {voice_id}")
+        ref_wav = str(ref_wav_path)
+        import json as _json
+        meta_path = VOICES_DIR / f"{voice_id}.json"
+        if meta_path.exists():
+            try:
+                ref_text = _json.loads(meta_path.read_text(encoding="utf-8")).get("ref_text")
+            except Exception:
+                pass
+
+    out_id = uuid.uuid4().hex[:12]
+    out_path = AUDIO_OUTPUT_DIR / f"{out_id}.wav"
+
+    try:
+        vieneu_svc.vieneu.generate(
+            text=text,
+            ref_wav_path=ref_wav,
+            ref_text=ref_text,
+            out_wav_path=str(out_path),
+        )
+    except Exception as e:
+        import traceback
+        raise HTTPException(
+            status_code=500,
+            detail=f"{type(e).__name__}: {e}\n{traceback.format_exc()}",
+        )
+
+    return {
+        "audio_url": f"/api/v1/tts/audio/{out_id}",
+        "file_id": out_id,
+        "size_bytes": out_path.stat().st_size,
+    }
+
+
 @router.post("/xtts-test")
 async def xtts_test(
     voice_id: str = Form(...),
