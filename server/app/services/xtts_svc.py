@@ -23,36 +23,76 @@ import torch
 logger = logging.getLogger(__name__)
 
 
-def _patch_tts_for_transformers5():
-    """Coqui TTS uses `isin_mps_friendly` which was removed in transformers 5.x.
+def _find_tts_file(relative_path: str) -> Optional[str]:
+    for site in sys.path:
+        hits = glob.glob(f"{site}/TTS/{relative_path}")
+        if hits:
+            return hits[0]
+    return None
 
+
+def _patch_tts_for_transformers5():
+    """Coqui TTS uses `isin_mps_friendly` (removed in transformers 5.x).
     Patch the source file on disk (idempotent) so `from TTS.api import TTS` works.
     Must run BEFORE any `from TTS...` import.
     """
-    for site in sys.path:
-        hits = glob.glob(f"{site}/TTS/tts/layers/tortoise/autoregressive.py")
-        if not hits:
-            continue
-        file_path = hits[0]
-        try:
-            with open(file_path) as f:
-                code = f.read()
-            if "isin_mps_friendly" not in code:
-                return  # already patched
-            code = code.replace(
-                "from transformers.pytorch_utils import isin_mps_friendly as isin",
-                "from torch import isin",
-            )
-            with open(file_path, "w") as f:
-                f.write(code)
-            logger.info("Auto-patched Coqui TTS for transformers 5.x at %s", file_path)
-        except Exception as e:
-            logger.warning("Could not auto-patch TTS: %s", e)
+    file_path = _find_tts_file("tts/layers/tortoise/autoregressive.py")
+    if not file_path:
         return
+    try:
+        with open(file_path) as f:
+            code = f.read()
+        if "isin_mps_friendly" not in code:
+            return
+        code = code.replace(
+            "from transformers.pytorch_utils import isin_mps_friendly as isin",
+            "from torch import isin",
+        )
+        with open(file_path, "w") as f:
+            f.write(code)
+        logger.info("Auto-patched Coqui TTS for transformers 5.x: %s", file_path)
+    except Exception as e:
+        logger.warning("Could not auto-patch TTS autoregressive.py: %s", e)
 
 
-# Apply patch at module import time so subsequent `from TTS...` calls work
+def _patch_tts_for_vietnamese():
+    """Add Vietnamese support to XTTS tokenizer.
+
+    Upstream Coqui tokenizer raises NotImplementedError for 'vi' in
+    preprocess_text(). Since the VN finetune retrained on VN data with
+    a modified vocab.json, we only need to route 'vi' through the same
+    multilingual_cleaners used for Latin languages (like 'en'). Also
+    add 'vi' to char_limits so split_sentence doesn't KeyError.
+    """
+    file_path = _find_tts_file("tts/layers/xtts/tokenizer.py")
+    if not file_path:
+        return
+    try:
+        with open(file_path) as f:
+            code = f.read()
+
+        # 1. Inject 'vi' into preprocess_text language set (after 'ar', 'cs', ...)
+        old_set = '{"ar", "cs", "de", "en", "es", "fr", "hi", "hu", "it", "nl", "pl", "pt", "ru", "tr", "zh", "ko"}'
+        new_set = '{"ar", "cs", "de", "en", "es", "fr", "hi", "hu", "it", "nl", "pl", "pt", "ru", "tr", "zh", "ko", "vi"}'
+        if old_set in code and new_set not in code:
+            code = code.replace(old_set, new_set)
+
+        # 2. Add 'vi' to char_limits dict (so split_sentence/check_input_length don't KeyError)
+        limits_old = '"hi": 150,\n        }'
+        limits_new = '"hi": 150,\n            "vi": 250,\n        }'
+        if limits_old in code and '"vi": 250,' not in code:
+            code = code.replace(limits_old, limits_new)
+
+        with open(file_path, "w") as f:
+            f.write(code)
+        logger.info("Auto-patched Coqui TTS tokenizer for Vietnamese: %s", file_path)
+    except Exception as e:
+        logger.warning("Could not auto-patch TTS tokenizer for 'vi': %s", e)
+
+
+# Apply patches at module import time so subsequent `from TTS...` calls work
 _patch_tts_for_transformers5()
+_patch_tts_for_vietnamese()
 
 # HuggingFace repo for Vietnamese finetune
 VN_REPO_ID = os.getenv("XTTS_VN_REPO", "Nhat1106/xtts-vietnamese")
