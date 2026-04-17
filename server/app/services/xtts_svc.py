@@ -58,11 +58,15 @@ def _patch_tts_for_transformers5():
 def _patch_tts_for_vietnamese():
     """Add Vietnamese support to XTTS tokenizer.
 
-    Upstream Coqui tokenizer raises NotImplementedError for 'vi' in
-    preprocess_text(). Since the VN finetune retrained on VN data with
-    a modified vocab.json, we only need to route 'vi' through the same
-    multilingual_cleaners used for Latin languages (like 'en'). Also
-    add 'vi' to char_limits so split_sentence doesn't KeyError.
+    Coqui tokenizer upstream blocks 'vi' in multiple hardcoded places:
+      - preprocess_text() raises NotImplementedError
+      - char_limits dict has no 'vi' key
+      - _ordinal_re / _abbreviations / _symbols dicts have no 'vi' key
+        (these get called via multilingual_cleaners → KeyError)
+
+    The VN finetune retrains vocab.json to handle VN phonemes directly,
+    so we override preprocess_text() for 'vi' to just do lowercase + whitespace
+    collapse, skipping the number/abbreviation expansion that needs 'vi' dicts.
     """
     file_path = _find_tts_file("tts/layers/xtts/tokenizer.py")
     if not file_path:
@@ -71,13 +75,52 @@ def _patch_tts_for_vietnamese():
         with open(file_path) as f:
             code = f.read()
 
-        # 1. Inject 'vi' into preprocess_text language set (after 'ar', 'cs', ...)
-        old_set = '{"ar", "cs", "de", "en", "es", "fr", "hi", "hu", "it", "nl", "pl", "pt", "ru", "tr", "zh", "ko"}'
-        new_set = '{"ar", "cs", "de", "en", "es", "fr", "hi", "hu", "it", "nl", "pl", "pt", "ru", "tr", "zh", "ko", "vi"}'
-        if old_set in code and new_set not in code:
-            code = code.replace(old_set, new_set)
+        # 1. Rewrite preprocess_text: handle 'vi' with minimal cleaning (lowercase + whitespace)
+        old_pp = '''    def preprocess_text(self, txt, lang):
+        if lang in {"ar", "cs", "de", "en", "es", "fr", "hi", "hu", "it", "nl", "pl", "pt", "ru", "tr", "zh", "ko"}:
+            txt = multilingual_cleaners(txt, lang)
+            if lang == "zh":
+                txt = chinese_transliterate(txt)
+            if lang == "ko":
+                txt = hangul_romanize(txt)
+        elif lang == "ja":
+            txt = japanese_cleaners(txt, self.katsu)
+        else:
+            raise NotImplementedError(f"Language '{lang}' is not supported.")
+        return txt'''
 
-        # 2. Add 'vi' to char_limits dict (so split_sentence/check_input_length don't KeyError)
+        new_pp = '''    def preprocess_text(self, txt, lang):
+        if lang == "vi":
+            # Vietnamese: skip multilingual_cleaners (number/abbr dicts have no 'vi' entry)
+            # Just lowercase + collapse whitespace. VN finetune's vocab handles phonemes.
+            txt = txt.lower()
+            txt = collapse_whitespace(txt)
+        elif lang in {"ar", "cs", "de", "en", "es", "fr", "hi", "hu", "it", "nl", "pl", "pt", "ru", "tr", "zh", "ko"}:
+            txt = multilingual_cleaners(txt, lang)
+            if lang == "zh":
+                txt = chinese_transliterate(txt)
+            if lang == "ko":
+                txt = hangul_romanize(txt)
+        elif lang == "ja":
+            txt = japanese_cleaners(txt, self.katsu)
+        else:
+            raise NotImplementedError(f"Language '{lang}' is not supported.")
+        return txt'''
+
+        if old_pp in code:
+            code = code.replace(old_pp, new_pp)
+        elif '"vi":' not in code.split("preprocess_text")[1][:600]:
+            # Fallback: if exact block didn't match (whitespace drift), inject branch
+            # via simpler pattern — find the 'elif lang == "ja"' line and insert before
+            marker = '        elif lang == "ja":'
+            vi_branch = ('        if lang == "vi":\n'
+                         '            txt = txt.lower()\n'
+                         '            txt = collapse_whitespace(txt)\n'
+                         '            return txt\n')
+            if marker in code and vi_branch not in code:
+                code = code.replace(marker, vi_branch + marker)
+
+        # 2. Add 'vi' to char_limits dict (for split_sentence in xtts.py:508)
         limits_old = '"hi": 150,\n        }'
         limits_new = '"hi": 150,\n            "vi": 250,\n        }'
         if limits_old in code and '"vi": 250,' not in code:
