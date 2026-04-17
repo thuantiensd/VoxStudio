@@ -188,24 +188,64 @@ class XTTSService:
         speed: float = 1.0,
     ) -> None:
         """Synthesize `text` with voice cloned from `ref_wav_path`, write to `out_wav_path`."""
+        import numpy as np
         import soundfile as sf
 
         with self._lock:
             self._ensure_loaded()
 
-            logger.info("XTTS generating (%d chars, lang=%s)", len(text), language)
-            outputs = self._model.synthesize(
-                text,
-                self._config,
-                speaker_wav=ref_wav_path,
+            if not text or not text.strip():
+                raise ValueError(f"Empty text for XTTS")
+
+            logger.info("XTTS generating (%d chars, lang=%s): %s",
+                        len(text), language, text[:80])
+
+            # Use lower-level inference() with explicit speaker embedding (more reliable
+            # than synthesize() on VN finetune which has modified tokenizer).
+            gpt_cond_latent, speaker_embedding = self._model.get_conditioning_latents(
+                audio_path=[ref_wav_path],
+                gpt_cond_len=self._model.config.gpt_cond_len,
+                gpt_cond_chunk_len=self._model.config.gpt_cond_chunk_len,
+                max_ref_length=self._model.config.max_ref_len,
+                sound_norm_refs=self._model.config.sound_norm_refs,
+            )
+
+            out = self._model.inference(
+                text=text,
                 language=language,
+                gpt_cond_latent=gpt_cond_latent,
+                speaker_embedding=speaker_embedding,
                 temperature=temperature,
                 repetition_penalty=repetition_penalty,
                 length_penalty=length_penalty,
                 speed=speed,
+                enable_text_splitting=True,
             )
-            wav = outputs["wav"]
+
+            wav = out.get("wav")
+            if wav is None:
+                raise RuntimeError(f"XTTS inference returned no 'wav' key (keys={list(out.keys())})")
+
+            # Normalize to numpy float32
+            if hasattr(wav, "cpu"):
+                wav = wav.cpu().numpy()
+            wav = np.asarray(wav, dtype=np.float32).squeeze()
+
+            if wav.size == 0:
+                raise RuntimeError(f"XTTS produced empty audio for text: {text[:100]}")
+
+            duration = len(wav) / self.sampling_rate
+            peak = float(np.abs(wav).max()) if wav.size > 0 else 0.0
+            logger.info("XTTS output: %.2fs, peak=%.3f, samples=%d @ %dHz",
+                        duration, peak, len(wav), self.sampling_rate)
+
+            if peak < 1e-4:
+                raise RuntimeError(f"XTTS produced silent audio (peak={peak}) for: {text[:100]}")
+
             sf.write(out_wav_path, wav, self.sampling_rate)
+            import os
+            sz = os.path.getsize(out_wav_path)
+            logger.info("XTTS wrote %s (%.1fKB)", out_wav_path, sz / 1024)
 
 
 # Singleton

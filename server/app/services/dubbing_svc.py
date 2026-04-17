@@ -701,6 +701,9 @@ def generate_segment(project_id: str, seg_id: str) -> dict:
     except Exception as e:
         seg["status"] = "error"
         _save_meta(project)
+        import traceback
+        logger.error("Generate segment %s FAILED (engine=%s): %s\n%s",
+                     seg_id, tts_engine, e, traceback.format_exc())
         raise ValueError(f"Generation failed: {e}")
 
     return project
