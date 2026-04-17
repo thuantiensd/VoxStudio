@@ -82,14 +82,20 @@ class XTTSService:
         from huggingface_hub import snapshot_download
 
         VN_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+
+        # Skip download if already cached
+        required = ["model.pth", "config.json", "vocab.json"]
+        if all((VN_CACHE_DIR / f).exists() for f in required):
+            logger.info("VN XTTS model already cached at %s", VN_CACHE_DIR)
+            return VN_CACHE_DIR
+
         logger.info("Downloading %s to %s (first-time ~1.8GB)...", VN_REPO_ID, VN_CACHE_DIR)
         snapshot_download(
             repo_id=VN_REPO_ID,
             local_dir=str(VN_CACHE_DIR),
             allow_patterns=["*.pth", "*.json"],
+            max_workers=4,
         )
-        # Verify files
-        required = ["model.pth", "config.json", "vocab.json"]
         for f in required:
             if not (VN_CACHE_DIR / f).exists():
                 raise FileNotFoundError(f"Missing {f} after download")
@@ -102,6 +108,19 @@ class XTTSService:
 
         from TTS.tts.configs.xtts_config import XttsConfig
         from TTS.tts.models.xtts import Xtts
+
+        # Free VRAM first — unload OmniVoice so we don't OOM loading XTTS too
+        try:
+            from app.core.gpu_manager import gpu
+            if gpu.tts_model is not None:
+                logger.info("Unloading OmniVoice to free VRAM for XTTS...")
+                del gpu.tts_model
+                gpu.tts_model = None
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                    torch.cuda.synchronize()
+        except Exception as e:
+            logger.warning("Could not unload OmniVoice: %s", e)
 
         vn_dir = self._download_vn_model()
 
