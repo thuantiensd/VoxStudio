@@ -298,6 +298,16 @@ def transcribe_project(project_id: str) -> dict:
 
     raw_segs = result.get("segments", [])
 
+    # Fallback: if Demucs vocals are too degraded and no segments detected,
+    # retry on the original mixed audio
+    if not raw_segs and audio_to_transcribe != audio_path:
+        logger.warning("No segments from vocals.wav — retrying on original mixed audio")
+        result = whisper_svc.transcribe(
+            audio_path,
+            language=src_lang if src_lang != "auto" else None,
+        )
+        raw_segs = result.get("segments", [])
+
     # Post-process: merge short segments (< 1.5s) with neighbors
     merged = _merge_short_segments(raw_segs, min_duration=1.5, max_gap=1.0)
 
