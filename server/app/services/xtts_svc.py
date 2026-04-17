@@ -149,6 +149,17 @@ class XTTSService:
         else:
             model.to(torch.device(device))
 
+        # Patch tokenizer: upstream TTS `char_limits` dict doesn't have 'vi'
+        # even though VN finetune adds 'vi' to languages. Add it ourselves
+        # to the same limit as English (~250) to avoid KeyError in split_sentence.
+        try:
+            char_limits = getattr(model.tokenizer, "char_limits", None)
+            if char_limits is not None and "vi" not in char_limits:
+                char_limits["vi"] = char_limits.get("en", 250)
+                logger.info("Patched tokenizer.char_limits['vi'] = %d", char_limits["vi"])
+        except Exception as e:
+            logger.warning("Could not patch char_limits: %s", e)
+
         self._model = model
         self._config = config
         self._loaded = True
@@ -210,17 +221,46 @@ class XTTSService:
                 sound_norm_refs=self._model.config.sound_norm_refs,
             )
 
-            out = self._model.inference(
-                text=text,
-                language=language,
-                gpt_cond_latent=gpt_cond_latent,
-                speaker_embedding=speaker_embedding,
-                temperature=temperature,
-                repetition_penalty=repetition_penalty,
-                length_penalty=length_penalty,
-                speed=speed,
-                enable_text_splitting=True,
-            )
+            # Disable text splitting — split ourselves if needed to avoid
+            # tokenizer.char_limits[language] KeyError path
+            max_chars = 220
+            if len(text) > max_chars:
+                import re
+                # naive split on . ! ? , keeping reasonable chunk size
+                chunks = []
+                buf = ""
+                for part in re.split(r"(?<=[.!?…])\s+", text):
+                    if len(buf) + len(part) < max_chars:
+                        buf = (buf + " " + part).strip()
+                    else:
+                        if buf: chunks.append(buf)
+                        buf = part
+                if buf: chunks.append(buf)
+            else:
+                chunks = [text]
+
+            import numpy as np
+            wav_parts = []
+            for chunk in chunks:
+                out = self._model.inference(
+                    text=chunk,
+                    language=language,
+                    gpt_cond_latent=gpt_cond_latent,
+                    speaker_embedding=speaker_embedding,
+                    temperature=temperature,
+                    repetition_penalty=repetition_penalty,
+                    length_penalty=length_penalty,
+                    speed=speed,
+                    enable_text_splitting=False,  # KEY FIX: avoid char_limits[lang] KeyError
+                )
+                w = out.get("wav")
+                if w is None:
+                    raise RuntimeError(f"inference returned no 'wav' (keys={list(out.keys())})")
+                if hasattr(w, "cpu"):
+                    w = w.cpu().numpy()
+                wav_parts.append(np.asarray(w, dtype=np.float32).squeeze())
+
+            out = {"wav": np.concatenate(wav_parts) if len(wav_parts) > 1 else wav_parts[0]}
 
             wav = out.get("wav")
             if wav is None:
