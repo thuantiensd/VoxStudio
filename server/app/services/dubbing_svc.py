@@ -16,7 +16,7 @@ import soundfile as sf
 from app.config import DUBBING_DIR, VOICES_DIR, TTS_DEFAULT_GUIDANCE, TTS_DEFAULT_STEPS, IS_CUDA
 from app.core.gpu_manager import gpu
 from app.core.storage import load_voice
-from app.services import whisper_svc, translate_svc, llm_translate_svc, edge_tts_svc, vocal_separator_svc, gemini_translate_svc
+from app.services import whisper_svc, translate_svc, llm_translate_svc, edge_tts_svc, vocal_separator_svc, gemini_translate_svc, diarize_svc
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +31,34 @@ def _detect_tts_engine() -> str:
     except ImportError:
         logger.info("OmniVoice not installed, falling back to Edge TTS")
         return "edge"
+
+
+# Default Vietnamese Edge TTS voices per gender
+EDGE_VOICE_MALE_VI = "vi-VN-NamMinhNeural"
+EDGE_VOICE_FEMALE_VI = "vi-VN-HoaiMyNeural"
+
+
+def _pick_edge_voice_for_segment(seg: dict, project: dict) -> str | None:
+    """Choose an Edge TTS voice for this segment.
+
+    Priority:
+      1. Project-wide override `edge_voice` (user-selected in UI)
+      2. Per-segment speaker_gender from diarization → Vietnamese male/female preset
+      3. None (Edge will use its default)
+    """
+    # User chose an explicit voice for the whole project
+    if project.get("edge_voice"):
+        return project["edge_voice"]
+
+    # Auto per-speaker (currently only Vietnamese presets)
+    gender = seg.get("speaker_gender")
+    if (project.get("target_language") == "vietnamese" and gender):
+        if gender == "female":
+            return EDGE_VOICE_FEMALE_VI
+        if gender == "male":
+            return EDGE_VOICE_MALE_VI
+
+    return None
 
 
 _default_voice_cache = None
@@ -311,6 +339,18 @@ def transcribe_project(project_id: str) -> dict:
     # Post-process: merge short segments (< 1.5s) with neighbors
     merged = _merge_short_segments(raw_segs, min_duration=1.5, max_gap=1.0)
 
+    # ── Diarization: gán speaker + gender cho từng segment (optional) ──
+    speaker_genders = {}
+    try:
+        diar_audio = str(vocals_path) if vocals_path.exists() else audio_path
+        diar_result = diarize_svc.diarize.diarize(diar_audio, min_speakers=1, max_speakers=6)
+        merged = diarize_svc.diarize.assign_speaker_to_segments(merged, diar_result["turns"])
+        speaker_genders = diar_result.get("speaker_genders", {})
+        logger.info("Diarization: %d speakers %s",
+                    len(diar_result["speakers"]), speaker_genders)
+    except Exception as e:
+        logger.warning("Diarization skipped (%s) — segments will have speaker=None", e)
+
     segments = []
     for i, seg in enumerate(merged):
         segments.append({
@@ -323,6 +363,8 @@ def transcribe_project(project_id: str) -> dict:
             "speech_text": "",
             "emotion": "neutral",
             "voice_id": None,
+            "speaker": seg.get("speaker"),
+            "speaker_gender": speaker_genders.get(seg.get("speaker")) if seg.get("speaker") else None,
             "volume": 1.0,
             "fade_in": 0.0,
             "fade_out": 0.0,
@@ -331,6 +373,7 @@ def transcribe_project(project_id: str) -> dict:
 
     project["segments"] = segments
     project["source_language"] = result.get("language")
+    project["speaker_genders"] = speaker_genders
     project["status"] = "editing"
     _save_meta(project)
     logger.info("Transcribed %d segments for project %s", len(segments), project_id)
@@ -559,7 +602,8 @@ def generate_segment(project_id: str, seg_id: str) -> dict:
             # ── Edge TTS with smart speed matching ──
             seg_dir = _segments_dir(project_id)
             mp3_path = seg_dir / f"{seg_id}.mp3"
-            edge_voice = project.get("edge_voice")
+            # Auto per-speaker voice based on diarization gender
+            edge_voice = _pick_edge_voice_for_segment(seg, project)
             lang = project["target_language"] or "vietnamese"
 
             # Pass 1: generate at 1x
@@ -723,6 +767,10 @@ def _group_segments_into_batches(segments: list[dict]) -> list[list[dict]]:
     batches = []
     current_batch = []
 
+    def seg_speaker(s):
+        # Group by (speaker, gender) so each batch uses one Edge voice
+        return (s.get("speaker"), s.get("speaker_gender"))
+
     for seg in segments:
         text = (seg.get("speech_text") or seg["translated_text"] or "").strip()
         if not text:
@@ -736,10 +784,11 @@ def _group_segments_into_batches(segments: list[dict]) -> list[list[dict]]:
         gap = seg["start"] - prev["end"]
         batch_duration = seg["end"] - current_batch[0]["start"]
 
-        # Start new batch if: too long, too many segments, or big gap
+        # Start new batch if: too long, too many segments, big gap, or speaker change
         if (batch_duration > MAX_BATCH_DURATION
                 or len(current_batch) >= MAX_BATCH_SEGMENTS
-                or gap > MIN_SEGMENT_GAP):
+                or gap > MIN_SEGMENT_GAP
+                or seg_speaker(seg) != seg_speaker(prev)):
             batches.append(current_batch)
             current_batch = [seg]
         else:
@@ -813,7 +862,6 @@ def _generate_all_batched(project_id: str, project: dict):
     total = sum(len(b) for b in batches)
     done_count = 0
 
-    edge_voice = project.get("edge_voice")
     target_lang = project.get("target_language") or "vietnamese"
     seg_dir = _segments_dir(project_id)
     sr = 24000
@@ -848,6 +896,9 @@ def _generate_all_batched(project_id: str, project: dict):
             batch_start = batch[0]["start"]
             batch_end = batch[-1]["end"]
             target_duration = batch_end - batch_start
+
+            # Per-batch voice: pick based on the batch's speaker/gender
+            edge_voice = _pick_edge_voice_for_segment(batch[0], project)
 
             batch_mp3 = seg_dir / f"_batch_{batch_idx}.mp3"
             batch_wav = seg_dir / f"_batch_{batch_idx}.wav"
@@ -1348,16 +1399,23 @@ def auto_dub(project_id: str, engine: str = "google"):
             try:
                 project = _load_meta(project_id)
                 translated = [seg.get("translated_text", "") for seg in project["segments"]]
-                # Pass segment durations so Qwen fits output to original timing
                 durations = [seg["end"] - seg["start"] for seg in project["segments"]]
+                speaker_ids = [seg.get("speaker") for seg in project["segments"]]
+                speaker_genders = project.get("speaker_genders", {})
                 target_lang = project["target_language"]
-                polished = llm_translate_svc.polish_for_speech(translated, target_lang, durations=durations)
+                polished = llm_translate_svc.polish_for_speech(
+                    translated, target_lang,
+                    durations=durations,
+                    speaker_ids=speaker_ids,
+                    speaker_genders=speaker_genders,
+                )
                 for seg, result in zip(project["segments"], polished):
                     if result.get("speech_text"):
                         seg["speech_text"] = result["speech_text"]
                         seg["emotion"] = result.get("emotion", "neutral")
                 _save_meta(project)
-                logger.info("Qwen rewrote %d segments with duration-aware word budget", len(polished))
+                logger.info("Qwen rewrote %d segments with duration + speaker context",
+                            len(polished))
             except Exception as e:
                 logger.warning("Qwen rewrite failed, using Google Translate only: %s", e)
             finally:

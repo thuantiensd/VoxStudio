@@ -11,3 +11,4 @@ scipy
 ffmpeg-python
 edge-tts
 bitsandbytes
+pyannote.audio
