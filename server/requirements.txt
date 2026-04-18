@@ -11,5 +11,3 @@ scipy
 ffmpeg-python
 edge-tts
 bitsandbytes
-coqui-tts
-vieneu
