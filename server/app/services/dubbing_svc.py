@@ -99,11 +99,75 @@ def _extract_segment_audio(source_path: str, out_path: str, start: float, end: f
     sf.write(out_path, segment, sr)
 
 
-def _merge_short_segments(segments: list[dict], min_duration: float = 1.5, max_gap: float = 1.0) -> list[dict]:
+import re as _re
+
+
+def _split_long_segment(seg: dict, max_duration: float = 12.0) -> list[dict]:
+    """Split a segment longer than max_duration into sentence-level sub-segments.
+
+    Uses sentence-ending punctuation (. ! ? 。 ！ ？) to find natural split points.
+    Timestamps are estimated proportionally by character count.
+    If the segment text has no sentence breaks, we split it in half.
+    """
+    duration = seg["end"] - seg["start"]
+    if duration <= max_duration:
+        return [dict(seg)]
+
+    text = seg.get("text", "").strip()
+    if not text:
+        return [dict(seg)]
+
+    # Split by sentence-ending punctuation (keep delimiter)
+    parts = _re.split(r"(?<=[.!?。！？])\s+", text)
+    parts = [p.strip() for p in parts if p.strip()]
+
+    # If no sentence break, force split by comma or half
+    if len(parts) < 2:
+        parts = _re.split(r"(?<=[,;，；])\s+", text)
+        parts = [p.strip() for p in parts if p.strip()]
+
+    if len(parts) < 2:
+        # Still one chunk — split text in halves by word count
+        words = text.split()
+        mid = len(words) // 2
+        if mid == 0:
+            return [dict(seg)]
+        parts = [" ".join(words[:mid]), " ".join(words[mid:])]
+
+    # Estimate timestamps proportional to character count
+    total_chars = sum(len(p) for p in parts) or 1
+    subs = []
+    cursor = seg["start"]
+    for i, p in enumerate(parts):
+        frac = len(p) / total_chars
+        sub_dur = duration * frac
+        sub_start = cursor
+        sub_end = seg["end"] if i == len(parts) - 1 else cursor + sub_dur
+        subs.append({
+            "start": round(sub_start, 2),
+            "end": round(sub_end, 2),
+            "text": p,
+        })
+        cursor = sub_end
+
+    return subs
+
+
+def _split_all_long_segments(segments: list[dict], max_duration: float = 12.0) -> list[dict]:
+    """Apply _split_long_segment to all segments."""
+    out = []
+    for seg in segments:
+        out.extend(_split_long_segment(seg, max_duration=max_duration))
+    return out
+
+
+def _merge_short_segments(segments: list[dict], min_duration: float = 2.5,
+                           max_gap: float = 1.5, max_combined: float = 10.0) -> list[dict]:
     """Merge short segments with their neighbors for better dubbing timing.
 
     - Segments shorter than min_duration get merged with the next/prev segment
-    - Only merge if the gap between segments is < max_gap seconds
+    - Only merge if the gap < max_gap seconds
+    - Do NOT let combined segment exceed max_combined (otherwise TTS too long → speedup)
     """
     if not segments:
         return segments
@@ -115,15 +179,46 @@ def _merge_short_segments(segments: list[dict], min_duration: float = 1.5, max_g
         prev_dur = prev["end"] - prev["start"]
         cur_dur = seg["end"] - seg["start"]
         gap = seg["start"] - prev["end"]
+        combined_dur = seg["end"] - prev["start"]
 
-        # Merge if: previous too short, or current too short, AND gap is small
-        if (prev_dur < min_duration or cur_dur < min_duration) and gap < max_gap:
+        # Merge if: (prev short OR cur short) AND gap small AND combined not too long
+        should_merge = (
+            (prev_dur < min_duration or cur_dur < min_duration)
+            and gap < max_gap
+            and combined_dur <= max_combined
+        )
+        if should_merge:
             prev["end"] = seg["end"]
             prev["text"] = (prev["text"] + " " + seg["text"]).strip()
         else:
             merged.append(dict(seg))
 
     return merged
+
+
+def _trim_sparse_segments(segments: list[dict], max_speech_per_sec: float = 14.0) -> list[dict]:
+    """Trim segments where text is too short for the duration (sparse speech).
+
+    If a segment has duration 20s but text fits only 3s of speech (at 14 chars/sec),
+    the extra 17s is likely silence in source audio. We shrink the segment end
+    to what the text can fill (+ small buffer), letting natural silence fall
+    in the gap between segments rather than inside a single segment.
+    """
+    out = []
+    for seg in segments:
+        text = seg.get("text", "").strip()
+        duration = seg["end"] - seg["start"]
+        # Estimated speech duration for this text (Vietnamese ~14 chars/sec)
+        estimated_dur = max(1.0, len(text) / max_speech_per_sec)
+        # If actual slot is much longer than estimated speech + 2s buffer → shrink
+        if duration > estimated_dur * 2 + 2.0:
+            new_dur = min(duration, estimated_dur * 1.5 + 1.0)
+            new_seg = dict(seg)
+            new_seg["end"] = round(seg["start"] + new_dur, 2)
+            out.append(new_seg)
+        else:
+            out.append(dict(seg))
+    return out
 
 
 def _project_dir(project_id: str) -> Path:
@@ -336,8 +431,19 @@ def transcribe_project(project_id: str) -> dict:
         )
         raw_segs = result.get("segments", [])
 
-    # Post-process: merge short segments (< 1.5s) with neighbors
-    merged = _merge_short_segments(raw_segs, min_duration=1.5, max_gap=1.0)
+    # Post-process pipeline: fix timing issues BEFORE translation/TTS
+    # 1. Split segments > 12s (sparse speech + silence, causes silence-padding hell)
+    split_segs = _split_all_long_segments(raw_segs, max_duration=12.0)
+    logger.info("Post-process: %d segments after split-long (was %d raw)",
+                len(split_segs), len(raw_segs))
+
+    # 2. Trim segments with duration >> text (too much silence in slot)
+    trimmed = _trim_sparse_segments(split_segs, max_speech_per_sec=14.0)
+    logger.info("Post-process: %d segments after trim-sparse", len(trimmed))
+
+    # 3. Merge adjacent short segments (< 2.5s, gap < 1.5s, combined <= 10s)
+    merged = _merge_short_segments(trimmed, min_duration=2.5, max_gap=1.5, max_combined=10.0)
+    logger.info("Post-process: %d segments after merge-short (final)", len(merged))
 
     # ── Diarization: gán speaker + gender cho từng segment (optional) ──
     speaker_genders = {}
