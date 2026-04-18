@@ -257,3 +257,60 @@ def pro_mix(
 
     logger.info("pro_mix: done, final peak=%.3f", float(np.abs(mastered).max()))
     return mastered.astype(np.float32)
+
+
+# ── Pre-Whisper amplification ──────────────────────────────
+def normalize_for_stt(input_path: str, output_path: str,
+                       target_lufs: float = -16.0,
+                       compression_threshold: float = -28.0,
+                       compression_ratio: float = 4.0) -> None:
+    """Normalize + dynamically compress audio so Whisper catches quiet speech.
+
+    Quiet whispers / internal monologues often get filtered as silence by Whisper.
+    Pre-processing chain:
+      1. Compressor (4:1 from -28dB) — bring quiet up, leave loud alone
+      2. LUFS normalize to -16 — consistent loudness
+      3. Limiter at -1dBFS — prevent clipping
+
+    Use this on vocals.wav (after Demucs) BEFORE feeding to Whisper.
+    """
+    import numpy as np
+    import soundfile as sf
+    from pedalboard import Pedalboard, Compressor, Limiter, HighpassFilter
+
+    # Load audio (force mono for STT)
+    audio, sr = sf.read(input_path, dtype="float32")
+    if audio.ndim > 1:
+        audio = audio.mean(axis=1)
+
+    # Pre-STT chain
+    chain = Pedalboard([
+        HighpassFilter(cutoff_frequency_hz=60),       # remove rumble
+        Compressor(threshold_db=compression_threshold,
+                   ratio=compression_ratio,
+                   attack_ms=10, release_ms=120),     # boost quiet
+    ])
+    processed = chain(audio, sr)
+
+    # LUFS normalize
+    try:
+        import pyloudnorm as pyln
+        meter = pyln.Meter(sr)
+        current_lufs = meter.integrated_loudness(processed)
+        if np.isfinite(current_lufs) and current_lufs > -70:
+            processed = pyln.normalize.loudness(processed, current_lufs, target_lufs)
+            logger.info("STT pre-amp: LUFS %.1f → %.1f", current_lufs, target_lufs)
+    except Exception as e:
+        logger.warning("LUFS normalize skipped: %s", e)
+
+    # Final limiter
+    limiter = Pedalboard([Limiter(threshold_db=-1.0, release_ms=100)])
+    processed = limiter(processed.astype(np.float32), sr)
+
+    # Safety
+    peak = float(np.abs(processed).max())
+    if peak > 0.95:
+        processed = processed * (0.95 / peak)
+
+    sf.write(output_path, processed, sr)
+    logger.info("STT pre-amp wrote %s (peak=%.3f)", output_path, float(np.abs(processed).max()))

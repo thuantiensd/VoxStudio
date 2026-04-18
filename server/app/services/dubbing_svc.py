@@ -484,9 +484,21 @@ def transcribe_project(project_id: str) -> dict:
         except Exception as e:
             logger.warning("Vocal separation failed, transcribing full audio: %s", e)
 
-    # Step 2: Transcribe on vocals.wav (cleaner) or fallback to original
+    # Step 2: Pre-amplify vocals (compressor + LUFS norm) so Whisper catches
+    # quiet whispers / internal monologues that VAD would otherwise filter as silence.
     vocals_path = pdir / "vocals.wav"
     audio_to_transcribe = str(vocals_path) if vocals_path.exists() else audio_path
+
+    if vocals_path.exists():
+        try:
+            from app.services.audio_mix_svc import normalize_for_stt
+            normalized_path = pdir / "vocals_normalized.wav"
+            normalize_for_stt(str(vocals_path), str(normalized_path))
+            audio_to_transcribe = str(normalized_path)
+            logger.info("Pre-amplified vocals for STT (catches quiet speech)")
+        except Exception as e:
+            logger.warning("STT pre-amp failed (%s), using raw vocals", e)
+
     logger.info("Transcribing: %s", audio_to_transcribe)
 
     src_lang = project.get("source_language_input", "auto")
