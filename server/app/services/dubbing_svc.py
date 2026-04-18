@@ -602,11 +602,13 @@ def generate_segment(project_id: str, seg_id: str) -> dict:
                 voice_prompt = _get_default_voice()
 
             from omnivoice import OmniVoiceGenerationConfig
+            # Match TTS preview params (no duration constraint, default guidance) —
+            # forcing `duration=` + high guidance_scale was producing choppy/muddy voice
             gen_config = OmniVoiceGenerationConfig(
                 num_step=TTS_DEFAULT_STEPS,
-                guidance_scale=3.0 if voice_prompt else TTS_DEFAULT_GUIDANCE,
+                guidance_scale=TTS_DEFAULT_GUIDANCE,
             )
-            kwargs = {"generation_config": gen_config, "duration": target_duration}
+            kwargs = {"generation_config": gen_config}
             if project["target_language"]:
                 kwargs["language"] = project["target_language"]
 
@@ -614,25 +616,31 @@ def generate_segment(project_id: str, seg_id: str) -> dict:
             sr = gpu.sampling_rate
             audio_np = waveform.cpu().numpy()
 
-            # ── Auto-align: stretch/compress to match target_duration ──
+            # ── Auto-align: ONLY speed up if TTS is too long for slot ──
+            # Atempo < 1.0 (slowing down short TTS) muddies the voice; instead
+            # just let silence fill the gap naturally. Only compress when needed
+            # to prevent overlap with next segment.
             actual_dur = len(audio_np) / sr
-            if target_duration > 0 and actual_dur > 0.1:
+            if target_duration > 0 and actual_dur > target_duration * 1.1:
                 ratio = actual_dur / target_duration
-                # Only stretch when noticeably off (>5%), clamp to reasonable range
-                if abs(ratio - 1.0) > 0.05:
-                    ratio_clamped = max(0.7, min(1.5, ratio))
-                    logger.info("OmniVoice align: actual=%.2fs target=%.2fs ratio=%.2f (clamped=%.2f)",
-                                actual_dur, target_duration, ratio, ratio_clamped)
-                    seg_dir = _segments_dir(project_id)
-                    raw_wav = seg_dir / f"{seg_id}_raw.wav"
-                    stretched_wav = seg_dir / f"{seg_id}_stretched.wav"
-                    sf.write(str(raw_wav), audio_np, sr)
-                    try:
-                        _atempo_stretch(raw_wav, stretched_wav, ratio_clamped)
-                        audio_np, sr = sf.read(str(stretched_wav))
-                    finally:
-                        raw_wav.unlink(missing_ok=True)
-                        stretched_wav.unlink(missing_ok=True)
+                # Cap at 1.8x — beyond that atempo creates audible artifacts.
+                # If still too long, accept slight overlap (better than muddy voice).
+                ratio_clamped = min(1.8, ratio)
+                logger.info("OmniVoice speed-up: actual=%.2fs target=%.2fs ratio=%.2f (capped=%.2f)",
+                            actual_dur, target_duration, ratio, ratio_clamped)
+                seg_dir = _segments_dir(project_id)
+                raw_wav = seg_dir / f"{seg_id}_raw.wav"
+                stretched_wav = seg_dir / f"{seg_id}_stretched.wav"
+                sf.write(str(raw_wav), audio_np, sr)
+                try:
+                    _atempo_stretch(raw_wav, stretched_wav, ratio_clamped)
+                    audio_np, sr = sf.read(str(stretched_wav))
+                finally:
+                    raw_wav.unlink(missing_ok=True)
+                    stretched_wav.unlink(missing_ok=True)
+            elif actual_dur < target_duration * 0.9:
+                logger.info("OmniVoice short-fill: actual=%.2fs target=%.2fs (silence padding)",
+                            actual_dur, target_duration)
 
         # Apply volume
         if seg.get("volume", 1.0) != 1.0:
