@@ -103,21 +103,58 @@ import re as _re
 
 
 def _split_long_segment(seg: dict, max_duration: float = 12.0) -> list[dict]:
-    """Split a segment longer than max_duration into sentence-level sub-segments.
+    """Split a segment longer than max_duration into sub-segments.
 
-    Uses sentence-ending punctuation (. ! ? 。 ！ ？) to find natural split points.
-    Timestamps are estimated proportionally by character count.
-    If the segment text has no sentence breaks, we split it in half.
+    Strategy:
+      1. If word-level timestamps available, find largest inter-word silence gap
+         (≥50ms) and split there — most accurate, uses real speech boundaries.
+      2. Else fall back to sentence-boundary regex with proportional time estimate.
+
+    Recursively splits each piece until <= max_duration.
     """
     duration = seg["end"] - seg["start"]
     if duration <= max_duration:
         return [dict(seg)]
 
+    words = seg.get("words") or []
     text = seg.get("text", "").strip()
+
+    # ── Path A: word-level — find biggest silence gap ──
+    if len(words) >= 4:
+        gaps = []
+        for i in range(1, len(words)):
+            gap = words[i]["start"] - words[i - 1]["end"]
+            gaps.append((gap, i))
+        # Prefer largest gap, tie-break toward middle
+        mid_time = seg["start"] + duration / 2
+        gaps.sort(key=lambda g: (-g[0], abs(words[g[1]]["start"] - mid_time)))
+
+        if gaps and gaps[0][0] >= 0.05:
+            split_idx = gaps[0][1]
+            left_words = words[:split_idx]
+            right_words = words[split_idx:]
+            left_text = "".join(w["word"] for w in left_words).strip()
+            right_text = "".join(w["word"] for w in right_words).strip()
+            if left_text and right_text:
+                left_seg = {
+                    "start": seg["start"],
+                    "end": left_words[-1]["end"],
+                    "text": left_text,
+                    "words": left_words,
+                }
+                right_seg = {
+                    "start": right_words[0]["start"],
+                    "end": seg["end"],
+                    "text": right_text,
+                    "words": right_words,
+                }
+                return _split_long_segment(left_seg, max_duration) + \
+                       _split_long_segment(right_seg, max_duration)
+
+    # ── Path B: sentence boundary fallback ──
     if not text:
         return [dict(seg)]
 
-    # Split by sentence-ending punctuation (keep delimiter)
     parts = _re.split(r"(?<=[.!?。！？])\s+", text)
     parts = [p.strip() for p in parts if p.strip()]
 
@@ -150,7 +187,36 @@ def _split_long_segment(seg: dict, max_duration: float = 12.0) -> list[dict]:
         })
         cursor = sub_end
 
-    return subs
+    # Recurse on each piece — proportional split may still leave one too long
+    out = []
+    for s in subs:
+        if s["end"] - s["start"] > max_duration:
+            out.extend(_split_long_segment(s, max_duration))
+        else:
+            out.append(s)
+    return out
+
+
+def _snap_segment_to_words(seg: dict, gap_threshold: float = 0.3) -> dict:
+    """Tighten segment boundaries to actual first/last word times.
+
+    Whisper VAD pads each segment by 200-400ms. With word timestamps we can
+    snap start/end to real speech, removing leading/trailing silence that
+    causes TTS to be placed too early (so voice plays ahead of original)
+    or end too late (causing overlap with next segment).
+    """
+    words = seg.get("words") or []
+    if not words:
+        return dict(seg)
+
+    snapped = dict(seg)
+    speech_start = words[0]["start"]
+    speech_end = words[-1]["end"]
+    if speech_start - seg["start"] > gap_threshold:
+        snapped["start"] = round(max(seg["start"], speech_start - 0.05), 2)
+    if seg["end"] - speech_end > gap_threshold:
+        snapped["end"] = round(min(seg["end"], speech_end + 0.10), 2)
+    return snapped
 
 
 def _split_all_long_segments(segments: list[dict], max_duration: float = 12.0) -> list[dict]:
@@ -159,6 +225,11 @@ def _split_all_long_segments(segments: list[dict], max_duration: float = 12.0) -
     for seg in segments:
         out.extend(_split_long_segment(seg, max_duration=max_duration))
     return out
+
+
+def _snap_all_to_words(segments: list[dict]) -> list[dict]:
+    """Snap all segment boundaries to actual word timestamps."""
+    return [_snap_segment_to_words(s) for s in segments]
 
 
 def _merge_short_segments(segments: list[dict], min_duration: float = 2.5,
@@ -431,17 +502,25 @@ def transcribe_project(project_id: str) -> dict:
         )
         raw_segs = result.get("segments", [])
 
-    # Post-process pipeline: fix timing issues BEFORE translation/TTS
-    # 1. Split segments > 12s (sparse speech + silence, causes silence-padding hell)
-    split_segs = _split_all_long_segments(raw_segs, max_duration=12.0)
-    logger.info("Post-process: %d segments after split-long (was %d raw)",
-                len(split_segs), len(raw_segs))
+    # Post-process pipeline (order matters — each step depends on prev):
+    # 1. Snap each segment's start/end to actual word timestamps (remove VAD padding)
+    snapped = _snap_all_to_words(raw_segs)
+    snap_savings = sum(
+        (raw["end"] - raw["start"]) - (s["end"] - s["start"])
+        for raw, s in zip(raw_segs, snapped)
+    )
+    logger.info("Post-process: snap-to-words removed %.1fs of silent edges", snap_savings)
 
-    # 2. Trim segments with duration >> text (too much silence in slot)
+    # 2. Split segments > 12s using word-level silence gaps (real time, not estimate)
+    split_segs = _split_all_long_segments(snapped, max_duration=12.0)
+    logger.info("Post-process: %d segments after split-long (was %d snapped)",
+                len(split_segs), len(snapped))
+
+    # 3. Trim sparse-speech segments (text too short for slot duration)
     trimmed = _trim_sparse_segments(split_segs, max_speech_per_sec=14.0)
     logger.info("Post-process: %d segments after trim-sparse", len(trimmed))
 
-    # 3. Merge adjacent short segments (< 2.5s, gap < 1.5s, combined <= 10s)
+    # 4. Merge adjacent short segments (< 2.5s, gap < 1.5s, combined <= 10s)
     merged = _merge_short_segments(trimmed, min_duration=2.5, max_gap=1.5, max_combined=10.0)
     logger.info("Post-process: %d segments after merge-short (final)", len(merged))
 

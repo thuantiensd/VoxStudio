@@ -121,46 +121,60 @@ class GPUManager:
     def transcribe_faster(self, audio_path: str, language: str = None) -> dict:
         """Faster-Whisper STT — returns {"text", "segments", "language"}.
 
-        Two-pass strategy: try with VAD first (cleaner segmentation).
-        If VAD removes all audio → retry without VAD as fallback.
+        - VAD first; retry without VAD if all audio removed.
+        - word_timestamps=True so downstream can split/snap to actual word boundaries
+          instead of guessing by character-count proportion.
         """
         # Re-load if Whisper was unloaded to free VRAM
         if self._fw_model is None and self._use_faster_whisper:
             self._load_faster_whisper()
         with self._lock:
             def _run(vad: bool):
-                kwargs = {"beam_size": 5, "vad_filter": vad}
+                kwargs = {
+                    "beam_size": 5,
+                    "vad_filter": vad,
+                    "word_timestamps": True,   # critical: actual time per word
+                }
                 if vad:
                     kwargs["vad_parameters"] = {
-                        "min_speech_duration_ms": 250,     # hạ xuống 0.25s (was 500)
+                        "min_speech_duration_ms": 250,
                         "max_speech_duration_s": 15,
-                        "min_silence_duration_ms": 500,    # cần im ≥ 0.5s mới cắt (was 300)
-                        "speech_pad_ms": 400,              # pad thêm (was 200) — tránh cắt chữ
-                        "threshold": 0.3,                  # NEW — VAD sensitivity (default 0.5)
+                        "min_silence_duration_ms": 500,
+                        "speech_pad_ms": 400,
+                        "threshold": 0.3,
                     }
                 if language:
                     kwargs["language"] = language
                 segments_gen, info = self._fw_model.transcribe(audio_path, **kwargs)
                 segs = []
                 for s in segments_gen:
+                    words = []
+                    if s.words:
+                        for w in s.words:
+                            words.append({
+                                "start": w.start,
+                                "end": w.end,
+                                "word": w.word,
+                                "probability": getattr(w, "probability", None),
+                            })
                     segs.append({
                         "start": s.start,
                         "end": s.end,
                         "text": s.text.strip(),
+                        "words": words,
                     })
                 return segs, info
 
-            # Pass 1: VAD on
             segments, info = _run(vad=True)
-
-            # Fallback: if VAD produced no segments, retry without VAD
             if not segments:
                 logger.warning("VAD removed all audio — retrying without VAD filter")
                 segments, info = _run(vad=False)
 
             full_text = " ".join(seg["text"] for seg in segments)
             self._clear_cache()
-            logger.info("Faster-Whisper: %d segments, lang=%s", len(segments), info.language)
+            total_words = sum(len(s.get("words", [])) for s in segments)
+            logger.info("Faster-Whisper: %d segments (%d words), lang=%s",
+                        len(segments), total_words, info.language)
             return {
                 "text": full_text,
                 "segments": segments,
