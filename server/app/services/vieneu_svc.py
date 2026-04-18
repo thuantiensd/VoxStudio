@@ -93,6 +93,26 @@ class VieNeuService:
             return int(self._tts.sample_rate)
         return 24000
 
+    def _build_voice(self, ref_wav_path: str, ref_text: Optional[str]) -> dict:
+        """Encode a reference WAV into a voice dict usable by infer().
+
+        Turbo/standard/fast backends all accept `voice={"codes":..., "text":...}`.
+        Turbo's infer() does NOT accept ref_audio/ref_text kwargs — those would
+        be silently dropped and the default preset voice used instead.
+        """
+        cache_key = (ref_wav_path, ref_text or "")
+        if not hasattr(self, "_voice_cache"):
+            self._voice_cache = {}
+        if cache_key in self._voice_cache:
+            return self._voice_cache[cache_key]
+
+        codes = self._tts.encode_reference(ref_wav_path)
+        voice = {"codes": codes, "text": ref_text or ""}
+        self._voice_cache[cache_key] = voice
+        logger.info("VieNeu encoded reference: %s (ref_text=%s)",
+                    ref_wav_path, bool(ref_text))
+        return voice
+
     def generate(
         self,
         text: str,
@@ -103,7 +123,7 @@ class VieNeuService:
         """Synthesize Vietnamese speech.
 
         If ref_wav_path is given, clones the voice from the reference audio.
-        Otherwise uses VieNeu's default voice.
+        Otherwise uses VieNeu's default preset voice.
 
         Returns the output WAV path.
         """
@@ -121,11 +141,10 @@ class VieNeuService:
             logger.info("VieNeu generating (%d chars, clone=%s): %s",
                         len(text), bool(ref_wav_path), text[:80])
 
-            kwargs = {"text": text}
+            kwargs = {"text": text, "show_progress": False}
             if ref_wav_path:
-                kwargs["ref_audio"] = ref_wav_path
-                if ref_text:
-                    kwargs["ref_text"] = ref_text
+                # Build + cache voice dict so we only encode once per reference
+                kwargs["voice"] = self._build_voice(ref_wav_path, ref_text)
 
             audio = self._tts.infer(**kwargs)
 
