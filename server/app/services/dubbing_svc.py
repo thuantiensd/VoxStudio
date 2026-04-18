@@ -1064,8 +1064,13 @@ def _apply_ducking(bgm: np.ndarray, dubbed: np.ndarray, sr: int,
 def export_video(project_id: str, keep_original_audio: bool = False,
                  original_audio_volume: float = 0.1,
                  enable_ducking: bool = True, duck_level: float = 0.15,
-                 duck_attack: float = 0.05, duck_release: float = 0.3) -> str:
-    """Assemble dubbed audio and/or burn subtitles based on project toggles."""
+                 duck_attack: float = 0.05, duck_release: float = 0.3,
+                 use_pro_mix: bool = True, target_lufs: float = -16.0) -> str:
+    """Assemble dubbed audio and/or burn subtitles based on project toggles.
+
+    use_pro_mix=True (default): use pedalboard + LUFS chain for broadcast-quality mix.
+    Falls back to legacy envelope-follower ducking if pro_mix fails.
+    """
     project = _load_meta(project_id)
     if not project:
         raise ValueError("Project not found")
@@ -1135,15 +1140,35 @@ def export_video(project_id: str, keep_original_audio: bool = False,
                         bg_audio = resample(bg_audio, total_samples).astype(np.float32)
 
                     if enable_ducking and accomp_path.exists():
-                        # Smart ducking: reduce BGM when dubbed voice plays
-                        logger.info("Applying audio ducking (level=%.2f, attack=%.2f, release=%.2f)",
-                                    duck_level, duck_attack, duck_release)
-                        full_audio = _apply_ducking(
-                            bg_audio, full_audio, sr,
-                            duck_level=duck_level,
-                            attack=duck_attack,
-                            release=duck_release,
-                        )
+                        # Professional mix chain: voice EQ + sidechain compressor
+                        # + LUFS normalize. Falls back to legacy envelope follower
+                        # if pedalboard unavailable or errors.
+                        used_pro = False
+                        if use_pro_mix:
+                            try:
+                                from app.services.audio_mix_svc import pro_mix
+                                logger.info("Applying PRO audio mix (LUFS target=%.1f)", target_lufs)
+                                # bg_audio may be stereo; reduce to mono for pro_mix
+                                bg_mono = bg_audio.mean(axis=1) if bg_audio.ndim > 1 else bg_audio
+                                full_audio = pro_mix(
+                                    voice=full_audio,
+                                    bgm=bg_mono,
+                                    sr=sr,
+                                    target_lufs=target_lufs,
+                                )
+                                used_pro = True
+                            except Exception as e:
+                                logger.warning("Pro mix failed, falling back to envelope ducking: %s", e)
+
+                        if not used_pro:
+                            logger.info("Applying legacy audio ducking (level=%.2f, attack=%.2f, release=%.2f)",
+                                        duck_level, duck_attack, duck_release)
+                            full_audio = _apply_ducking(
+                                bg_audio, full_audio, sr,
+                                duck_level=duck_level,
+                                attack=duck_attack,
+                                release=duck_release,
+                            )
                     else:
                         # Simple mix (fallback)
                         mix_len = min(len(full_audio), len(bg_audio))

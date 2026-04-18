@@ -12,3 +12,5 @@ ffmpeg-python
 edge-tts
 bitsandbytes
 pyannote.audio
+pedalboard
+pyloudnorm

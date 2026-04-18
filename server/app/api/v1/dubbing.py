@@ -248,6 +248,8 @@ async def export_video(project_id: str, body: ExportOptions = None):
             duck_level=body.duck_level,
             duck_attack=body.duck_attack,
             duck_release=body.duck_release,
+            use_pro_mix=body.use_pro_mix,
+            target_lufs=body.target_lufs,
         )
         return {"ok": True, "download_url": f"/api/v1/dubbing/projects/{project_id}/export/download"}
     except ValueError as e:

@@ -77,6 +77,8 @@ class ExportOptions(BaseModel):
     keep_original_audio: bool = False
     original_audio_volume: float = 0.1
     enable_ducking: bool = True       # Smart audio ducking — reduce BGM when voice plays
-    duck_level: float = 0.15          # BGM volume when voice is present (0.0-1.0)
-    duck_attack: float = 0.05         # Ducking attack time in seconds
-    duck_release: float = 0.3         # Ducking release time in seconds
+    duck_level: float = 0.15          # BGM volume when voice is present (0.0-1.0) [legacy]
+    duck_attack: float = 0.05         # Ducking attack time in seconds [legacy]
+    duck_release: float = 0.3         # Ducking release time in seconds [legacy]
+    use_pro_mix: bool = True          # Use professional pedalboard chain (recommended)
+    target_lufs: float = -16.0        # YouTube=-14, most streaming=-16, conservative=-18
