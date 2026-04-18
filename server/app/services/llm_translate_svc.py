@@ -49,9 +49,12 @@ def _build_polish_prompt(
             for i, t in enumerate(translated_lines)
         )
         duration_rule = (
-            "- Each line has [Xs, ~N words] — output must stay CLOSE to that word budget.\n"
-            "- Short lines stay short; long lines can be more expressive.\n"
-            "- Do NOT include the [Xs, ~N words] prefix in your output."
+            "- Each input line starts with a metadata tag [X.Ys, ~N words] which is\n"
+            "  a HINT FOR YOU ONLY — it tells you how many words fit in that time slot.\n"
+            "- CRITICAL: your output must NEVER contain numbers followed by 's', 'giây',\n"
+            "  'seconds', 'words', 'từ', or brackets with timing/word-count info.\n"
+            "  The TTS will literally read those numbers aloud. Strip them completely.\n"
+            "- Keep output length CLOSE to the ~N words budget so timing lines up."
         )
     else:
         numbered = "\n".join(f"{i+1}. {t}" for i, t in enumerate(translated_lines))
@@ -84,6 +87,29 @@ Rules:
     ]
 
 
+_DURATION_HINT_PATTERNS = [
+    # [5.2s, ~13 words]
+    re.compile(r"\[\s*\d+(?:\.\d+)?\s*s\s*,\s*[~≈]?\s*\d+\s*words?\s*\]", re.IGNORECASE),
+    # [5.2s]
+    re.compile(r"\[\s*\d+(?:\.\d+)?\s*s\s*\]", re.IGNORECASE),
+    # [~13 words]  /  [13 words]
+    re.compile(r"\[\s*[~≈]?\s*\d+\s*words?\s*\]", re.IGNORECASE),
+    # 5.2 giây  / 2.5s  / 13 từ / 13 words — nếu lọt vào text
+    re.compile(r"\b\d+(?:\.\d+)?\s*(?:giây|seconds?|secs?)\b", re.IGNORECASE),
+    re.compile(r"\b[~≈]?\s*\d+\s*(?:từ|words?)\b", re.IGNORECASE),
+]
+
+
+def _strip_duration_hints(text: str) -> str:
+    """Remove [X.Ys, ~N words] / [X.Ys] / [~N words] hints that Qwen sometimes leaks."""
+    out = text
+    for pat in _DURATION_HINT_PATTERNS:
+        out = pat.sub("", out)
+    # Collapse resulting double-spaces / leading commas
+    out = re.sub(r"\s{2,}", " ", out).strip(" ,.")
+    return out.strip()
+
+
 def _parse_response(response: str, count: int) -> list[dict]:
     """Parse numbered lines with emotion tags from LLM response."""
     lines = response.strip().split("\n")
@@ -102,14 +128,19 @@ def _parse_response(response: str, count: int) -> list[dict]:
             text = m.group(3).strip()
             if 0 <= idx < count:
                 if emotion not in VALID_EMOTIONS:
+                    # What we captured as "emotion" was actually a duration hint like
+                    # "2.5s" or "6 words" — treat as neutral + merge back into text
+                    emotion_raw = m.group(2)
                     emotion = "neutral"
+                    text = f"[{emotion_raw}] {text}"
+                text = _strip_duration_hints(text)
                 results[idx] = {"speech_text": text, "emotion": emotion}
         else:
             # Fallback: no emotion tag
             m2 = re.match(r"^(\d+)[.):\s]+(.+)$", line)
             if m2:
                 idx = int(m2.group(1)) - 1
-                text = m2.group(2).strip()
+                text = _strip_duration_hints(m2.group(2).strip())
                 if 0 <= idx < count:
                     results[idx] = {"speech_text": text, "emotion": "neutral"}
 
