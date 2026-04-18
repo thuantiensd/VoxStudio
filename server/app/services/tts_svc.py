@@ -3,13 +3,20 @@
 import logging
 import time
 
-from omnivoice import OmniVoiceGenerationConfig
-
 from app.config import TTS_DEFAULT_GUIDANCE, TTS_DEFAULT_STEPS
 from app.core.gpu_manager import gpu
 from app.core.storage import load_voice, save_audio
 
 logger = logging.getLogger(__name__)
+
+try:
+    from omnivoice import OmniVoiceGenerationConfig
+    OMNIVOICE_AVAILABLE = True
+except ImportError:
+    OmniVoiceGenerationConfig = None
+    OMNIVOICE_AVAILABLE = False
+    logger.warning("OmniVoice not installed — /api/v1/tts/generate will return error. "
+                   "Install with: pip install -e /path/to/OmniVoice-master")
 
 
 def generate(
@@ -30,6 +37,11 @@ def generate(
     duration: float = None,
 ) -> dict:
     """Generate TTS audio. Returns {"audio_url", "duration", "sample_rate"}."""
+    if not OMNIVOICE_AVAILABLE:
+        raise RuntimeError(
+            "OmniVoice not installed. Run cell 3 in Colab notebook "
+            "(or: pip install -e /content/OmniVoice-master)"
+        )
     steps = num_step or TTS_DEFAULT_STEPS
     logger.info("TTS generate: text=%r voice=%s steps=%d", text[:50], voice_id, steps)
 

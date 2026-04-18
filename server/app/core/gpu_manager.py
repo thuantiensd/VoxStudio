@@ -11,7 +11,12 @@ os.environ.setdefault("PYTORCH_MPS_HIGH_WATERMARK_RATIO", "0.0")
 import torch
 from transformers import pipeline as hf_pipeline, AutoModelForCausalLM, AutoTokenizer
 
-from omnivoice import OmniVoice
+try:
+    from omnivoice import OmniVoice
+    OMNIVOICE_AVAILABLE = True
+except ImportError:
+    OmniVoice = None
+    OMNIVOICE_AVAILABLE = False
 
 from app.config import (
     DEVICE, DTYPE, TTS_MODEL, WHISPER_MODEL, LLM_MODEL,
@@ -25,7 +30,7 @@ class GPUManager:
     def __init__(self):
         self._lock = threading.Lock()        # TTS + Whisper
         self._llm_lock = threading.Lock()    # LLM riêng, không block TTS/Whisper
-        self.tts_model: Optional[OmniVoice] = None
+        self.tts_model: Optional["OmniVoice"] = None  # type: ignore
         self.whisper_pipe = None
         self._fw_model = None                # Faster-Whisper model
         self._use_faster_whisper = USE_FASTER_WHISPER
@@ -88,6 +93,11 @@ class GPUManager:
         """Lazy-load OmniVoice TTS on first use."""
         if self.tts_model is not None:
             return
+        if not OMNIVOICE_AVAILABLE:
+            raise RuntimeError(
+                "OmniVoice package not installed. "
+                "Install: pip install -e /content/OmniVoice-master (Colab cell 3)"
+            )
         logger.info("Loading OmniVoice from %s (first TTS request)...", TTS_MODEL)
         self.tts_model = OmniVoice.from_pretrained(
             TTS_MODEL,
