@@ -4,6 +4,7 @@ import asyncio
 import concurrent.futures
 import json
 import logging
+import os
 import shutil
 import uuid
 from datetime import datetime
@@ -16,7 +17,7 @@ import soundfile as sf
 from app.config import DUBBING_DIR, VOICES_DIR, TTS_DEFAULT_GUIDANCE, TTS_DEFAULT_STEPS, IS_CUDA
 from app.core.gpu_manager import gpu
 from app.core.storage import load_voice
-from app.services import whisper_svc, translate_svc, llm_translate_svc, edge_tts_svc, vocal_separator_svc, gemini_translate_svc, diarize_svc
+from app.services import whisper_svc, translate_svc, llm_translate_svc, edge_tts_svc, vocal_separator_svc, gemini_translate_svc, diarize_svc, resemblyzer_diarize_svc
 
 logger = logging.getLogger(__name__)
 
@@ -538,12 +539,24 @@ def transcribe_project(project_id: str) -> dict:
     merged = _merge_short_segments(trimmed, min_duration=2.5, max_gap=1.5, max_combined=10.0)
     logger.info("Post-process: %d segments after merge-short (final)", len(merged))
 
-    # ── Diarization: gán speaker + gender cho từng segment (optional) ──
+    # ── Diarization: gán speaker + gender cho từng segment ──
+    # Default: Resemblyzer (no token, MIT, ~17MB).
+    # If HF_TOKEN is set AND DIARIZE_BACKEND=pyannote → use pyannote (better quality).
     speaker_genders = {}
+    diarize_backend = os.getenv("DIARIZE_BACKEND", "resemblyzer").lower()
+    use_pyannote = diarize_backend == "pyannote" and os.getenv("HF_TOKEN")
+
     try:
         diar_audio = str(vocals_path) if vocals_path.exists() else audio_path
-        diar_result = diarize_svc.diarize.diarize(diar_audio, min_speakers=1, max_speakers=6)
-        merged = diarize_svc.diarize.assign_speaker_to_segments(merged, diar_result["turns"])
+        if use_pyannote:
+            logger.info("Diarization backend: pyannote (HF_TOKEN set)")
+            diar_module = diarize_svc.diarize
+        else:
+            logger.info("Diarization backend: Resemblyzer (default, no token)")
+            diar_module = resemblyzer_diarize_svc.diarize
+
+        diar_result = diar_module.diarize(diar_audio, min_speakers=1, max_speakers=6)
+        merged = diar_module.assign_speaker_to_segments(merged, diar_result["turns"])
         speaker_genders = diar_result.get("speaker_genders", {})
         logger.info("Diarization: %d speakers %s",
                     len(diar_result["speakers"]), speaker_genders)
