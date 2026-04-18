@@ -40,16 +40,36 @@ def transcribe(audio_path: str, return_timestamps: bool = True, language: str = 
                     "word": chunk.get("text", ""),
                 })
 
-        # Group words into segments by sentence punctuation
+        # Group words into segments using:
+        #   - Sentence punctuation (. ! ? 。 ！ ？)
+        #   - OR silence gap >= 0.5s between consecutive words (natural pause)
+        #   - OR accumulated duration >= 8s (force break for long monologues)
+        #   - OR comma + small pause (secondary breakpoint)
         if word_chunks:
             current_words = [word_chunks[0]]
             for w in word_chunks[1:]:
-                current_words.append(w)
-                last_word = w["word"].strip()
-                # End segment on sentence punctuation
-                if last_word and last_word[-1] in ".!?。！？":
+                last_added = current_words[-1]
+                gap = w["start"] - last_added["end"]
+                cur_duration = last_added["end"] - current_words[0]["start"]
+
+                # Decide: end current segment BEFORE adding `w`?
+                last_text = last_added["word"].strip()
+                ends_sentence = last_text and last_text[-1] in ".!?。！？"
+                ends_clause = last_text and last_text[-1] in ",;，；、"
+                long_pause = gap >= 0.5
+                medium_pause = gap >= 0.25
+                too_long = cur_duration >= 8.0
+
+                should_break = (
+                    ends_sentence
+                    or long_pause
+                    or too_long
+                    or (ends_clause and medium_pause)
+                )
+                if should_break:
                     segments.append(_words_to_segment(current_words))
                     current_words = []
+                current_words.append(w)
             if current_words:
                 segments.append(_words_to_segment(current_words))
 

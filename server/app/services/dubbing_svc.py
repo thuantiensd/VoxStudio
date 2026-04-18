@@ -197,13 +197,14 @@ def _split_long_segment(seg: dict, max_duration: float = 12.0) -> list[dict]:
     return out
 
 
-def _snap_segment_to_words(seg: dict, gap_threshold: float = 0.3) -> dict:
+def _snap_segment_to_words(seg: dict, gap_threshold: float = 0.5,
+                            keep_padding: float = 0.2) -> dict:
     """Tighten segment boundaries to actual first/last word times.
 
     Whisper VAD pads each segment by 200-400ms. With word timestamps we can
-    snap start/end to real speech, removing leading/trailing silence that
-    causes TTS to be placed too early (so voice plays ahead of original)
-    or end too late (causing overlap with next segment).
+    snap start/end to real speech. But we keep `keep_padding` seconds of
+    padding so TTS has natural room (avoids speedup pressure when text is
+    slightly long for the slot).
     """
     words = seg.get("words") or []
     if not words:
@@ -212,10 +213,11 @@ def _snap_segment_to_words(seg: dict, gap_threshold: float = 0.3) -> dict:
     snapped = dict(seg)
     speech_start = words[0]["start"]
     speech_end = words[-1]["end"]
+    # Only snap if the silent padding is BIG enough to justify removing
     if speech_start - seg["start"] > gap_threshold:
-        snapped["start"] = round(max(seg["start"], speech_start - 0.05), 2)
+        snapped["start"] = round(max(seg["start"], speech_start - keep_padding), 2)
     if seg["end"] - speech_end > gap_threshold:
-        snapped["end"] = round(min(seg["end"], speech_end + 0.10), 2)
+        snapped["end"] = round(min(seg["end"], speech_end + keep_padding), 2)
     return snapped
 
 
@@ -850,11 +852,11 @@ def generate_segment(project_id: str, seg_id: str) -> dict:
             # just let silence fill the gap naturally. Only compress when needed
             # to prevent overlap with next segment.
             actual_dur = len(audio_np) / sr
-            if target_duration > 0 and actual_dur > target_duration * 1.1:
+            if target_duration > 0 and actual_dur > target_duration * 1.15:
                 ratio = actual_dur / target_duration
-                # Cap at 1.8x — beyond that atempo creates audible artifacts.
-                # If still too long, accept slight overlap (better than muddy voice).
-                ratio_clamped = min(1.8, ratio)
+                # Cap at 1.3x — beyond that atempo creates "rushed/chipmunk" artifact.
+                # If still too long, accept slight overlap into next segment.
+                ratio_clamped = min(1.3, ratio)
                 logger.info("OmniVoice speed-up: actual=%.2fs target=%.2fs ratio=%.2f (capped=%.2f)",
                             actual_dur, target_duration, ratio, ratio_clamped)
                 seg_dir = _segments_dir(project_id)
