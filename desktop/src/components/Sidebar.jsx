@@ -58,10 +58,17 @@ export default function Sidebar() {
     { to: "/history", icon: Clock, label: t("nav.history") },
   ];
 
+  // Spacer width matches the PINNED state only:
+  //   - pinned open → spacer = EXPANDED_W so layout doesn't overlap
+  //   - pinned closed → spacer = COLLAPSED_W, hover peeks as overlay
+  // This prevents Settings aside (at x=spacer) from being hidden when the
+  // main sidebar is pinned open.
+  const spacerWidth = pinned ? EXPANDED_W : COLLAPSED_W;
+
   return (
     <>
-      {/* Spacer reserves the collapsed width so main content does not shift */}
-      <div className="flex-shrink-0" style={{ width: COLLAPSED_W }} />
+      <div className="flex-shrink-0 transition-all duration-200"
+           style={{ width: spacerWidth }} />
 
       <aside
         className="fixed top-0 left-0 h-screen flex flex-col z-20 transition-all duration-200"
