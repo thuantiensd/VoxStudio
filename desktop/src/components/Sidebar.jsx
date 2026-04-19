@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { NavLink } from "react-router-dom";
 import {
   Mic, AudioLines, Library, Clock,
@@ -11,18 +11,39 @@ import { useAuth } from "../auth/AuthContext";
 const COLLAPSED_W = 56;
 const EXPANDED_W = 220;
 
-// Extra top spacing so macOS traffic lights don't overlap the brand area.
-// The Electron window uses `trafficLightPosition: { x: 16, y: 16 }`, so we
-// push the sidebar content down when running on macOS.
 const IS_MAC =
   typeof navigator !== "undefined" && /Mac/i.test(navigator.platform || navigator.userAgent);
 const HEADER_TOP = IS_MAC ? 38 : 12;
+
+// Hover-expand debounce — prevents jitter when mouse moves across the
+// button's shifting position during expand/collapse animation.
+const HOVER_ENTER_DELAY = 120;
+const HOVER_LEAVE_DELAY = 200;
 
 export default function Sidebar() {
   const t = useT();
   const { isAuthenticated } = useAuth();
   const [pinned, setPinned] = useState(false);
   const [hovered, setHovered] = useState(false);
+  const enterTimer = useRef(null);
+  const leaveTimer = useRef(null);
+
+  function handleMouseEnter() {
+    if (leaveTimer.current) {
+      clearTimeout(leaveTimer.current);
+      leaveTimer.current = null;
+    }
+    if (hovered) return;
+    enterTimer.current = setTimeout(() => setHovered(true), HOVER_ENTER_DELAY);
+  }
+
+  function handleMouseLeave() {
+    if (enterTimer.current) {
+      clearTimeout(enterTimer.current);
+      enterTimer.current = null;
+    }
+    leaveTimer.current = setTimeout(() => setHovered(false), HOVER_LEAVE_DELAY);
+  }
 
   const expanded = pinned || hovered;
   const width = expanded ? EXPANDED_W : COLLAPSED_W;
@@ -54,8 +75,8 @@ export default function Sidebar() {
           // override this back to non-draggable.
           WebkitAppRegion: "drag",
         }}
-        onMouseEnter={() => setHovered(true)}
-        onMouseLeave={() => setHovered(false)}
+        onMouseEnter={handleMouseEnter}
+        onMouseLeave={handleMouseLeave}
       >
         {/* Header: brand + pin — extra top padding on Mac to clear traffic lights */}
         <div

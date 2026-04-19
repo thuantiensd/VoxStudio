@@ -1,10 +1,15 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  User, Settings, CreditCard, Globe, LogOut, ChevronRight,
+  User, CreditCard, Globe, LogOut, ChevronRight, ChevronDown, Check,
 } from "lucide-react";
 import { useAuth } from "../auth/AuthContext";
 import { useI18n, useT } from "../i18n/I18nContext";
+
+const LOCALE_LABELS = {
+  vi: "Tiếng Việt",
+  en: "English",
+};
 
 /**
  * UserMenu — button at the bottom of the sidebar.
@@ -17,8 +22,15 @@ export default function UserMenu({ expanded }) {
   const { user, logout } = useAuth();
   const { locale, setLocale, locales } = useI18n();
   const [open, setOpen] = useState(false);
+  const [pendingLocale, setPendingLocale] = useState(locale);
+  const [langOpen, setLangOpen] = useState(false);
   const menuRef = useRef(null);
   const btnRef = useRef(null);
+
+  // Keep pendingLocale in sync if external change or popover re-opens
+  useEffect(() => {
+    if (open) setPendingLocale(locale);
+  }, [open, locale]);
 
   useEffect(() => {
     function handleClick(e) {
@@ -110,43 +122,72 @@ export default function UserMenu({ expanded }) {
             </span>
           </div>
 
-          {/* Items */}
+          {/* Settings (billing + profile + quota all live inside /settings page) */}
           <MenuItem
             icon={User}
             label={t("user.accountSettings")}
             onClick={() => { setOpen(false); navigate("/settings"); }}
           />
-          <MenuItem
-            icon={CreditCard}
-            label={t("user.billing")}
-            onClick={() => { setOpen(false); navigate("/billing"); }}
-          />
 
           <div className="border-t" style={{ borderColor: "#2a2a40" }} />
 
-          {/* Language submenu — inline radio list */}
-          <div className="px-3 py-2">
-            <div className="flex items-center gap-2 text-xs mb-1.5"
+          {/* Language picker — dropdown + Update button */}
+          <div className="px-3 py-3 space-y-2">
+            <div className="flex items-center gap-2 text-xs"
                  style={{ color: "var(--text-secondary)" }}>
               <Globe size={12} />
               <span>{t("user.language")}</span>
             </div>
-            <div className="flex gap-1">
-              {locales.map((loc) => (
-                <button
-                  key={loc}
-                  onClick={() => setLocale(loc)}
-                  className="flex-1 text-xs rounded px-2 py-1 transition-colors"
-                  style={{
-                    background: locale === loc ? "var(--accent)" : "transparent",
-                    color: locale === loc ? "#fff" : "var(--text-secondary)",
-                    border: "1px solid " + (locale === loc ? "var(--accent)" : "#2a2a40"),
-                  }}
-                >
-                  {loc === "vi" ? "Tiếng Việt" : "English"}
-                </button>
-              ))}
+
+            {/* Dropdown trigger */}
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setLangOpen((v) => !v)}
+                className="w-full flex items-center justify-between rounded-md px-2.5 py-1.5 text-sm transition-colors"
+                style={{
+                  background: "var(--bg-base)",
+                  color: "var(--text-primary)",
+                  border: "1px solid #2a2a40",
+                }}
+              >
+                <span>{LOCALE_LABELS[pendingLocale] || pendingLocale}</span>
+                <ChevronDown size={14} style={{ color: "var(--text-secondary)" }} />
+              </button>
+              {langOpen && (
+                <div className="absolute left-0 right-0 mt-1 z-50 rounded-md overflow-hidden border shadow-lg"
+                     style={{ background: "var(--bg-surface)", borderColor: "#2a2a40" }}>
+                  {locales.map((loc) => (
+                    <button
+                      key={loc}
+                      type="button"
+                      onClick={() => { setPendingLocale(loc); setLangOpen(false); }}
+                      className="w-full flex items-center justify-between px-2.5 py-1.5 text-sm text-left hover:bg-white/5"
+                      style={{ color: "var(--text-primary)" }}
+                    >
+                      <span>{LOCALE_LABELS[loc] || loc}</span>
+                      {pendingLocale === loc && (
+                        <Check size={14} style={{ color: "var(--accent)" }} />
+                      )}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
+
+            {/* Update button — applies pending locale; disabled if unchanged */}
+            <button
+              type="button"
+              disabled={pendingLocale === locale}
+              onClick={() => { setLocale(pendingLocale); setOpen(false); }}
+              className="w-full rounded-md py-1.5 text-xs font-medium transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+              style={{
+                background: "var(--accent)",
+                color: "#fff",
+              }}
+            >
+              {t("user.updateLanguage")}
+            </button>
           </div>
 
           <div className="border-t" style={{ borderColor: "#2a2a40" }} />
