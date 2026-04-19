@@ -1,14 +1,47 @@
 const SERVER_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 const API_BASE = SERVER_URL + '/api/v1';
 
+// ── Auth token injection ──────────────────────────
+// Kept in sync with auth/AuthContext localStorage key.
+const AUTH_STORAGE_KEY = 'voxstudio:auth';
+
+function getAuthToken() {
+  try {
+    const raw = localStorage.getItem(AUTH_STORAGE_KEY);
+    if (!raw) return null;
+    const { token } = JSON.parse(raw);
+    return token || null;
+  } catch {
+    return null;
+  }
+}
+
+function buildHeaders(extra = {}) {
+  const headers = { ...extra };
+  const token = getAuthToken();
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+  return headers;
+}
+
 async function request(path, options = {}) {
-  const res = await fetch(`${API_BASE}${path}`, options);
+  const { headers = {}, ...rest } = options;
+  const res = await fetch(`${API_BASE}${path}`, {
+    ...rest,
+    headers: buildHeaders(headers),
+  });
+  if (res.status === 401) {
+    // Clear stale auth on unauthorized
+    try { localStorage.removeItem(AUTH_STORAGE_KEY); } catch {}
+    throw new Error('Unauthorized — please sign in again');
+  }
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }));
     throw new Error(err.detail || 'API Error');
   }
   return res;
 }
+
+export { SERVER_URL, API_BASE, getAuthToken };
 
 // ── TTS ─────────────────────────────────────────────
 export async function generateTTS({
