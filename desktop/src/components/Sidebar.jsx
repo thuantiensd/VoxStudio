@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useState } from "react";
 import { NavLink } from "react-router-dom";
 import {
   Mic, AudioLines, Library, Clock,
@@ -8,48 +8,41 @@ import UserMenu from "./UserMenu";
 import { useT } from "../i18n/I18nContext";
 import { useAuth } from "../auth/AuthContext";
 
-const COLLAPSED_W = 56;
-const EXPANDED_W = 220;
+const COLLAPSED_W = 64;
+const EXPANDED_W = 240;
 
 const IS_MAC =
   typeof navigator !== "undefined" && /Mac/i.test(navigator.platform || navigator.userAgent);
-const HEADER_TOP = IS_MAC ? 38 : 12;
+const HEADER_TOP = IS_MAC ? 40 : 14;
 
-// Hover-expand debounce — prevents jitter when mouse moves across the
-// button's shifting position during expand/collapse animation.
-const HOVER_ENTER_DELAY = 120;
-const HOVER_LEAVE_DELAY = 200;
+// Brand mark — matches the landing-page header: compact rounded-md square
+// with a mic icon in primary color. Keeps the app visually consistent with
+// the public VoxStudio mark.
+function BrandMark({ size = 32 }) {
+  return (
+    <div
+      className="flex-shrink-0 rounded-md flex items-center justify-center"
+      style={{
+        width: size,
+        height: size,
+        background: "var(--accent)",
+      }}
+    >
+      <Mic size={size * 0.55} color="#fff" strokeWidth={2.2} />
+    </div>
+  );
+}
 
 export default function Sidebar() {
   const t = useT();
   const { isAuthenticated } = useAuth();
+  // Expand is ONLY controlled by the pin button click — no hover-expand.
+  // This matches Claude Code behavior and eliminates all jitter on Electron.
   const [pinned, setPinned] = useState(false);
-  const [hovered, setHovered] = useState(false);
-  const enterTimer = useRef(null);
-  const leaveTimer = useRef(null);
 
-  function handleMouseEnter() {
-    if (leaveTimer.current) {
-      clearTimeout(leaveTimer.current);
-      leaveTimer.current = null;
-    }
-    if (hovered) return;
-    enterTimer.current = setTimeout(() => setHovered(true), HOVER_ENTER_DELAY);
-  }
-
-  function handleMouseLeave() {
-    if (enterTimer.current) {
-      clearTimeout(enterTimer.current);
-      enterTimer.current = null;
-    }
-    leaveTimer.current = setTimeout(() => setHovered(false), HOVER_LEAVE_DELAY);
-  }
-
-  const expanded = pinned || hovered;
+  const expanded = pinned;
   const width = expanded ? EXPANDED_W : COLLAPSED_W;
 
-  // Main nav (primary actions at top). Settings lives in the UserMenu popover
-  // at the bottom (Claude-style), not as a separate sidebar entry.
   const nav = [
     { to: "/", icon: AudioLines, label: t("nav.tts") },
     { to: "/dubbing", icon: Film, label: t("nav.dubbing") },
@@ -58,64 +51,55 @@ export default function Sidebar() {
     { to: "/history", icon: Clock, label: t("nav.history") },
   ];
 
-  // Spacer width matches the PINNED state only:
-  //   - pinned open → spacer = EXPANDED_W so layout doesn't overlap
-  //   - pinned closed → spacer = COLLAPSED_W, hover peeks as overlay
-  // This prevents Settings aside (at x=spacer) from being hidden when the
-  // main sidebar is pinned open.
-  const spacerWidth = pinned ? EXPANDED_W : COLLAPSED_W;
-
   return (
     <>
-      <div className="flex-shrink-0 transition-all duration-200"
-           style={{ width: spacerWidth }} />
+      {/* Spacer reserves the full width so the main content never overlaps */}
+      <div
+        className="flex-shrink-0 transition-[width] duration-200"
+        style={{ width }}
+      />
 
       <aside
-        className="fixed top-0 left-0 h-screen flex flex-col z-20 transition-all duration-200"
+        className="fixed top-0 left-0 h-screen flex flex-col z-20 transition-[width] duration-200"
         style={{
           width,
           background: "var(--bg-surface)",
-          borderRight: "1px solid #2a2a40",
-          boxShadow: expanded && !pinned ? "4px 0 24px rgba(0,0,0,.4)" : "none",
-          // Make the entire sidebar draggable on macOS so user can drag the
-          // window by the empty sidebar area (like Claude). Buttons below
-          // override this back to non-draggable.
+          borderRight: "1px solid rgba(255,255,255,0.06)",
+          // Make empty sidebar area draggable (window drag on macOS).
           WebkitAppRegion: "drag",
         }}
-        onMouseEnter={handleMouseEnter}
-        onMouseLeave={handleMouseLeave}
       >
-        {/* Header: brand + pin — extra top padding on Mac to clear traffic lights */}
+        {/* Header: brand + pin — top padding clears macOS traffic lights */}
         <div
           className="flex items-center px-3"
           style={{
-            minHeight: 56,
+            minHeight: 68,
             paddingTop: HEADER_TOP,
-            paddingBottom: 12,
-            gap: 8,
+            paddingBottom: 14,
+            gap: 10,
+            WebkitAppRegion: "drag",
           }}
         >
-          {expanded ? (
-            <div className="flex-1 pl-1 overflow-hidden whitespace-nowrap">
+          <BrandMark size={32} />
+          {expanded && (
+            <div className="flex-1 overflow-hidden whitespace-nowrap">
               <h1
-                className="text-base font-bold leading-tight tracking-tight"
-                style={{ color: "var(--accent)" }}
+                className="text-[15px] font-semibold leading-none tracking-tight"
+                style={{ color: "var(--text-primary)" }}
               >
                 {t("brand.name")}
               </h1>
               <p
-                className="text-[11px] leading-tight mt-0.5"
+                className="text-[11px] leading-tight mt-1"
                 style={{ color: "var(--text-secondary)" }}
               >
                 {t("brand.tagline")}
               </p>
             </div>
-          ) : (
-            <div className="flex-1" />
           )}
           <button
             onClick={() => setPinned((p) => !p)}
-            className="p-1.5 rounded-md flex-shrink-0 transition-colors hover:bg-white/5"
+            className="p-1.5 rounded-md flex-shrink-0 transition-colors hover:bg-white/10"
             style={{ color: "var(--text-secondary)", WebkitAppRegion: "no-drag" }}
             title={pinned ? t("sidebar.collapse") : t("sidebar.expand")}
           >
@@ -123,7 +107,7 @@ export default function Sidebar() {
           </button>
         </div>
 
-        {/* Main nav — grows to fill */}
+        {/* Main nav */}
         <nav
           className="flex-1 px-2 mt-1 overflow-y-auto"
           style={{ WebkitAppRegion: "no-drag" }}
@@ -133,7 +117,7 @@ export default function Sidebar() {
           ))}
         </nav>
 
-        {/* Bottom — user menu ONLY (Claude-style: Settings lives inside the popover) */}
+        {/* Bottom — user menu (Settings + Billing + Language + Sign out live inside) */}
         <div
           className="mt-auto border-t px-2 pt-2 pb-3"
           style={{
@@ -154,7 +138,7 @@ function NavItem({ to, Icon, label, expanded }) {
       to={to}
       end={to === "/"}
       className={({ isActive }) =>
-        `flex items-center rounded-lg mb-1 text-sm transition-all duration-150 ${isActive ? "font-medium" : "hover:opacity-80"}`
+        `flex items-center rounded-lg mb-1 text-sm transition-colors ${isActive ? "font-medium" : "hover:opacity-80"}`
       }
       style={({ isActive }) => ({
         background: isActive ? "var(--accent)" : "transparent",
