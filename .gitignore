@@ -20,6 +20,10 @@ server/*.mp3
 desktop/node_modules/
 desktop/dist/
 desktop/.vite/
+desktop/release/
+_web_future_landing/node_modules/
+_web_future_landing/.next/
+node_modules/
 
 # IDE
 .vscode/
@@ -39,3 +43,4 @@ Thumbs.db
 
 # Logs
 *.log
+_web_future_landing/

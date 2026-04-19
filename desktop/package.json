@@ -1,13 +1,26 @@
 {
   "name": "voxstudio-desktop",
+  "productName": "VoxStudio",
+  "version": "0.1.0",
   "private": true,
-  "version": "0.0.0",
+  "description": "VoxStudio — Professional AI video dubbing",
+  "author": {
+    "name": "VoxStudio",
+    "email": "hello@voxstudio.app"
+  },
   "type": "module",
+  "main": "electron/main.js",
   "scripts": {
-    "dev": "vite",
-    "build": "vite build",
+    "vite:dev": "vite",
+    "vite:build": "vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "electron:dev": "cross-env VITE_DEV_SERVER_URL=http://localhost:5174 wait-on http://localhost:5174 && electron .",
+    "dev": "concurrently -k -n vite,electron -c blue,magenta \"npm run vite:dev\" \"npm run electron:dev\"",
+    "build": "npm run vite:build && electron-builder",
+    "build:mac": "npm run vite:build && electron-builder --mac",
+    "build:win": "npm run vite:build && electron-builder --win",
+    "build:linux": "npm run vite:build && electron-builder --linux"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.2.2",
@@ -22,10 +35,46 @@
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.1",
+    "concurrently": "^9.2.1",
+    "cross-env": "^10.1.0",
+    "electron": "^41.2.1",
+    "electron-builder": "^26.8.1",
     "eslint": "^9.39.4",
     "eslint-plugin-react-hooks": "^7.0.1",
     "eslint-plugin-react-refresh": "^0.5.2",
     "globals": "^17.4.0",
-    "vite": "^8.0.4"
+    "vite": "^8.0.4",
+    "wait-on": "^9.0.5"
+  },
+  "build": {
+    "appId": "app.voxstudio.desktop",
+    "productName": "VoxStudio",
+    "copyright": "Copyright © 2026 VoxStudio",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "package.json"
+    ],
+    "mac": {
+      "category": "public.app-category.video",
+      "target": [
+        { "target": "dmg", "arch": ["universal"] }
+      ],
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false
+    },
+    "win": {
+      "target": [
+        { "target": "nsis", "arch": ["x64"] }
+      ]
+    },
+    "linux": {
+      "target": ["AppImage"],
+      "category": "AudioVideo"
+    },
+    "publish": null
   }
 }
