@@ -77,6 +77,15 @@ async def stream_video(project_id: str):
     return FileResponse(str(path), media_type="video/mp4")
 
 
+@router.get("/projects/{project_id}/thumbnail")
+async def get_thumbnail(project_id: str):
+    """Return pre-generated thumbnail (JPEG) for the project."""
+    path = dubbing_svc.get_thumbnail_path(project_id)
+    if not path:
+        raise HTTPException(status_code=404, detail="Thumbnail not found")
+    return FileResponse(str(path), media_type="image/jpeg")
+
+
 # ── Transcribe ──────────────────────────────────────
 
 @router.post("/projects/{project_id}/transcribe")
@@ -332,18 +341,48 @@ async def set_gemini_key(body: dict):
 async def auto_dub(project_id: str, engine: str = "google"):
     """Run full pipeline: Demucs → Whisper → Translate → TTS → Export.
 
-    Returns SSE stream with progress updates.
+    Chạy sync generator auto_dub trong thread riêng, bridge qua asyncio.Queue
+    để event_generator await → mỗi item được flush ra SSE ngay, không bị
+    block bởi time.sleep hoặc blocking step bên trong.
     """
+    import asyncio
+    import threading
+
     async def event_generator():
-        try:
-            for update in dubbing_svc.auto_dub(project_id, engine=engine):
-                yield f"data: {json.dumps(update)}\n\n"
-        except ValueError as e:
-            yield f"data: {json.dumps({'step': 'error', 'label': str(e), 'progress': -1})}\n\n"
-        except Exception as e:
-            yield f"data: {json.dumps({'step': 'error', 'label': str(e), 'progress': -1})}\n\n"
+        loop = asyncio.get_running_loop()
+        queue: asyncio.Queue = asyncio.Queue()
+        SENTINEL = object()
+
+        def producer():
+            try:
+                for update in dubbing_svc.auto_dub(project_id, engine=engine):
+                    loop.call_soon_threadsafe(queue.put_nowait, update)
+            except ValueError as e:
+                loop.call_soon_threadsafe(queue.put_nowait,
+                    {"step": "error", "label": str(e), "progress": -1})
+            except Exception as e:
+                loop.call_soon_threadsafe(queue.put_nowait,
+                    {"step": "error", "label": str(e), "progress": -1})
+            finally:
+                loop.call_soon_threadsafe(queue.put_nowait, SENTINEL)
+
+        threading.Thread(target=producer, daemon=True).start()
+
+        while True:
+            item = await queue.get()
+            if item is SENTINEL:
+                break
+            yield f"data: {json.dumps(item)}\n\n"
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+
+@router.post("/projects/{project_id}/cancel")
+async def cancel_auto_dub(project_id: str):
+    """Yêu cầu huỷ pipeline đang chạy cho project. Pipeline sẽ thoát sớm
+    tại checkpoint gần nhất (giữa các bước, hoặc trong loop TTS)."""
+    dubbing_svc.request_cancel(project_id)
+    return {"ok": True, "project_id": project_id}
 
 
 @router.get("/edge-voices")

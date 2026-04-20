@@ -25,6 +25,7 @@ function createWindow() {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
+      webSecurity: false,  // cho phép renderer load file:// (dùng cho thumbnail local)
     },
   });
 
@@ -85,6 +86,62 @@ ipcMain.handle("app:getVersion", () => app.getVersion());
 ipcMain.handle("app:getPlatform", () => process.platform);
 
 ipcMain.handle("shell:openExternal", (_event, url) => shell.openExternal(url));
+
+// Folder picker — trả về path absolute hoặc null khi hủy.
+ipcMain.handle("dialog:pickFolder", async () => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    properties: ["openDirectory", "createDirectory"],
+  });
+  return result.canceled ? null : result.filePaths[0];
+});
+
+// Download URL remote → lưu vào folder chỉ định.
+ipcMain.handle("fs:saveRemoteFile", async (_event, { url, folder, filename }) => {
+  const fs = await import("node:fs/promises");
+  const path = await import("node:path");
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Download failed: ${res.status}`);
+  const buf = Buffer.from(await res.arrayBuffer());
+  const dest = path.join(folder, filename);
+  await fs.writeFile(dest, buf);
+  return dest;
+});
+
+// Liệt kê video trong thư mục local.
+ipcMain.handle("fs:listVideosInFolder", async (_event, folder) => {
+  const fs = await import("node:fs/promises");
+  const path = await import("node:path");
+  const entries = await fs.readdir(folder);
+  const videos = entries.filter((f) => /\.(mp4|mov|mkv|avi|webm)$/i.test(f));
+  const out = [];
+  for (const name of videos) {
+    const full = path.join(folder, name);
+    try {
+      const s = await fs.stat(full);
+      if (s.isFile()) out.push({ name, path: full, size: s.size });
+    } catch {}
+  }
+  return out;
+});
+
+// Đọc file thành buffer để renderer wrap thành File và gửi lên backend.
+ipcMain.handle("fs:readFileAsBuffer", async (_event, filepath) => {
+  const fs = await import("node:fs/promises");
+  return await fs.readFile(filepath);
+});
+
+// Mở file bằng ứng dụng mặc định của hệ điều hành
+ipcMain.handle("shell:openFileInApp", async (_event, filepath) => {
+  const err = await shell.openPath(filepath);
+  if (err) throw new Error(err);
+  return true;
+});
+
+// Hiện file trong Finder/Explorer
+ipcMain.handle("shell:revealInFolder", async (_event, filepath) => {
+  shell.showItemInFolder(filepath);
+  return true;
+});
 
 // Menu (minimal, system-native feel)
 const template = [

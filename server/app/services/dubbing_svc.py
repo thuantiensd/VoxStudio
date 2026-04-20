@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import shutil
+import threading
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -363,6 +364,20 @@ def create_project(video_data: bytes, video_filename: str,
         duration = float(probe["format"]["duration"])
     except Exception:
         duration = 0.0
+
+    # Generate thumbnail (frame ở giây thứ 1, hoặc giữa video nếu ngắn hơn)
+    try:
+        thumb_path = pdir / "thumbnail.jpg"
+        thumb_at = min(1.0, max(0.0, duration / 2)) if duration > 0 else 0
+        (
+            ffmpeg
+            .input(str(video_path), ss=thumb_at)
+            .output(str(thumb_path), vframes=1, **{"q:v": 4})
+            .overwrite_output()
+            .run(quiet=True)
+        )
+    except Exception as e:
+        logger.warning("Thumbnail generation failed: %s", e)
 
     project = {
         "id": project_id,
@@ -1515,40 +1530,86 @@ def generate_ass(project_id: str, use_translated: bool = True) -> str:
     italic = -1 if style.get("font_italic", False) else 0
     primary_color = _hex_to_ass_color(style.get("font_color", "#FFFFFF"))
     outline_color = _hex_to_ass_color(style.get("outline_color", "#000000"))
-    back_color = _hex_to_ass_color(style.get("bg_color", "#000000"), style.get("bg_opacity", 0.6))
+    bg_opacity = style.get("bg_opacity", 0.6)
+    back_color = _hex_to_ass_color(style.get("bg_color", "#000000"), bg_opacity)
     outline_w = style.get("outline_width", 2)
     shadow = style.get("shadow_offset", 1)
     margin_v = style.get("margin_v", 30)
 
+    # BorderStyle=3 (opaque box) khi user muốn nền mờ, khớp với CSS preview.
+    # BorderStyle=1 (outline+shadow) khi không có nền.
+    border_style = 3 if bg_opacity > 0.01 else 1
+
+    # Khi có nền (BorderStyle=3), tham số Outline không còn là độ rộng stroke
+    # mà là padding của hộp nền quanh chữ. Preview CSS dùng padding ~0.2em
+    # trên/dưới → quy đổi sang px theo font size để ASS render giống hệt.
+    if border_style == 3:
+        outline_w = max(2, round(size * 0.22))
+
     # Alignment: bottom=2, top=8, center=5
     alignment = {"bottom": 2, "top": 8, "center": 5}.get(style.get("position", "bottom"), 2)
+
+    # PlayRes phải khớp độ phân giải video thật để Fontsize/MarginV giống preview.
+    video_w, video_h = 1920, 1080
+    try:
+        probe = ffmpeg.probe(str(_project_dir(project_id) / "original.mp4"))
+        for s in probe.get("streams", []):
+            if s.get("codec_type") == "video":
+                video_w = int(s.get("width") or 1920)
+                video_h = int(s.get("height") or 1080)
+                break
+    except Exception as e:
+        logger.warning("ffprobe for ASS PlayRes failed: %s", e)
 
     header = f"""[Script Info]
 Title: VoxStudio Subtitles
 ScriptType: v4.00+
-PlayResX: 1920
-PlayResY: 1080
+PlayResX: {video_w}
+PlayResY: {video_h}
+ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,{font},{size},{primary_color},&H000000FF,{outline_color},{back_color},{bold},{italic},0,0,100,100,0,0,1,{outline_w},{shadow},{alignment},20,20,{margin_v},1
+Style: Default,{font},{size},{primary_color},&H000000FF,{outline_color},{back_color},{bold},{italic},0,0,100,100,0,0,{border_style},{outline_w},{shadow},{alignment},20,20,{margin_v},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
 
     events = []
+    # Custom overrides — drag position, rotation từ preview
+    cx = style.get("custom_x")
+    cy = style.get("custom_y")
+    rot_val = float(style.get("rotation", 0.0) or 0.0)
+    max_width_pct = style.get("max_width_pct")
+
+    overrides = ""
+    if cx is not None and cy is not None:
+        px = round(cx / 100 * video_w, 1)
+        py = round(cy / 100 * video_h, 1)
+        overrides += f"\\pos({px},{py})"
+    if abs(rot_val) > 0.1:
+        overrides += f"\\frz{round(-rot_val, 1)}"  # ASS xoay ngược chiều CSS
+    override_tag = ("{" + overrides + "}") if overrides else ""
+
+    # MarginL/R per-dialogue để wrap text theo max_width_pct
+    if isinstance(max_width_pct, (int, float)) and 10 <= max_width_pct <= 100:
+        margin_side = int(round(video_w * (1 - max_width_pct / 100) / 2))
+    else:
+        margin_side = 0  # 0 = dùng Style default (20)
+
     for seg in project["segments"]:
         text = seg["translated_text"] if use_translated and seg["translated_text"].strip() else seg["original_text"]
         if not text.strip():
             continue
         start = _fmt_time(seg["start"])
         end = _fmt_time(seg["end"])
-        # ASS uses H:MM:SS.cc format
-        start_ass = start[1:]  # remove leading 0 from hours → "H:MM:SS.cc"
+        start_ass = start[1:]
         end_ass = end[1:]
         clean_text = text.strip().replace("\n", "\\N")
-        events.append(f"Dialogue: 0,{start_ass},{end_ass},Default,,0,0,0,,{clean_text}")
+        events.append(
+            f"Dialogue: 0,{start_ass},{end_ass},Default,,{margin_side},{margin_side},0,,{override_tag}{clean_text}"
+        )
 
     content = header + "\n".join(events) + "\n"
     ass_path = _project_dir(project_id) / "subtitles.ass"
@@ -1603,36 +1664,239 @@ def get_video_path(project_id: str) -> Path | None:
     return path if path.exists() else None
 
 
+def get_thumbnail_path(project_id: str) -> Path | None:
+    path = _project_dir(project_id) / "thumbnail.jpg"
+    return path if path.exists() else None
+
+
 # ── Auto-Dub Pipeline ─────────────────────────────
+
+def _chunk_sentences_timed(text: str):
+    """Chia text dài thành các câu nhỏ, mỗi câu <= ~45 ký tự.
+    Trả về list[str]. Không có dấu chấm thì split theo mệnh đề/từ."""
+    import re
+    CHUNK = 45
+    WORDS = 7
+    sents = [s.strip() for s in re.split(r'(?<=[.!?。！？…])\s+|\n+', text) if s.strip()]
+    out = []
+    for s in sents:
+        if len(s) <= CHUNK:
+            out.append(s); continue
+        clauses = [c.strip() for c in re.split(r'(?<=[,;:—–])\s+', s) if c.strip()]
+        for c in clauses:
+            if len(c) <= CHUNK:
+                out.append(c); continue
+            if re.search(r'\s', c):
+                words = c.split()
+                for i in range(0, len(words), WORDS):
+                    out.append(' '.join(words[i:i+WORDS]))
+            else:
+                for i in range(0, len(c), 20):
+                    out.append(c[i:i+20])
+    return out
+
+
+def auto_chunk_project_segments(project_id: str) -> dict:
+    """Tách mỗi segment thành nhiều sub-segment theo CÂU, time chia tỷ lệ
+    độ dài ký tự. Gọi sau translate_project. Mỗi câu nhỏ = 1 segment backend
+    riêng → export sẽ burn từng câu đúng khoảng thời gian của riêng nó."""
+    project = _load_meta(project_id)
+    if not project:
+        raise ValueError("Project not found")
+    new_segments = []
+    for seg in project.get("segments", []):
+        text = (seg.get("translated_text") or "").strip()
+        chunks = _chunk_sentences_timed(text) if text else []
+        if len(chunks) <= 1:
+            new_segments.append(seg)
+            continue
+        total_chars = sum(len(c) for c in chunks)
+        dur = max(0.1, seg["end"] - seg["start"])
+        elapsed = 0
+        for i, ch in enumerate(chunks):
+            frac_start = elapsed / total_chars
+            elapsed += len(ch)
+            frac_end = elapsed / total_chars
+            sub_start = round(seg["start"] + frac_start * dur, 2)
+            sub_end = round(seg["start"] + frac_end * dur, 2)
+            new_segments.append({
+                **seg,
+                "id": uuid.uuid4().hex[:8],
+                "start": sub_start,
+                "end": sub_end,
+                "translated_text": ch,
+                "speech_text": ch,
+                # Reset TTS status vì text thay đổi
+                "status": "pending",
+            })
+    for i, s in enumerate(new_segments):
+        s["index"] = i
+    project["segments"] = new_segments
+    _save_meta(project)
+    logger.info("Auto-chunked segments → %d sub-segments", len(new_segments))
+    return project
+
+
+def _run_step_with_progress(func, args, kwargs, start_pct, end_pct, label,
+                             estimated_sec=30):
+    """Chạy `func(*args, **kwargs)` trong 1 thread, vừa chạy vừa yield tick
+    tiến trình (theo thời gian thực nội suy giữa start_pct và end_pct).
+
+    Trả về generator. Item cuối có `_result` chứa kết quả func, hoặc
+    `_error` chứa exception (caller tự raise).
+    """
+    import threading, time
+    box = {}
+    def run():
+        try:
+            box["result"] = func(*args, **kwargs)
+        except Exception as e:
+            box["error"] = e
+    thread = threading.Thread(target=run, daemon=True)
+    thread.start()
+    t0 = time.time()
+    while thread.is_alive():
+        elapsed = time.time() - t0
+        # Nội suy CHẬM DẦN (ease-out) để khi estimate hết mà vẫn chưa xong,
+        # thanh không bị cắm ở 95% mà tiếp tục bò rất chậm về gần cuối.
+        if estimated_sec > 0 and elapsed < estimated_sec:
+            frac = elapsed / estimated_sec
+        else:
+            # Vượt estimate: creep chậm từ 0.95 → 0.99
+            overshoot = elapsed - estimated_sec
+            frac = 0.95 + 0.04 * (1 - 1 / (1 + overshoot / 10))
+        frac = min(0.99, frac)
+        cur = start_pct + (end_pct - start_pct) * frac
+        yield {"step": "progress", "label": label, "progress": round(cur, 1)}
+        time.sleep(0.25)  # tick 4 lần/giây cho thanh bò mượt
+    thread.join()
+    if "error" in box:
+        yield {"step": "error", "label": str(box["error"]), "progress": -1}
+        return
+    yield {"step": "progress", "label": label, "progress": end_pct,
+           "_result": box.get("result")}
+
+
+# ── Cancellation registry ─────────────────────────────────────────────
+# Client bấm huỷ → gọi request_cancel(project_id) → auto_dub kiểm tra
+# giữa các bước + trong vòng lặp TTS và thoát sớm.
+_cancel_flags: dict[str, threading.Event] = {}
+_cancel_lock = threading.Lock()
+
+
+def request_cancel(project_id: str) -> bool:
+    with _cancel_lock:
+        ev = _cancel_flags.get(project_id)
+        if ev is None:
+            ev = threading.Event()
+            _cancel_flags[project_id] = ev
+        ev.set()
+    return True
+
+
+def is_canceled(project_id: str) -> bool:
+    with _cancel_lock:
+        ev = _cancel_flags.get(project_id)
+    return bool(ev and ev.is_set())
+
+
+def _reset_cancel(project_id: str):
+    with _cancel_lock:
+        _cancel_flags.pop(project_id, None)
+
+
+class _Canceled(Exception):
+    pass
+
 
 def auto_dub(project_id: str, engine: str = "google"):
     """Full pipeline: Demucs → Faster-Whisper → Translate → TTS → Export.
 
+    Respects project toggles:
+      - enable_dubbing=False → skip TTS step entirely
+      - enable_subtitle=False → don't burn subtitle in export
     Yields progress updates as dicts for SSE streaming.
+    Mỗi step chạy trong thread riêng, tick tiến trình mỗi 0.5s để UI thấy
+    thanh progress bò đều, không phải step-jump.
     """
     project = _load_meta(project_id)
     if not project:
         raise ValueError("Project not found")
 
+    do_dubbing = project.get("enable_dubbing", True)
+    do_subtitle = project.get("enable_subtitle", False)
+
+    if not do_dubbing and not do_subtitle:
+        yield {"step": "error", "label": "Bật Lồng tiếng hoặc Phụ đề trước khi chạy.", "progress": -1}
+        return
+
+    # Reset cờ huỷ cho lần chạy mới
+    _reset_cancel(project_id)
+
+    def _check_cancel():
+        if is_canceled(project_id):
+            raise _Canceled()
+
     steps = [
-        ("transcribing", "Đang nhận diện giọng nói (Demucs + Whisper)..."),
+        ("transcribing", "Đang nhận diện giọng nói..."),
         ("translating", "Đang dịch thuật..."),
-        ("generating_tts", "Đang tạo giọng lồng tiếng..."),
+        ("generating_tts", "Đang lồng tiếng..."),
         ("exporting", "Đang xuất video..."),
     ]
 
-    try:
-        # Step 1: Transcribe (includes auto Demucs separation)
-        yield {"step": "transcribing", "label": steps[0][1], "progress": 5}
-        transcribe_project(project_id)
-        yield {"step": "transcribing", "label": steps[0][1], "progress": 30}
+    # Tính range động: phân bổ % cho các bước sẽ chạy, tổng 0→100 mượt.
+    # Trọng số (tương đối theo thời gian thực tế): transcribe 30, translate 15,
+    # chunk 3, tts 40 (chỉ khi do_dubbing), export 12.
+    weights = {
+        "transcribe": 30,
+        "translate": 15,
+        "chunk": 3,
+        "tts": 40 if do_dubbing else 0,
+        "export": 12,
+    }
+    total_w = sum(weights.values())
+    cursor = 0.0
+    def _range(key):
+        nonlocal cursor
+        start = cursor
+        cursor += (weights[key] / total_w) * 100
+        return (round(start, 1), round(cursor, 1))
+    r_trans  = _range("transcribe")
+    r_transl = _range("translate")
+    r_chunk  = _range("chunk")
+    r_tts    = _range("tts") if weights["tts"] > 0 else None
+    r_export = _range("export")
 
-        # Step 2: Translate (Google) + Rewrite (Qwen)
-        yield {"step": "translating", "label": "Đang dịch thuật (Google Translate)...", "progress": 35}
-        translate_project(project_id, engine="google")
+    try:
+        _check_cancel()
+        # Step 1: Transcribe
+        for tick in _run_step_with_progress(
+            transcribe_project, [project_id], {},
+            start_pct=r_trans[0], end_pct=r_trans[1],
+            label=steps[0][1], estimated_sec=45,
+        ):
+            _check_cancel()
+            if tick.get("step") == "error":
+                yield tick
+                return
+            if "_result" not in tick:
+                yield {"step": "transcribing", **{k: v for k, v in tick.items() if k != "step"}}
+
+        _check_cancel()
+        # Step 2: Translate
+        for tick in _run_step_with_progress(
+            translate_project, [project_id], {"engine": "google"},
+            start_pct=r_transl[0], end_pct=r_transl[1],
+            label="Đang dịch thuật...", estimated_sec=20,
+        ):
+            if tick.get("step") == "error":
+                yield tick
+                return
+            if "_result" not in tick:
+                yield {"step": "translating", **{k: v for k, v in tick.items() if k != "step"}}
         # Qwen rewrite: only on CUDA (7B model too heavy for MPS/CPU)
         if IS_CUDA:
-            yield {"step": "translating", "label": "Đang viết lại lời thoại (Qwen AI)...", "progress": 42}
+            yield {"step": "translating", "label": "Đang tinh chỉnh lời thoại...", "progress": 42}
             try:
                 project = _load_meta(project_id)
                 translated = [seg.get("translated_text", "") for seg in project["segments"]]
@@ -1657,24 +1921,91 @@ def auto_dub(project_id: str, engine: str = "google"):
                 logger.warning("Qwen rewrite failed, using Google Translate only: %s", e)
             finally:
                 # Free ~5-6GB VRAM — Qwen not needed for TTS/export phases
-                yield {"step": "translating", "label": "Giải phóng VRAM (Qwen)...", "progress": 48}
+                yield {"step": "translating", "label": "Đang dọn bộ nhớ...",
+                       "progress": r_transl[1]}
                 gpu.unload_llm()
         else:
             logger.info("Skipping Qwen rewrite (no CUDA). Using Google Translate only.")
-        yield {"step": "translating", "label": "Dịch thuật hoàn tất!", "progress": 50}
+        yield {"step": "translating", "label": "Dịch thuật hoàn tất!", "progress": r_transl[1]}
 
-        # Step 3: Generate TTS for all segments
-        yield {"step": "generating_tts", "label": steps[2][1], "progress": 55}
-        tts_progress = list(generate_all(project_id))
-        total_segs = len(tts_progress) if tts_progress else 1
-        for i, p in enumerate(tts_progress):
-            pct = 55 + int((i + 1) / total_segs * 30)  # 55% → 85%
-            yield {"step": "generating_tts", "label": steps[2][1], "progress": pct,
-                   "detail": f"{i+1}/{total_segs}"}
+        # Step 2.5: Auto-chunk
+        yield {"step": "chunking", "label": "Chia nhỏ phụ đề theo từng câu...",
+               "progress": r_chunk[0]}
+        try:
+            auto_chunk_project_segments(project_id)
+        except Exception as e:
+            logger.warning("auto_chunk_project_segments failed: %s", e)
+        yield {"step": "chunking", "label": "Chia nhỏ phụ đề theo từng câu...",
+               "progress": r_chunk[1]}
 
-        # Step 4: Export video with ducking
-        yield {"step": "exporting", "label": steps[3][1], "progress": 88}
-        export_video(project_id, keep_original_audio=True, enable_ducking=True)
+        # Step 3: Generate TTS — stream + tick giữa các segment
+        if do_dubbing and r_tts:
+            import threading, time
+            project = _load_meta(project_id)
+            total_segs = max(1, len(project.get("segments", [])))
+            yield {"step": "generating_tts", "label": steps[2][1], "progress": r_tts[0],
+                   "detail": f"0/{total_segs}"}
+
+            counter = {"done": 0, "error": None, "finished": False}
+
+            def tts_runner():
+                try:
+                    for _ in generate_all(project_id):
+                        counter["done"] += 1
+                except Exception as e:
+                    counter["error"] = e
+                finally:
+                    counter["finished"] = True
+
+            thread = threading.Thread(target=tts_runner, daemon=True)
+            thread.start()
+            t_last = time.time()
+            last_done = 0
+            seg_est = 8.0  # dự đoán 8s/segment, cập nhật theo thực tế
+            while not counter["finished"]:
+                if is_canceled(project_id):
+                    raise _Canceled()
+                now = time.time()
+                done = counter["done"]
+                # Cập nhật seg_est theo segment vừa xong
+                if done > last_done:
+                    seg_est = max(2.0, (now - t_last) / (done - last_done))
+                    t_last = now
+                    last_done = done
+                # Nội suy trong phạm vi segment kế tiếp
+                frac_seg = min(1.0, (now - t_last) / max(1.0, seg_est))
+                virtual = done + frac_seg * 0.95
+                pct = r_tts[0] + min(1.0, virtual / total_segs) * (r_tts[1] - r_tts[0])
+                yield {"step": "generating_tts", "label": steps[2][1],
+                       "progress": round(pct, 1),
+                       "detail": f"{done}/{total_segs}"}
+                time.sleep(0.25)
+            thread.join()
+            if counter["error"]:
+                yield {"step": "error", "label": str(counter["error"]), "progress": -1}
+                return
+            yield {"step": "generating_tts", "label": steps[2][1],
+                   "progress": r_tts[1], "detail": f"{total_segs}/{total_segs}"}
+        else:
+            # Không có bước TTS → không emit gì (range đã = 0)
+            logger.info("Skip TTS step (enable_dubbing=false)")
+
+        _check_cancel()
+        # Step 4: Export
+        for tick in _run_step_with_progress(
+            export_video, [project_id], {
+                "keep_original_audio": not do_dubbing,
+                "enable_ducking": do_dubbing,
+            },
+            start_pct=r_export[0], end_pct=r_export[1],
+            label=steps[3][1], estimated_sec=15,
+        ):
+            _check_cancel()
+            if tick.get("step") == "error":
+                yield tick
+                return
+            if "_result" not in tick:
+                yield {"step": "exporting", **{k: v for k, v in tick.items() if k != "step"}}
 
         # Step 5: Free TTS VRAM (ready for next project or voice test)
         gpu._log_vram("end of pipeline (before TTS unload)")
@@ -1683,6 +2014,11 @@ def auto_dub(project_id: str, engine: str = "google"):
 
         yield {"step": "done", "label": "Hoàn tất!", "progress": 100}
 
+    except _Canceled:
+        logger.info("Auto-dub canceled by user: %s", project_id)
+        yield {"step": "canceled", "label": "Đã huỷ", "progress": -1}
     except Exception as e:
         logger.error("Auto-dub failed at pipeline: %s", e)
         yield {"step": "error", "label": f"Lỗi: {e}", "progress": -1}
+    finally:
+        _reset_cancel(project_id)

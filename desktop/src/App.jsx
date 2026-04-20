@@ -5,12 +5,14 @@ import VoiceClonePage from "./pages/VoiceClonePage";
 import VoiceLibraryPage from "./pages/VoiceLibraryPage";
 import HistoryPage from "./pages/HistoryPage";
 import SettingsPage from "./pages/SettingsPage";
-import DubbingPage from "./pages/DubbingPage";
+import StudioPage from "./pages/StudioPage";
 
 import LoginPage from "./auth/LoginPage";
 import SignupPage from "./auth/SignupPage";
 import { AuthProvider, useAuth } from "./auth/AuthContext";
 import { I18nProvider } from "./i18n/I18nContext";
+import { ThemeProvider } from "./theme/ThemeContext";
+import { BatchProvider } from "./batch/BatchContext";
 
 function ProtectedRoute({ children }) {
   const { isAuthenticated } = useAuth();
@@ -28,7 +30,9 @@ function AppShell() {
       <main className="flex-1 overflow-y-auto">
         <Routes>
           <Route path="/" element={<TTSPage />} />
-          <Route path="/dubbing" element={<DubbingPage />} />
+          <Route path="/studio/*" element={<StudioPage />} />
+          {/* Legacy redirect */}
+          <Route path="/dubbing" element={<Navigate to="/studio" replace />} />
           <Route path="/clone" element={<VoiceClonePage />} />
           <Route path="/library" element={<VoiceLibraryPage />} />
           <Route path="/history" element={<HistoryPage />} />
@@ -42,7 +46,9 @@ function AppShell() {
 export default function App() {
   return (
     <I18nProvider>
+      <ThemeProvider>
       <AuthProvider>
+      <BatchProvider>
         <BrowserRouter>
           <Routes>
             <Route path="/login" element={<LoginPage />} />
@@ -57,7 +63,9 @@ export default function App() {
             />
           </Routes>
         </BrowserRouter>
+      </BatchProvider>
       </AuthProvider>
+      </ThemeProvider>
     </I18nProvider>
   );
 }

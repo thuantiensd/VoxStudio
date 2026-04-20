@@ -18,6 +18,11 @@ class SubtitleStyle(BaseModel):
     shadow_offset: int = 1
     position: str = "bottom"  # top | center | bottom
     margin_v: int = 30
+    # Custom overrides (khi user drag/scale/rotate text trên preview)
+    custom_x: Optional[float] = None         # % horizontal, 0-100
+    custom_y: Optional[float] = None         # % vertical, 0-100
+    max_width_pct: Optional[float] = None    # % của width video (wrap vùng text)
+    rotation: float = 0.0                    # độ
 
 
 class DubbingSegment(BaseModel):

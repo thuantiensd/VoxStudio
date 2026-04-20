@@ -1,9 +1,11 @@
 import { useState, useEffect } from "react";
 import {
   User, CreditCard, BarChart3, Bell, Lock, Server, Info, Loader2,
+  Palette, Sun, Moon, Monitor,
 } from "lucide-react";
 import { useT } from "../i18n/I18nContext";
 import { useAuth } from "../auth/AuthContext";
+import { useTheme } from "../theme/ThemeContext";
 import { checkHealth } from "../services/api";
 
 /**
@@ -16,6 +18,7 @@ import { checkHealth } from "../services/api";
 
 const TABS = [
   { id: "account", icon: User, tKey: "settings.tabs.account" },
+  { id: "appearance", icon: Palette, tKey: "settings.tabs.appearance" },
   { id: "billing", icon: CreditCard, tKey: "settings.tabs.billing" },
   { id: "usage", icon: BarChart3, tKey: "settings.tabs.usage" },
   { id: "notifications", icon: Bell, tKey: "settings.tabs.notifications" },
@@ -72,6 +75,7 @@ export default function SettingsPage() {
       <main className="flex-1 overflow-y-auto">
         <div className="max-w-2xl mx-auto p-8">
           {active === "account" && <AccountTab />}
+          {active === "appearance" && <AppearanceTab />}
           {active === "billing" && <BillingTab />}
           {active === "usage" && <UsageTab />}
           {active === "notifications" && <NotificationsTab />}
@@ -223,6 +227,44 @@ function AccountTab() {
         </Card>
       </Section>
     </>
+  );
+}
+
+// ── Appearance ────────────────────────────
+function AppearanceTab() {
+  const t = useT();
+  const { theme, setTheme } = useTheme();
+  const options = [
+    { id: "light", icon: Sun, label: t("settings.appearance.light") },
+    { id: "dark", icon: Moon, label: t("settings.appearance.dark") },
+    { id: "system", icon: Monitor, label: t("settings.appearance.system") },
+  ];
+  return (
+    <Section title={t("settings.appearance.theme")}
+             description={t("settings.appearance.themeDesc")}>
+      <Card>
+        <div className="grid grid-cols-3 gap-3">
+          {options.map(({ id, icon: Icon, label }) => {
+            const active = theme === id;
+            return (
+              <button
+                key={id}
+                onClick={() => setTheme(id)}
+                className="flex flex-col items-center gap-2 rounded-lg py-4 transition-colors"
+                style={{
+                  background: active ? "rgba(108,92,231,0.12)" : "transparent",
+                  border: `1px solid ${active ? "var(--accent)" : "rgba(127,127,160,0.2)"}`,
+                  color: "var(--text-primary)",
+                }}
+              >
+                <Icon size={20} style={{ color: active ? "var(--accent)" : "var(--text-secondary)" }} />
+                <span className="text-sm">{label}</span>
+              </button>
+            );
+          })}
+        </div>
+      </Card>
+    </Section>
   );
 }
 

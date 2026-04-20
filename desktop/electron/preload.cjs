@@ -13,6 +13,19 @@ contextBridge.exposeInMainWorld("voxstudio", {
   // External links (bypass window blocker)
   openExternal: (url) => ipcRenderer.invoke("shell:openExternal", url),
 
+  // Folder picker + save remote file to folder (cho batch export)
+  pickFolder: () => ipcRenderer.invoke("dialog:pickFolder"),
+  saveRemoteFileToFolder: (opts) =>
+    ipcRenderer.invoke("fs:saveRemoteFile", opts),
+  listVideosInFolder: (folder) =>
+    ipcRenderer.invoke("fs:listVideosInFolder", folder),
+  readFileAsBuffer: (filepath) =>
+    ipcRenderer.invoke("fs:readFileAsBuffer", filepath),
+  openFileInApp: (filepath) =>
+    ipcRenderer.invoke("shell:openFileInApp", filepath),
+  revealFileInFolder: (filepath) =>
+    ipcRenderer.invoke("shell:revealInFolder", filepath),
+
   // Marker so React can detect Electron runtime
   isElectron: true,
 });

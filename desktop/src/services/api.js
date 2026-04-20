@@ -161,6 +161,10 @@ export function dubbingVideoURL(projectId) {
   return `${API_BASE}/dubbing/projects/${projectId}/video`;
 }
 
+export function thumbnailURL(projectId) {
+  return `${API_BASE}/dubbing/projects/${projectId}/thumbnail`;
+}
+
 export async function transcribeProject(id) {
   const res = await request(`/dubbing/projects/${id}/transcribe`, { method: 'POST' });
   return res.json();
@@ -304,13 +308,13 @@ export async function generateEdgeTTS({ text, voice, language, speed }) {
 }
 
 // ── Auto-Dub Pipeline ───────────────────────────────
-export function autoDub(projectId, { engine = 'google', onProgress, onDone, onError } = {}) {
+export function autoDub(projectId, { engine = 'google', onProgress, onDone, onError, signal } = {}) {
   const params = new URLSearchParams();
   if (engine !== 'google') params.set('engine', engine);
   const qs = params.toString();
   const url = `${API_BASE}/dubbing/projects/${projectId}/auto-dub${qs ? '?' + qs : ''}`;
 
-  return fetch(url, { method: 'POST' }).then(res => {
+  return fetch(url, { method: 'POST', signal }).then(res => {
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
@@ -339,6 +343,12 @@ export function autoDub(projectId, { engine = 'google', onProgress, onDone, onEr
     }
     return pump();
   });
+}
+
+export async function cancelAutoDub(projectId) {
+  try {
+    await fetch(`${API_BASE}/dubbing/projects/${projectId}/cancel`, { method: 'POST' });
+  } catch {}
 }
 
 // ── Health ──────────────────────────────────────────

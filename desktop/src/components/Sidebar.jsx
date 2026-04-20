@@ -45,7 +45,7 @@ export default function Sidebar() {
 
   const nav = [
     { to: "/", icon: AudioLines, label: t("nav.tts") },
-    { to: "/dubbing", icon: Film, label: t("nav.dubbing") },
+    { to: "/studio", icon: Film, label: t("nav.dubbing") },
     { to: "/clone", icon: Mic, label: t("nav.clone") },
     { to: "/library", icon: Library, label: t("nav.library") },
     { to: "/history", icon: Clock, label: t("nav.history") },
@@ -69,42 +69,63 @@ export default function Sidebar() {
           WebkitAppRegion: "drag",
         }}
       >
-        {/* Header: brand + pin — top padding clears macOS traffic lights */}
+        {/* Header — khi expanded: brand + tên + pin ngang hàng.
+            Khi collapsed (64px): BrandMark căn giữa, pin nằm dưới căn giữa
+            để không tràn ngoài rail 64px. */}
         <div
-          className="flex items-center px-3"
+          className="flex px-3"
           style={{
             minHeight: 68,
             paddingTop: HEADER_TOP,
             paddingBottom: 14,
             gap: 10,
+            alignItems: expanded ? "center" : "stretch",
+            flexDirection: expanded ? "row" : "column",
             WebkitAppRegion: "drag",
           }}
         >
-          <BrandMark size={32} />
-          {expanded && (
-            <div className="flex-1 overflow-hidden whitespace-nowrap">
-              <h1
-                className="text-[15px] font-semibold leading-none tracking-tight"
-                style={{ color: "var(--text-primary)" }}
+          {expanded ? (
+            <>
+              <BrandMark size={32} />
+              <div className="flex-1 overflow-hidden whitespace-nowrap">
+                <h1
+                  className="text-[15px] font-semibold leading-none tracking-tight"
+                  style={{ color: "var(--text-primary)" }}
+                >
+                  {t("brand.name")}
+                </h1>
+                <p
+                  className="text-[11px] leading-tight mt-1"
+                  style={{ color: "var(--text-secondary)" }}
+                >
+                  {t("brand.tagline")}
+                </p>
+              </div>
+              <button
+                onClick={() => setPinned(false)}
+                className="p-1.5 rounded-md flex-shrink-0 transition-colors hover:bg-white/10"
+                style={{ color: "var(--text-secondary)", WebkitAppRegion: "no-drag" }}
+                title={t("sidebar.collapse")}
               >
-                {t("brand.name")}
-              </h1>
-              <p
-                className="text-[11px] leading-tight mt-1"
+                <PanelLeftClose size={18} />
+              </button>
+            </>
+          ) : (
+            <div
+              className="flex flex-col items-center w-full"
+              style={{ gap: 8, WebkitAppRegion: "no-drag" }}
+            >
+              <BrandMark size={32} />
+              <button
+                onClick={() => setPinned(true)}
+                className="p-1 rounded-md transition-colors hover:bg-white/10"
                 style={{ color: "var(--text-secondary)" }}
+                title={t("sidebar.expand")}
               >
-                {t("brand.tagline")}
-              </p>
+                <PanelLeftOpen size={16} />
+              </button>
             </div>
           )}
-          <button
-            onClick={() => setPinned((p) => !p)}
-            className="p-1.5 rounded-md flex-shrink-0 transition-colors hover:bg-white/10"
-            style={{ color: "var(--text-secondary)", WebkitAppRegion: "no-drag" }}
-            title={pinned ? t("sidebar.collapse") : t("sidebar.expand")}
-          >
-            {pinned ? <PanelLeftClose size={18} /> : <PanelLeftOpen size={18} />}
-          </button>
         </div>
 
         {/* Main nav */}
