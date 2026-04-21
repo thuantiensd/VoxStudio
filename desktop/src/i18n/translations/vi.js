@@ -331,7 +331,7 @@ export default {
     engineAuto: "Tự động",
     engineAutoHint: "Thử chế độ Nhanh trước, nếu fail chuyển Toàn năng",
     engineScraper: "Nhanh",
-    engineScraperHint: "Tối ưu cho TikTok, Douyin, Bilibili · không cần đăng nhập",
+    engineScraperHint: "Tối ưu cho Douyin, Bilibili · không cần đăng nhập · (TikTok dùng Toàn năng)",
     engineYtdlp: "Toàn năng",
     engineYtdlpHint: "Hỗ trợ hầu hết mọi trang · có thể cần đăng nhập qua Chrome",
     actions: "Hành động",

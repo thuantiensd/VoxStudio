@@ -107,7 +107,23 @@ async def fetch_info(url: str, engine: str = "auto") -> InfoResult:
     if engine == "scraper":
         if not _DT_OK:
             raise RuntimeError("Chế độ Nhanh chưa sẵn sàng trên server.")
-        info = await _fetch_via_scraper(url, platform)
+        if platform == "tiktok":
+            raise RuntimeError(
+                "Chế độ Nhanh tạm thời không hỗ trợ TikTok ổn định. "
+                "Hãy chuyển sang chế độ Toàn năng."
+            )
+        if platform not in ("douyin", "bilibili"):
+            raise RuntimeError(
+                "Chế độ Nhanh chỉ hỗ trợ Douyin, Bilibili. "
+                "Với link khác hãy dùng chế độ Toàn năng."
+            )
+        try:
+            info = await _fetch_via_scraper(url, platform)
+        except Exception as e:
+            raise RuntimeError(
+                f"Chế độ Nhanh thất bại. Chuyển Toàn năng rồi thử lại. "
+                f"(Chi tiết: {str(e)[:120]})"
+            )
         if not info or not info.video_url:
             raise RuntimeError(
                 "Chế độ Nhanh không lấy được video. Chuyển sang chế độ "
@@ -122,9 +138,11 @@ async def fetch_info(url: str, engine: str = "auto") -> InfoResult:
         return await loop.run_in_executor(None, _fetch_via_ytdlp, url, platform)
 
     # engine == "auto" — smart fallback
-    # 1. Douyin scraper cho TikTok/Douyin/Bilibili nếu khả dụng
+    # 1. Scraper chỉ thử với Douyin/Bilibili vì TikTok signing hiện không ổn
+    #    (PyPI douyin-tiktok-scraper 1.2.9 outdated → ContentTypeError retry).
+    #    TikTok trong auto mode sẽ skip thẳng sang yt-dlp.
     scraper_err = None
-    if _DT_OK and platform in ("tiktok", "douyin", "bilibili"):
+    if _DT_OK and platform in ("douyin", "bilibili"):
         try:
             info = await _fetch_via_scraper(url, platform)
             if info and info.video_url:

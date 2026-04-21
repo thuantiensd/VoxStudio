@@ -331,7 +331,7 @@ export default {
     engineAuto: "Smart",
     engineAutoHint: "Try Fast first, fall back to Universal if needed",
     engineScraper: "Fast",
-    engineScraperHint: "Optimized for TikTok, Douyin, Bilibili · no login required",
+    engineScraperHint: "Optimized for Douyin, Bilibili · no login · (use Universal for TikTok)",
     engineYtdlp: "Universal",
     engineYtdlpHint: "Works on most sites · may need browser login",
     actions: "Actions",
