@@ -2,9 +2,6 @@ import { app, BrowserWindow, Menu, shell, ipcMain, dialog, Notification } from "
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import windowStateKeeper from "electron-window-state";
-import { createRequire } from "node:module";
-const require = createRequire(import.meta.url);
-const ingestOrchestrator = require("./ingest/orchestrator.cjs");
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -73,11 +70,6 @@ function createWindow() {
 // ── App lifecycle ──────────────────────────────────────
 app.whenReady().then(() => {
   createWindow();
-  // Ingest orchestrator — chế độ "Trình duyệt" mở hidden BrowserWindow để lấy media URL
-  ingestOrchestrator.register(
-    () => mainWindow,
-    () => process.env.VITE_API_URL || "http://localhost:8000",
-  );
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();

@@ -87,12 +87,6 @@ export default function DownloaderPage() {
 
   const doFetchInfo = async () => {
     if (!validUrl || fetching || downloading) return;
-    // "Trình duyệt" không có endpoint info tách riêng — nó lấy info + download
-    // trong 1 flow hidden BrowserWindow. UI cho user bấm "Tải & Lồng tiếng" luôn.
-    if (engine === "browser") {
-      toast.info("Chế độ Trình duyệt tải trực tiếp — bấm 'Tải & Lồng tiếng'.");
-      return;
-    }
     setFetching(true);
     try {
       const data = await downloadFetchInfo(url.trim(), { engine });
@@ -162,11 +156,6 @@ export default function DownloaderPage() {
     setProgressLabel(t("downloader.analyzing"));
     setProgressDetail("");
 
-    // Engine "browser" → IPC Electron hidden BrowserWindow
-    if (engine === "browser") {
-      return doDownloadBrowser();
-    }
-
     const controller = new AbortController();
     abortRef.current = controller;
 
@@ -219,78 +208,6 @@ export default function DownloaderPage() {
     });
   };
 
-  const doDownloadBrowser = async () => {
-    if (!window.voxstudio?.ingest) {
-      toast.error("Chế độ Trình duyệt chỉ chạy trong desktop app.");
-      reset();
-      return;
-    }
-    let jobId = null;
-    const offProg = window.voxstudio.ingest.onProgress((d) => {
-      if (d.jobId !== jobId) return;
-      if (d.label) setProgressLabel(d.label);
-      if (d.detail) setProgressDetail(d.detail);
-      if (typeof d.progress === "number") setProgress(d.progress);
-      if (d.step === "meta" && d.meta) {
-        setInfo({
-          title: d.meta.title,
-          author: d.meta.author,
-          thumbnail: d.meta.thumbnail,
-          platform: d.meta.platform,
-          duration: d.meta.duration,
-          source: "browser",
-          video_url: null,
-        });
-      }
-    });
-    const offDone = window.voxstudio.ingest.onDone((d) => {
-      if (d.jobId !== jobId) return;
-      offProg(); offDone(); offErr();
-      pushHistory({
-        url: url.trim(),
-        project_id: d.project_id,
-        title: d.title,
-        thumbnail: d.thumbnail,
-        platform: d.platform,
-        duration: d.duration,
-        at: Date.now(),
-        kind: "project",
-      });
-      toast.success(`Đã tải: ${d.title}`);
-      nav(`/studio/${d.project_id}`);
-      reset();
-    });
-    const offErr = window.voxstudio.ingest.onError((d) => {
-      if (d.jobId !== jobId) return;
-      offProg(); offDone(); offErr();
-      if (d.message === "Đã huỷ") {
-        reset();
-      } else {
-        toast.error(d.message || "Không tải được video qua Trình duyệt.");
-        reset();
-      }
-    });
-    abortRef.current = {
-      abort: () => {
-        if (jobId) window.voxstudio.ingest.cancel(jobId);
-        offProg(); offDone(); offErr();
-      },
-    };
-    try {
-      const res = await window.voxstudio.ingest.start({
-        url: url.trim(),
-        targetLanguage: "vietnamese",
-        sourceLanguage: "auto",
-        enableDubbing: true,
-        enableSubtitle: false,
-      });
-      jobId = res.jobId;
-    } catch (e) {
-      offProg(); offDone(); offErr();
-      showError(toast, e, { context: "ingest start" }, t);
-      reset();
-    }
-  };
 
   const handleToFolder = () => withDisclaimer(doDownloadToFolder);
 
@@ -381,16 +298,6 @@ export default function DownloaderPage() {
             </motion.div>
           )}
         </AnimatePresence>
-
-        {/* Browser engine CTA — khi chọn engine 'browser' và có URL valid
-            nhưng chưa preview vì flow là capture-on-download */}
-        {engine === "browser" && validUrl && !info && !downloading && (
-          <BrowserEngineCTA
-            url={url}
-            onStart={handleToDub}
-            t={t}
-          />
-        )}
 
         {/* Progress */}
         <AnimatePresence>
@@ -494,7 +401,6 @@ function HeroInput({ url, onUrl, onPaste, onAnalyze, fetching, disabled,
     { value: "auto",    label: t("downloader.engineAuto"),    hint: t("downloader.engineAutoHint") },
     { value: "scraper", label: t("downloader.engineScraper"), hint: t("downloader.engineScraperHint") },
     { value: "ytdlp",   label: t("downloader.engineYtdlp"),   hint: t("downloader.engineYtdlpHint") },
-    { value: "browser", label: t("downloader.engineBrowser"), hint: t("downloader.engineBrowserHint") },
   ];
   const currentHint = engineOptions.find((o) => o.value === engine)?.hint;
   return (
@@ -927,47 +833,6 @@ function HistorySection({ items, onClear, onReplay, onOpenProject, onOpenFolder,
 }
 
 // ── utils ────────────────────────────────────────────────────
-function BrowserEngineCTA({ url, onStart, t }) {
-  return (
-    <div
-      style={{
-        marginTop: 16,
-        padding: 20,
-        borderRadius: 12,
-        background: "var(--n-1)",
-        border: "1px dashed var(--accent)",
-        display: "flex", alignItems: "center", gap: 16,
-      }}
-    >
-      <div
-        style={{
-          width: 44, height: 44, borderRadius: 10,
-          background: "var(--accent-soft)",
-          display: "flex", alignItems: "center", justifyContent: "center",
-          flexShrink: 0,
-        }}
-      >
-        <Globe size={18} style={{ color: "var(--accent)" }} />
-      </div>
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{
-          fontSize: 13, fontWeight: 500, color: "var(--n-10)",
-        }}>
-          {t("downloader.engineBrowser")} — sẵn sàng
-        </div>
-        <div style={{
-          fontSize: 11, color: "var(--n-8)", marginTop: 2,
-          overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-        }}>
-          Mở trình duyệt ẩn → lấy stream trực tiếp từ: {url}
-        </div>
-      </div>
-      <Button variant="primary" size="md" icon={Wand2} onClick={onStart}>
-        {t("downloader.toDub")}
-      </Button>
-    </div>
-  );
-}
 
 function formatDur(s) {
   if (!s || !isFinite(s)) return null;

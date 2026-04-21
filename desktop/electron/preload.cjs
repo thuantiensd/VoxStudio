@@ -36,28 +36,6 @@ contextBridge.exposeInMainWorld("voxstudio", {
   // Platform đồng bộ (để React render titlebar theo OS ngay lần đầu)
   platform: process.platform,
 
-  // Ingest — chế độ "Trình duyệt": Electron main mở hidden BrowserWindow
-  // intercept media URL (TikTok/FB/IG bypass anti-bot).
-  ingest: {
-    start: (opts) => ipcRenderer.invoke("ingest:start", opts),
-    cancel: (jobId) => ipcRenderer.invoke("ingest:cancel", jobId),
-    onProgress: (cb) => {
-      const h = (_e, data) => cb(data);
-      ipcRenderer.on("ingest:progress", h);
-      return () => ipcRenderer.off("ingest:progress", h);
-    },
-    onDone: (cb) => {
-      const h = (_e, data) => cb(data);
-      ipcRenderer.on("ingest:done", h);
-      return () => ipcRenderer.off("ingest:done", h);
-    },
-    onError: (cb) => {
-      const h = (_e, data) => cb(data);
-      ipcRenderer.on("ingest:error", h);
-      return () => ipcRenderer.off("ingest:error", h);
-    },
-  },
-
   // Marker so React can detect Electron runtime
   isElectron: true,
 });
