@@ -54,6 +54,9 @@ async function captureMediaURL(inputURL, opts = {}) {
   const win = new BrowserWindow({
     show: false,
     width: 1280, height: 720,
+    // Tuyệt đối không cho phép window hiện ra / phát tiếng
+    focusable: false,
+    skipTaskbar: true,
     webPreferences: {
       session: ingestSession,
       contextIsolation: true,
@@ -62,8 +65,14 @@ async function captureMediaURL(inputURL, opts = {}) {
       webSecurity: true,
       javascript: true,
       sandbox: false,
+      backgroundThrottling: false,
+      autoplayPolicy: "no-user-gesture-required",
     },
   });
+  // Tắt audio ngay lập tức — ngăn rò rỉ tiếng từ video player.
+  win.webContents.setAudioMuted(true);
+  // Chặn mọi pop-up / new window từ trang TikTok
+  win.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
   // Chặn detection qua navigator.webdriver
   win.webContents.session.setUserAgent(
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
@@ -76,10 +85,17 @@ async function captureMediaURL(inputURL, opts = {}) {
 
   const cleanup = () => {
     clearTimeout(timer);
-    // Electron API: onCompleted(null) để unregister global handler — nhưng
-    // listener này gắn vào session cụ thể, session sẽ GC cùng BrowserWindow.
+    try { win.webContents.setAudioMuted(true); } catch {}
+    try { win.webContents.stop(); } catch {}
     try { if (!win.isDestroyed()) win.destroy(); } catch {}
   };
+
+  // Hard timeout — force-kill sau 30s tuyệt đối, bất kể state
+  const HARD_TIMEOUT_MS = 30000;
+  timer = setTimeout(() => {
+    aborted = true;
+    cleanup();
+  }, HARD_TIMEOUT_MS);
 
   try {
     await win.loadURL(inputURL, { userAgent:
