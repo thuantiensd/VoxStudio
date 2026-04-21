@@ -28,6 +28,8 @@ export default {
     titleClone: "Voice Clone",
     titleSettings: "Cài đặt",
     titleDownloader: "Tải video",
+    moreTip: "Thông tin & ngôn ngữ",
+    learnMore: "Tìm hiểu thêm",
     drop: "Thả video vào đây",
     dropHint: "MP4 · MOV · MKV · AVI · WEBM",
   },

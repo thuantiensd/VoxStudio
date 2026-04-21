@@ -28,6 +28,8 @@ export default {
     titleClone: "Voice Clone",
     titleSettings: "Settings",
     titleDownloader: "Download",
+    moreTip: "Info & language",
+    learnMore: "Learn more",
     drop: "Drop video here",
     dropHint: "MP4 · MOV · MKV · AVI · WEBM",
   },
