@@ -8,6 +8,8 @@ import { createDubbingProject, thumbnailURL } from "../../services/api";
 import { useT } from "../../i18n/I18nContext";
 import { useBatch } from "../../batch/BatchContext";
 import { useToast } from "../ui/Toast";
+import PageHeader, { Page } from "../ui/PageHeader";
+import Segmented from "../ui/Segmented";
 
 const MAX_BATCH = 10;
 
@@ -164,51 +166,29 @@ export default function StudioHome() {
   };
 
   return (
-    <div className="h-full overflow-y-auto">
-      <div className="mx-auto px-8 py-8" style={{ maxWidth: 1000 }}>
-        {/* Brand */}
-        <div className="flex items-center gap-3 mb-6">
-          <div
-            className="rounded-md flex items-center justify-center"
-            style={{ width: 36, height: 36, background: "var(--accent)" }}
-          >
-            <Mic size={18} color="#fff" strokeWidth={2.2} />
-          </div>
-          <div>
-            <h1 className="text-lg font-semibold leading-tight"
-                style={{ color: "var(--text-primary)" }}>
-              {t("brand.name")} · {t("studio.brand")}
-            </h1>
-            <p className="text-xs" style={{ color: "var(--text-secondary)" }}>
-              {t("brand.tagline")}
-            </p>
-          </div>
-        </div>
+    <Page>
+      <PageHeader
+        title={t("studio.brand")}
+        subtitle={t("brand.tagline")}
+      >
+        <Segmented
+          value={tab}
+          onChange={setTab}
+          options={[
+            { value: "library", label: t("shell.titleLibrary"), icon: LibraryIcon },
+            { value: "upload",  label: "Upload",                 icon: Upload },
+          ]}
+        />
+      </PageHeader>
 
-        {/* Tabs — Thư viện / Upload */}
-        <div className="flex rounded-t-lg overflow-hidden"
-             style={{ background: "var(--bg-surface)" }}>
-          <TabButton
-            active={tab === "library"}
-            onClick={() => setTab("library")}
-            icon={<LibraryIcon size={14} />}
-            label="Thư viện"
-          />
-          <TabButton
-            active={tab === "upload"}
-            onClick={() => setTab("upload")}
-            icon={<Upload size={14} />}
-            label="Upload"
-          />
-        </div>
-
+      <div className="flex-1 overflow-y-auto">
+      <div className="mx-auto px-8 py-6" style={{ maxWidth: 1000 }}>
         {/* Tab content */}
         <div
-          className="rounded-b-lg p-4 mb-4"
+          className="rounded-lg p-4 mb-4"
           style={{
-            background: "var(--bg-surface)",
-            border: "1px solid rgba(127,127,160,0.15)",
-            borderTop: "none",
+            background: "var(--n-1)",
+            border: "1px solid var(--n-3)",
             minHeight: 320,
           }}
         >
@@ -284,7 +264,8 @@ export default function StudioHome() {
         {/* Tiến trình / Lịch sử — nằm dưới cùng */}
         {queue.length > 0 && <QueuePanel queue={queue} />}
       </div>
-    </div>
+      </div>
+    </Page>
   );
 }
 

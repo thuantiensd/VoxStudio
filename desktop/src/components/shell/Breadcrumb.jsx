@@ -1,18 +1,20 @@
 import { useLocation, useNavigate } from "react-router-dom";
 import { ChevronRight } from "lucide-react";
-
-const ROUTE_LABELS = {
-  "/": "Trang chủ",
-  "/studio": "Studio",
-  "/clone": "Voice Clone",
-  "/library": "Thư viện giọng",
-  "/history": "Lịch sử",
-  "/settings": "Cài đặt",
-};
+import { useT } from "../../i18n/I18nContext";
 
 export default function Breadcrumb() {
+  const t = useT();
   const loc = useLocation();
   const navigate = useNavigate();
+
+  const ROUTE_LABELS = {
+    "/":         t("shell.titleHome"),
+    "/studio":   t("shell.titleStudio"),
+    "/clone":    t("shell.titleClone"),
+    "/library":  t("shell.titleLibrary"),
+    "/history":  t("shell.titleHistory"),
+    "/settings": t("shell.titleSettings"),
+  };
 
   // Tạo crumb từ path. /studio/abc-123 → ["Studio", "abc-123" (8 ký tự)]
   const parts = loc.pathname.split("/").filter(Boolean);

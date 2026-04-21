@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Search, Minus, Square, X } from "lucide-react";
 import Breadcrumb from "./Breadcrumb";
+import { useT } from "../../i18n/I18nContext";
 
 /**
  * Titlebar — 36px drag region.
@@ -10,6 +11,7 @@ import Breadcrumb from "./Breadcrumb";
  * Props: onOpenPalette — trigger ⌘K pill.
  */
 export default function Titlebar({ onOpenPalette }) {
+  const t = useT();
   const [platform, setPlatform] = useState("darwin");
   const [isMax, setIsMax] = useState(false);
 
@@ -63,7 +65,7 @@ export default function Titlebar({ onOpenPalette }) {
           title="Tìm kiếm & lệnh nhanh"
         >
           <Search size={12} />
-          <span className="flex-1 text-left">Tìm kiếm…</span>
+          <span className="flex-1 text-left">{t("shell.search")}</span>
           <kbd style={{ fontSize: 10 }}>{modKey}K</kbd>
         </button>
 

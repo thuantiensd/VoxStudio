@@ -5,27 +5,29 @@ import {
   ClockFading, Settings as Cog, Sparkles,
 } from "lucide-react";
 import { useBatch } from "../../batch/BatchContext";
-
-const MAIN = [
-  { path: "/studio",   icon: Clapperboard,    label: "Studio",       hotkey: "1" },
-  { path: "/library",  icon: Library,    label: "Thư viện",     hotkey: "2" },
-  { path: "/history",  icon: ClockFading,     label: "Lịch sử",      hotkey: "3" },
-];
-
-const TOOLS = [
-  { path: "/",         icon: AudioWaveform,   label: "TTS",          hotkey: "4" },
-  { path: "/clone",    icon: Mic2,            label: "Voice Clone",  hotkey: "5" },
-];
+import { useT } from "../../i18n/I18nContext";
 
 /**
  * Sidebar — 220px fixed. Section headers uppercase nhỏ. Item 32px.
  * Active indicator = left accent bar 2px + bg accent-soft, animate bằng layoutId.
  */
 export default function Sidebar() {
+  const t = useT();
   const nav = useNavigate();
   const loc = useLocation();
   const { queue = [] } = useBatch() || {};
   const running = queue.filter((q) => q.status === "running").length;
+
+  const MAIN = [
+    { path: "/studio",   icon: Clapperboard, label: t("shell.titleStudio"),  hotkey: "1" },
+    { path: "/library",  icon: Library,      label: t("shell.titleLibrary"), hotkey: "2" },
+    { path: "/history",  icon: ClockFading,  label: t("shell.titleHistory"), hotkey: "3" },
+  ];
+
+  const TOOLS = [
+    { path: "/",         icon: AudioWaveform, label: "TTS",                    hotkey: "4" },
+    { path: "/clone",    icon: Mic2,          label: t("shell.titleClone"),    hotkey: "5" },
+  ];
 
   return (
     <aside
@@ -62,7 +64,7 @@ export default function Sidebar() {
 
       {/* Nav sections */}
       <nav className="flex-1 overflow-y-auto px-2 pt-3 pb-2">
-        <Section title="Chính" />
+        <Section title={t("sidebar.main")} />
         {MAIN.map((item) => (
           <NavItem
             key={item.path}
@@ -74,7 +76,7 @@ export default function Sidebar() {
         ))}
 
         <div className="h-4" />
-        <Section title="Công cụ" />
+        <Section title={t("sidebar.tools")} />
         {TOOLS.map((item) => (
           <NavItem
             key={item.path}
@@ -89,11 +91,11 @@ export default function Sidebar() {
       <div className="px-2 py-2"
            style={{ borderTop: "1px solid var(--n-3)" }}>
         <NavItem
-          item={{ path: "/settings", icon: Cog, label: "Cài đặt", hotkey: "," }}
+          item={{ path: "/settings", icon: Cog, label: t("shell.titleSettings"), hotkey: "," }}
           active={isActive(loc.pathname, "/settings")}
           onClick={() => nav("/settings")}
         />
-        <BackendStatus />
+        <BackendStatus label={t("sidebar.backendOnline")} />
       </div>
     </aside>
   );
@@ -163,8 +165,7 @@ function NavItem({ item, active, onClick, badge }) {
   );
 }
 
-function BackendStatus() {
-  // Placeholder — sau connect checkHealth. Hiện tại mặc định "ok" để không giả trạng thái sai.
+function BackendStatus({ label }) {
   return (
     <div className="mt-2 mx-1 flex items-center gap-2 text-[11px]"
          style={{ color: "var(--n-8)" }}>
@@ -172,7 +173,7 @@ function BackendStatus() {
         className="inline-block rounded-full"
         style={{ width: 6, height: 6, background: "var(--ok)" }}
       />
-      <span>Backend online</span>
+      <span>{label}</span>
     </div>
   );
 }

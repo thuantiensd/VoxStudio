@@ -3,6 +3,7 @@ import { Upload, Loader2, Check, Play, Save, X, ChevronDown, ChevronUp } from 'l
 import { cloneVoice, transcribe, previewVoice, audioURL } from '../services/api';
 import SpeedKnob from '../components/SpeedKnob';
 import AudioPlayer from '../components/AudioPlayer';
+import PageHeader, { Page, PageContent } from '../components/ui/PageHeader';
 
 const inputStyle = { background: 'var(--bg-card)', border: '1px solid #2a2a40', color: 'var(--text-primary)' };
 const selectStyle = { background: 'var(--bg-card)', border: '1px solid #2a2a40', color: 'var(--text-primary)' };
@@ -170,9 +171,12 @@ export default function VoiceClonePage() {
   const hasPreview = !!previewAudioUrl;
 
   return (
-    <div className="p-6 mx-auto" style={{ maxWidth: '720px', width: '100%' }}>
-      <h2 className="text-2xl font-bold mb-6">Voice Clone</h2>
-
+    <Page>
+      <PageHeader
+        title="Voice Clone"
+        subtitle="Tải 5–30s giọng mẫu để clone · Kết quả dùng trong Studio/TTS"
+      />
+      <PageContent maxWidth={760}>
       {/* ── Step 1: Upload Reference Audio ── */}
       <div className="rounded-xl p-5 mb-4" style={{ background: 'var(--bg-card)', border: '1px solid #2a2a40' }}>
         <div className="flex items-center gap-2 mb-3">
@@ -411,6 +415,7 @@ export default function VoiceClonePage() {
           {error}
         </div>
       )}
-    </div>
+      </PageContent>
+    </Page>
   );
 }

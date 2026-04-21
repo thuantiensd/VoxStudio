@@ -3,6 +3,8 @@ import { Loader2, User, ChevronDown, ChevronUp, FolderUp, X, Check, Download, Fi
 import { generateTTS, generateEdgeTTS, listVoices, listEdgeVoices, audioURL } from '../services/api';
 import AudioPlayer from '../components/AudioPlayer';
 import SpeedKnob from '../components/SpeedKnob';
+import PageHeader, { Page, PageContent } from '../components/ui/PageHeader';
+import Segmented from '../components/ui/Segmented';
 
 const LANGUAGES = [
   { value: '', label: 'Auto Detect' },
@@ -287,28 +289,24 @@ export default function TTSPage() {
   const s = useSharedSettings();
 
   return (
-    <div className="p-6 mx-auto" style={{ maxWidth: '720px', width: '100%' }}>
-      <h2 className="text-2xl font-bold mb-6">Text to Speech</h2>
-
-      {/* Mode tabs */}
-      <div className="flex gap-1 mb-6 p-1 rounded-lg" style={{ background: 'var(--bg-card)' }}>
-        {[
-          { key: 'single', label: 'Single Text' },
-          { key: 'batch', label: 'Batch Files' },
-        ].map(t => (
-          <button key={t.key} onClick={() => setMode(t.key)}
-            className="flex-1 py-2 rounded-md text-sm font-medium transition-colors"
-            style={{
-              background: mode === t.key ? 'var(--accent)' : 'transparent',
-              color: mode === t.key ? '#fff' : 'var(--text-secondary)',
-            }}>
-            {t.label}
-          </button>
-        ))}
-      </div>
-
-      {mode === 'single' ? <SingleMode s={s} /> : <BatchMode s={s} />}
-    </div>
+    <Page>
+      <PageHeader
+        title="Text to Speech"
+        subtitle="Tạo giọng nói từ văn bản · Chọn engine VoxCloud (Edge) hoặc VoxLocal (OmniVoice)"
+      >
+        <Segmented
+          value={mode}
+          onChange={setMode}
+          options={[
+            { value: 'single', label: 'Single Text' },
+            { value: 'batch',  label: 'Batch Files' },
+          ]}
+        />
+      </PageHeader>
+      <PageContent maxWidth={760}>
+        {mode === 'single' ? <SingleMode s={s} /> : <BatchMode s={s} />}
+      </PageContent>
+    </Page>
   );
 }
 

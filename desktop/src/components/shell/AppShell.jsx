@@ -6,10 +6,12 @@ import Sidebar from "./Sidebar";
 import Titlebar from "./Titlebar";
 import CommandPalette from "./CommandPalette";
 import { useHotkeys } from "./useHotkeys";
+import { useT } from "../../i18n/I18nContext";
 
 const VIDEO_EXT = /\.(mp4|mov|mkv|avi|webm)$/i;
 
 export default function AppShell({ children }) {
+  const t = useT();
   const nav = useNavigate();
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [dragOver, setDragOver] = useState(false);
@@ -104,10 +106,10 @@ export default function AppShell({ children }) {
             >
               <UploadIcon size={32} style={{ color: "var(--accent)", marginBottom: 10 }} />
               <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 4 }}>
-                Thả video vào đây
+                {t("shell.drop")}
               </div>
               <div style={{ fontSize: 12, color: "var(--n-8)" }}>
-                MP4 · MOV · MKV · AVI · WEBM
+                {t("shell.dropHint")}
               </div>
             </div>
           </motion.div>

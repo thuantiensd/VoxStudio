@@ -8,11 +8,13 @@ import {
 } from "lucide-react";
 import { useTheme } from "../../theme/ThemeContext";
 import { useBatch } from "../../batch/BatchContext";
+import { useT } from "../../i18n/I18nContext";
 
 /**
  * CommandPalette — ⌘K. Navigate + actions + recent projects.
  */
 export default function CommandPalette({ open, onClose }) {
+  const t = useT();
   const nav = useNavigate();
   const { theme, setTheme } = useTheme() || { theme: "dark", setTheme: () => {} };
   const { clearDone } = useBatch() || {};
@@ -24,31 +26,34 @@ export default function CommandPalette({ open, onClose }) {
 
   const go = (path) => () => { nav(path); onClose(); };
 
-  const actions = useMemo(() => [
-    { id: "nav:studio",   icon: Clapperboard,  label: "Studio",        group: "Chuyển trang", run: go("/studio"),   hotkey: "⌘1" },
-    { id: "nav:library",  icon: Library,  label: "Thư viện giọng", group: "Chuyển trang", run: go("/library"),  hotkey: "⌘2" },
-    { id: "nav:history",  icon: ClockFading,   label: "Lịch sử",        group: "Chuyển trang", run: go("/history"),  hotkey: "⌘3" },
-    { id: "nav:tts",      icon: AudioWaveform, label: "TTS",            group: "Chuyển trang", run: go("/"),         hotkey: "⌘4" },
-    { id: "nav:clone",    icon: Mic2,          label: "Voice Clone",    group: "Chuyển trang", run: go("/clone"),    hotkey: "⌘5" },
-    { id: "nav:settings", icon: Cog,           label: "Cài đặt",        group: "Chuyển trang", run: go("/settings"), hotkey: "⌘," },
+  const NAV = t("palette.navigate");
+  const ACT = t("palette.actions");
 
-    { id: "act:upload",   icon: Upload,        label: "Tải video mới lên Studio", group: "Hành động", run: go("/studio") },
-    { id: "act:output",   icon: FolderOpen,    label: "Mở thư mục xuất",          group: "Hành động",
+  const actions = useMemo(() => [
+    { id: "nav:studio",   icon: Clapperboard,  label: t("shell.titleStudio"),   group: NAV, run: go("/studio"),   hotkey: "⌘1" },
+    { id: "nav:library",  icon: Library,       label: t("shell.titleLibrary"),  group: NAV, run: go("/library"),  hotkey: "⌘2" },
+    { id: "nav:history",  icon: ClockFading,   label: t("shell.titleHistory"),  group: NAV, run: go("/history"),  hotkey: "⌘3" },
+    { id: "nav:tts",      icon: AudioWaveform, label: "TTS",                    group: NAV, run: go("/"),         hotkey: "⌘4" },
+    { id: "nav:clone",    icon: Mic2,          label: t("shell.titleClone"),    group: NAV, run: go("/clone"),    hotkey: "⌘5" },
+    { id: "nav:settings", icon: Cog,           label: t("shell.titleSettings"), group: NAV, run: go("/settings"), hotkey: "⌘," },
+
+    { id: "act:upload",   icon: Upload,        label: t("palette.uploadVideo"),      group: ACT, run: go("/studio") },
+    { id: "act:output",   icon: FolderOpen,    label: t("palette.openOutputFolder"), group: ACT,
       run: () => {
         const folder = localStorage.getItem("voxstudio:batch:outputFolder");
         if (folder) window.voxstudio?.revealFileInFolder?.(folder);
         onClose();
       } },
-    { id: "act:clear",    icon: Trash2,        label: "Xoá các job đã xong khỏi lịch sử", group: "Hành động",
+    { id: "act:clear",    icon: Trash2,        label: t("palette.clearDone"), group: ACT,
       run: () => { clearDone?.(); onClose(); } },
-    { id: "act:theme",    icon: SunMoon,       label: `Đổi theme (hiện: ${theme})`, group: "Hành động",
+    { id: "act:theme",    icon: SunMoon,       label: t("palette.toggleTheme", { theme }), group: ACT,
       run: () => {
         const next = theme === "dark" ? "light" : "dark";
         setTheme(next);
         onClose();
       } },
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  ], [theme, clearDone, onClose]);
+  ], [theme, clearDone, onClose, t]);
 
   return (
     <AnimatePresence>
@@ -89,7 +94,7 @@ export default function CommandPalette({ open, onClose }) {
                 <Search size={14} style={{ color: "var(--n-8)" }} />
                 <Command.Input
                   autoFocus
-                  placeholder="Gõ để tìm trang hoặc lệnh…"
+                  placeholder={t("palette.placeholder")}
                   className="flex-1 bg-transparent outline-none"
                   style={{
                     color: "var(--n-10)",
@@ -110,10 +115,10 @@ export default function CommandPalette({ open, onClose }) {
                     color: "var(--n-8)", fontSize: 13,
                   }}
                 >
-                  Không tìm thấy lệnh.
+                  {t("palette.empty")}
                 </Command.Empty>
 
-                {["Chuyển trang", "Hành động"].map((group) => (
+                {[NAV, ACT].map((group) => (
                   <Command.Group
                     key={group}
                     heading={group}

@@ -31,23 +31,26 @@ export default function SettingsPage() {
   const t = useT();
   const [active, setActive] = useState("account");
 
+  const activeTab = TABS.find((tb) => tb.id === active) || TABS[0];
+
   return (
-    <div className="flex h-full">
+    <div className="flex h-full overflow-hidden"
+         style={{ background: "var(--n-0)" }}>
       {/* Left: tab list */}
       <aside
-        className="flex-shrink-0 border-r py-6 px-3"
+        className="flex-shrink-0 py-3 px-2"
         style={{
-          width: 220,
-          borderColor: "rgba(255,255,255,0.06)",
-          background: "var(--bg-surface)",
+          width: 200,
+          borderRight: "1px solid var(--n-3)",
+          background: "var(--n-1)",
         }}
       >
-        <h1
-          className="px-3 mb-4 text-lg font-semibold"
-          style={{ color: "var(--text-primary)" }}
+        <div
+          className="px-3 py-2 mb-2 text-[10px] font-semibold uppercase tracking-wider"
+          style={{ color: "var(--n-6)" }}
         >
           {t("settings.title")}
-        </h1>
+        </div>
         <nav className="space-y-0.5">
           {TABS.map((tab) => {
             const Icon = tab.icon;
@@ -56,14 +59,23 @@ export default function SettingsPage() {
               <button
                 key={tab.id}
                 onClick={() => setActive(tab.id)}
-                className="w-full flex items-center gap-2.5 rounded-md px-3 py-2 text-sm transition-colors"
+                className="w-full flex items-center gap-2 rounded-md px-2.5 transition-colors"
                 style={{
-                  background: isActive ? "var(--bg-card)" : "transparent",
-                  color: isActive ? "var(--text-primary)" : "var(--text-secondary)",
+                  height: 30,
+                  background: isActive ? "var(--accent-soft)" : "transparent",
+                  color: isActive ? "var(--n-10)" : "var(--n-8)",
                   fontWeight: isActive ? 500 : 400,
+                  fontSize: 13,
+                  borderLeft: `2px solid ${isActive ? "var(--accent)" : "transparent"}`,
+                }}
+                onMouseEnter={(e) => {
+                  if (!isActive) e.currentTarget.style.background = "var(--n-2)";
+                }}
+                onMouseLeave={(e) => {
+                  if (!isActive) e.currentTarget.style.background = "transparent";
                 }}
               >
-                <Icon size={15} />
+                <Icon size={13} />
                 <span className="flex-1 text-left">{t(tab.tKey)}</span>
               </button>
             );
@@ -72,16 +84,31 @@ export default function SettingsPage() {
       </aside>
 
       {/* Right: panel */}
-      <main className="flex-1 overflow-y-auto">
-        <div className="max-w-2xl mx-auto p-8">
-          {active === "account" && <AccountTab />}
-          {active === "appearance" && <AppearanceTab />}
-          {active === "billing" && <BillingTab />}
-          {active === "usage" && <UsageTab />}
-          {active === "notifications" && <NotificationsTab />}
-          {active === "privacy" && <PrivacyTab />}
-          {active === "server" && <ServerTab />}
-          {active === "about" && <AboutTab />}
+      <main className="flex-1 flex flex-col overflow-hidden"
+            style={{ background: "var(--n-0)" }}>
+        <div style={{
+          padding: "20px 32px 14px",
+          borderBottom: "1px solid var(--n-2)",
+          flexShrink: 0,
+        }}>
+          <h1 style={{
+            fontSize: 20, fontWeight: 600, margin: 0,
+            color: "var(--n-10)", letterSpacing: "var(--tr-tight)",
+          }}>
+            {t(activeTab.tKey)}
+          </h1>
+        </div>
+        <div className="flex-1 overflow-y-auto">
+          <div className="max-w-2xl mx-auto p-8">
+            {active === "account" && <AccountTab />}
+            {active === "appearance" && <AppearanceTab />}
+            {active === "billing" && <BillingTab />}
+            {active === "usage" && <UsageTab />}
+            {active === "notifications" && <NotificationsTab />}
+            {active === "privacy" && <PrivacyTab />}
+            {active === "server" && <ServerTab />}
+            {active === "about" && <AboutTab />}
+          </div>
         </div>
       </main>
     </div>
