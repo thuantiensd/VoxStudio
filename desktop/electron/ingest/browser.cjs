@@ -49,7 +49,7 @@ async function captureMediaURL(inputURL, opts = {}) {
       onProgress("detecting", 40, `Thấy media stream (${candidates.size})`);
     } catch {}
   };
-  webRequest.onCompleted({ urls: ["http*://*/*"] }, onCompleted);
+  webRequest.onCompleted({ urls: ["http://*/*", "https://*/*"] }, onCompleted);
 
   const win = new BrowserWindow({
     show: false,
@@ -76,7 +76,8 @@ async function captureMediaURL(inputURL, opts = {}) {
 
   const cleanup = () => {
     clearTimeout(timer);
-    try { webRequest.onCompleted(null); } catch {}
+    // Electron API: onCompleted(null) để unregister global handler — nhưng
+    // listener này gắn vào session cụ thể, session sẽ GC cùng BrowserWindow.
     try { if (!win.isDestroyed()) win.destroy(); } catch {}
   };
 
