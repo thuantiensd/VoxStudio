@@ -4,33 +4,25 @@ import { cloneVoice, transcribe, previewVoice, audioURL } from '../services/api'
 import SpeedKnob from '../components/SpeedKnob';
 import AudioPlayer from '../components/AudioPlayer';
 import PageHeader, { Page, PageContent } from '../components/ui/PageHeader';
+import { useT } from '../i18n/I18nContext';
 
 const inputStyle = { background: 'var(--bg-card)', border: '1px solid #2a2a40', color: 'var(--text-primary)' };
 const selectStyle = { background: 'var(--bg-card)', border: '1px solid #2a2a40', color: 'var(--text-primary)' };
 const labelStyle = { color: 'var(--text-secondary)' };
 
-const LANGUAGES = [
-  { value: '', label: 'Auto Detect' },
-  { value: 'vietnamese', label: 'Vietnamese' },
-  { value: 'english', label: 'English' },
-  { value: 'chinese', label: 'Chinese' },
-  { value: 'japanese', label: 'Japanese' },
-  { value: 'korean', label: 'Korean' },
-  { value: 'french', label: 'French' },
-  { value: 'spanish', label: 'Spanish' },
-  { value: 'german', label: 'German' },
-  { value: 'portuguese', label: 'Portuguese' },
-  { value: 'russian', label: 'Russian' },
-  { value: 'thai', label: 'Thai' },
-  { value: 'arabic', label: 'Arabic' },
-  { value: 'hindi', label: 'Hindi' },
-  { value: 'italian', label: 'Italian' },
-  { value: 'dutch', label: 'Dutch' },
-  { value: 'turkish', label: 'Turkish' },
-  { value: 'polish', label: 'Polish' },
-  { value: 'indonesian', label: 'Indonesian' },
-  { value: 'malay', label: 'Malay' },
+const LANGUAGE_KEYS = [
+  'auto', 'vietnamese', 'english', 'chinese', 'japanese', 'korean',
+  'french', 'spanish', 'german', 'portuguese', 'russian', 'thai',
+  'arabic', 'hindi', 'italian', 'dutch', 'turkish', 'polish',
+  'indonesian', 'malay',
 ];
+
+function useLanguages(t) {
+  return LANGUAGE_KEYS.map((k) => ({
+    value: k === 'auto' ? '' : k,
+    label: t(`langs.${k}`),
+  }));
+}
 
 const SPEED_PRESETS = [0.5, 0.75, 1.0, 1.25, 1.5];
 
@@ -52,6 +44,8 @@ function SliderControl({ label, value, onChange, min, max, step, description }) 
 }
 
 export default function VoiceClonePage() {
+  const t = useT();
+  const LANGUAGES = useLanguages(t);
   const fileRef = useRef(null);
 
   // Step 1: Upload
@@ -173,8 +167,8 @@ export default function VoiceClonePage() {
   return (
     <Page>
       <PageHeader
-        title="Voice Clone"
-        subtitle="Tải 5–30s giọng mẫu để clone · Kết quả dùng trong Studio/TTS"
+        title={t('shell.titleClone')}
+        subtitle={t('clone.subtitle')}
       />
       <PageContent maxWidth={760}>
       {/* ── Step 1: Upload Reference Audio ── */}
@@ -182,7 +176,7 @@ export default function VoiceClonePage() {
         <div className="flex items-center gap-2 mb-3">
           <span className="text-xs font-bold px-2 py-0.5 rounded-full"
             style={{ background: hasFile ? 'var(--accent)' : 'rgba(255,255,255,0.1)', color: '#fff' }}>1</span>
-          <span className="text-sm font-medium">Reference Audio</span>
+          <span className="text-sm font-medium">{t('clone.refAudio')}</span>
           {hasFile && <span className="text-xs ml-auto truncate" style={labelStyle}>{file.name}</span>}
         </div>
 
@@ -193,7 +187,7 @@ export default function VoiceClonePage() {
             <input ref={fileRef} type="file" accept="audio/*" className="hidden"
               onChange={e => e.target.files?.[0] && handleFile(e.target.files[0])} />
             <Upload size={28} className="mx-auto mb-2" style={{ color: '#555' }} />
-            <p className="text-sm mb-0.5" style={{ color: '#888' }}>Upload audio (3-10s recommended)</p>
+            <p className="text-sm mb-0.5" style={{ color: '#888' }}>{t('clone.refAudioHint')}</p>
             <p className="text-xs" style={{ color: '#555' }}>WAV, MP3, FLAC</p>
           </div>
         ) : (
@@ -215,10 +209,10 @@ export default function VoiceClonePage() {
             {/* Reference text */}
             <div>
               <label className="block text-xs mb-1" style={labelStyle}>
-                Reference Text {transcribing && <Loader2 size={10} className="inline animate-spin ml-1" />}
+                {t('clone.refText')} {transcribing && <Loader2 size={10} className="inline animate-spin ml-1" />}
               </label>
               <textarea value={refText} onChange={e => setRefText(e.target.value)}
-                placeholder="Auto-filled by Whisper, or type manually..."
+                placeholder={t('clone.refTextPlaceholder')}
                 rows={2}
                 className="w-full p-2.5 rounded-lg text-sm resize-none"
                 style={inputStyle} />
@@ -226,7 +220,7 @@ export default function VoiceClonePage() {
 
             <button onClick={reset} className="text-xs flex items-center gap-1 hover:opacity-80"
               style={{ color: '#666' }}>
-              <X size={12} /> Change audio
+              <X size={12} /> {t('common.back')}
             </button>
           </div>
         )}
@@ -238,18 +232,18 @@ export default function VoiceClonePage() {
           <div className="flex items-center gap-2 mb-3">
             <span className="text-xs font-bold px-2 py-0.5 rounded-full"
               style={{ background: hasPreview ? 'var(--accent)' : 'rgba(255,255,255,0.1)', color: '#fff' }}>2</span>
-            <span className="text-sm font-medium">Test Voice</span>
+            <span className="text-sm font-medium">{t('clone.testVoice')}</span>
           </div>
 
           <textarea value={testText} onChange={e => setTestText(e.target.value)}
-            placeholder="Enter text to test with this voice..."
+            placeholder={t('clone.testPlaceholder')}
             rows={3}
             className="w-full p-3 rounded-lg text-sm resize-none mb-3"
             style={inputStyle} />
 
           {/* Language */}
           <div className="mb-3">
-            <label className="block text-xs mb-1" style={labelStyle}>Language</label>
+            <label className="block text-xs mb-1" style={labelStyle}>{t('tts.language')}</label>
             <select value={language} onChange={e => setLanguage(e.target.value)}
               className="w-full p-2.5 rounded-lg text-sm" style={selectStyle}>
               {LANGUAGES.map(l => (
@@ -282,48 +276,41 @@ export default function VoiceClonePage() {
             className="flex items-center gap-2 mb-3 text-xs transition-colors"
             style={{ color: 'var(--text-secondary)' }}>
             {showAdvanced ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-            Advanced Settings
+            {t('tts.advanced')}
           </button>
 
           {showAdvanced && (
             <div className="mb-3 p-3 rounded-lg space-y-3"
               style={{ background: 'var(--bg-surface)', border: '1px solid #1e1e38' }}>
               <div className="grid grid-cols-2 gap-3">
-                <SliderControl label="Inference Steps" value={numStep}
-                  onChange={v => setNumStep(Math.round(v))} min={4} max={64} step={1}
-                  description="Higher = better quality, slower" />
-                <SliderControl label="Guidance Scale (CFG)" value={guidanceScale.toFixed(1)}
-                  onChange={setGuidanceScale} min={0} max={4} step={0.1}
-                  description="How strongly to follow conditioning" />
+                <SliderControl label={t('tts.steps')} value={numStep}
+                  onChange={v => setNumStep(Math.round(v))} min={4} max={64} step={1} />
+                <SliderControl label={t('tts.guidance')} value={guidanceScale.toFixed(1)}
+                  onChange={setGuidanceScale} min={0} max={4} step={0.1} />
               </div>
               <div className="grid grid-cols-2 gap-3">
-                <SliderControl label="Time Shift (t_shift)" value={tShift.toFixed(2)}
-                  onChange={setTShift} min={0} max={1} step={0.01}
-                  description="Smaller = emphasize low-SNR regions" />
-                <SliderControl label="Layer Penalty Factor" value={layerPenaltyFactor.toFixed(1)}
-                  onChange={setLayerPenaltyFactor} min={0} max={20} step={0.5}
-                  description="Penalty for layer-wise sampling order" />
+                <SliderControl label={t('tts.tShift')} value={tShift.toFixed(2)}
+                  onChange={setTShift} min={0} max={1} step={0.01} />
+                <SliderControl label={t('tts.layerPenalty')} value={layerPenaltyFactor.toFixed(1)}
+                  onChange={setLayerPenaltyFactor} min={0} max={20} step={0.5} />
               </div>
               <div className="grid grid-cols-2 gap-3">
-                <SliderControl label="Position Temperature" value={positionTemperature.toFixed(1)}
-                  onChange={setPositionTemperature} min={0} max={20} step={0.5}
-                  description="Temperature for position selection" />
-                <SliderControl label="Class Temperature" value={classTemperature.toFixed(2)}
-                  onChange={setClassTemperature} min={0} max={2} step={0.05}
-                  description="0 = greedy, >0 = stochastic sampling" />
+                <SliderControl label={t('tts.posTemp')} value={positionTemperature.toFixed(1)}
+                  onChange={setPositionTemperature} min={0} max={20} step={0.5} />
+                <SliderControl label={t('tts.classTemp')} value={classTemperature.toFixed(2)}
+                  onChange={setClassTemperature} min={0} max={2} step={0.05} />
               </div>
-              <SliderControl label="Audio Chunk Duration (s)" value={audioChunkDuration.toFixed(1)}
-                onChange={setAudioChunkDuration} min={5} max={30} step={0.5}
-                description="Max duration per chunk for long text splitting" />
+              <SliderControl label={t('tts.chunkDur')} value={audioChunkDuration.toFixed(1)}
+                onChange={setAudioChunkDuration} min={5} max={30} step={0.5} />
               <div className="flex gap-5 pt-1">
                 <label className="flex items-center gap-2 text-xs cursor-pointer" style={labelStyle}>
-                  <input type="checkbox" checked={denoise} onChange={e => setDenoise(e.target.checked)} /> Denoise
+                  <input type="checkbox" checked={denoise} onChange={e => setDenoise(e.target.checked)} /> {t('tts.denoise')}
                 </label>
                 <label className="flex items-center gap-2 text-xs cursor-pointer" style={labelStyle}>
-                  <input type="checkbox" checked={preprocessPrompt} onChange={e => setPreprocessPrompt(e.target.checked)} /> Preprocess Prompt
+                  <input type="checkbox" checked={preprocessPrompt} onChange={e => setPreprocessPrompt(e.target.checked)} /> {t('tts.preprocess')}
                 </label>
                 <label className="flex items-center gap-2 text-xs cursor-pointer" style={labelStyle}>
-                  <input type="checkbox" checked={postprocessOutput} onChange={e => setPostprocessOutput(e.target.checked)} /> Postprocess Output
+                  <input type="checkbox" checked={postprocessOutput} onChange={e => setPostprocessOutput(e.target.checked)} /> {t('tts.postprocess')}
                 </label>
               </div>
             </div>
@@ -333,15 +320,15 @@ export default function VoiceClonePage() {
             className="w-full py-2.5 rounded-lg font-medium text-white flex items-center justify-center gap-2 disabled:opacity-40 transition-all hover:brightness-110"
             style={{ background: 'linear-gradient(135deg, var(--accent), #8b5cf6)', boxShadow: '0 2px 12px rgba(124,58,237,0.2)' }}>
             {previewing
-              ? <><Loader2 size={16} className="animate-spin" /> Generating preview...</>
-              : <><Play size={16} /> Generate Preview</>
+              ? <><Loader2 size={16} className="animate-spin" /> {t('clone.generatingPreview')}</>
+              : <><Play size={16} /> {t('clone.generatePreview')}</>
             }
           </button>
 
           {/* Preview result */}
           {hasPreview && (
             <div className="mt-3">
-              <label className="block text-xs mb-1.5 font-medium" style={labelStyle}>Preview Result</label>
+              <label className="block text-xs mb-1.5 font-medium" style={labelStyle}>{t('clone.previewResult')}</label>
               <AudioPlayer src={previewAudioUrl} filename="voice_preview.wav" />
             </div>
           )}
@@ -354,8 +341,8 @@ export default function VoiceClonePage() {
           <div className="flex items-center gap-2 mb-3">
             <span className="text-xs font-bold px-2 py-0.5 rounded-full"
               style={{ background: 'rgba(255,255,255,0.1)', color: '#fff' }}>3</span>
-            <span className="text-sm font-medium">Save Voice</span>
-            <span className="text-xs ml-auto" style={labelStyle}>Optional — skip if you don't want to keep it</span>
+            <span className="text-sm font-medium">{t('clone.save')}</span>
+            <span className="text-xs ml-auto" style={labelStyle}>{t('clone.saveOptional')}</span>
           </div>
 
           {!showSave ? (
@@ -363,18 +350,18 @@ export default function VoiceClonePage() {
               <button onClick={() => setShowSave(true)}
                 className="flex-1 py-2.5 rounded-lg font-medium text-sm flex items-center justify-center gap-2 transition-all hover:brightness-110"
                 style={{ background: 'var(--accent)', color: '#fff' }}>
-                <Save size={14} /> Save This Voice
+                <Save size={14} /> {t('clone.saveThis')}
               </button>
               <button onClick={reset}
                 className="px-4 py-2.5 rounded-lg text-sm transition-all"
                 style={{ background: 'rgba(255,255,255,0.05)', color: '#888', border: '1px solid #2a2a40' }}>
-                Discard
+                {t('common.discard')}
               </button>
             </div>
           ) : (
             <div className="space-y-3">
               <input type="text" value={name} onChange={e => setName(e.target.value)}
-                placeholder="Voice name (e.g. My Voice, Vietnamese Female...)"
+                placeholder={t('clone.voiceName')}
                 className="w-full p-2.5 rounded-lg text-sm"
                 style={inputStyle}
                 autoFocus />
@@ -382,12 +369,12 @@ export default function VoiceClonePage() {
                 <button onClick={handleSave} disabled={saving || !name.trim()}
                   className="flex-1 py-2.5 rounded-lg font-medium text-sm flex items-center justify-center gap-2 disabled:opacity-40"
                   style={{ background: 'var(--accent)', color: '#fff' }}>
-                  {saving ? <><Loader2 size={14} className="animate-spin" /> Saving...</> : <><Save size={14} /> Confirm Save</>}
+                  {saving ? <><Loader2 size={14} className="animate-spin" /> {t('common.saving')}</> : <><Save size={14} /> {t('clone.confirmSave')}</>}
                 </button>
                 <button onClick={() => setShowSave(false)}
                   className="px-4 py-2.5 rounded-lg text-sm"
                   style={{ background: 'rgba(255,255,255,0.05)', color: '#888', border: '1px solid #2a2a40' }}>
-                  Cancel
+                  {t('common.cancel')}
                 </button>
               </div>
             </div>
@@ -399,12 +386,12 @@ export default function VoiceClonePage() {
       {saved && (
         <div className="rounded-xl p-5 mb-4 text-center" style={{ background: 'var(--bg-card)', border: '1px solid #22c55e33' }}>
           <Check size={40} className="mx-auto mb-2" style={{ color: 'var(--success)' }} />
-          <p className="text-sm font-medium mb-1">Voice "{savedName}" saved!</p>
-          <p className="text-xs mb-4" style={labelStyle}>Ready to use in TTS page</p>
+          <p className="text-sm font-medium mb-1">{t('clone.savedTitle', { name: savedName })}</p>
+          <p className="text-xs mb-4" style={labelStyle}>{t('clone.savedReady')}</p>
           <button onClick={reset}
             className="px-5 py-2 rounded-lg text-sm font-medium transition-all hover:brightness-110"
             style={{ background: 'var(--accent)', color: '#fff' }}>
-            Clone Another
+            {t('clone.cloneAnother')}
           </button>
         </div>
       )}

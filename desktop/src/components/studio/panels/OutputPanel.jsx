@@ -240,7 +240,7 @@ export default function OutputPanel({ project, onToggle, onProjectUpdated }) {
             color: isDirty ? "#fff" : "var(--accent)",
             border: `1px solid ${isDirty ? "var(--accent)" : "rgba(108,92,231,0.3)"}`,
           }}
-          title="Lưu cấu hình hiện tại làm mẫu cho lần sau"
+          title={t("output.savePresetTip")}
         >
           <Save size={11} /> {isDirty ? "● Lưu làm mẫu" : "Lưu làm mẫu"}
         </button>
@@ -253,7 +253,7 @@ export default function OutputPanel({ project, onToggle, onProjectUpdated }) {
             color: "var(--text-primary)",
             border: "1px solid rgba(127,127,160,0.2)",
           }}
-          title={savedPreset ? "Áp dụng mẫu đã lưu" : "Chưa có mẫu nào"}
+          title={savedPreset ? t("output.applyPresetTip") : t("output.noPresetTip")}
         >
           <Copy size={11} /> Áp dụng mẫu
         </button>
@@ -276,11 +276,11 @@ export default function OutputPanel({ project, onToggle, onProjectUpdated }) {
         <div className="flex-1 min-w-0">
           <div className="text-[11px] font-medium"
                style={{ color: "var(--text-primary)" }}>
-            Thư mục lưu
+            {t("output.folder")}
           </div>
           <div className="text-[10px] truncate"
                style={{ color: outputFolder ? "var(--text-secondary)" : "#ef4444" }}
-               title={outputFolder || "Chưa chọn"}>
+               title={outputFolder || t("output.folderNone")}>
             {outputFolder || "Chưa chọn — cần chọn để bắt đầu"}
           </div>
         </div>
@@ -320,13 +320,13 @@ export default function OutputPanel({ project, onToggle, onProjectUpdated }) {
         )}
         {running ? t("studio.panels.pipelineRunning") : t("studio.panels.pipelineStart")}
         {batchIds.length > 1 && !running && (
-          <span className="ml-1 opacity-85">({batchIds.length} video)</span>
+          <span className="ml-1 opacity-85">{t("output.batchCount", { n: batchIds.length })}</span>
         )}
       </button>
       {batchIds.length > 1 && (
         <p className="text-[11px] mt-1.5 text-center"
            style={{ color: "var(--text-secondary)" }}>
-          Setting này sẽ áp dụng cho cả {batchIds.length} video trong batch.
+          {t("output.batchApply", { n: batchIds.length })}
         </p>
       )}
 

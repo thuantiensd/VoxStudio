@@ -74,7 +74,7 @@ export default function VoiceLibraryPage() {
             <THead>
               <Th width={40} />
               <Th>Tên</Th>
-              <Th>ID</Th>
+              <Th>{t("common.id")}</Th>
               <Th width={60} align="right"> </Th>
             </THead>
             <TBody>

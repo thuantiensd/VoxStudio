@@ -1,5 +1,6 @@
 import { useRef, useState, useEffect, useCallback } from 'react';
 import { Play, Pause, Download, Scissors, X } from 'lucide-react';
+import { useT } from '../i18n/I18nContext';
 
 const BAR_GAP = 1.2;
 
@@ -12,6 +13,7 @@ function fmt(s) {
 }
 
 export default function AudioPlayer({ src, filename = 'audio.wav', compact = false, onTrim = null }) {
+  const t = useT();
   const audioRef = useRef(null);
   const waveRef = useRef(null);
   const [playing, setPlaying] = useState(false);
@@ -417,13 +419,13 @@ export default function AudioPlayer({ src, filename = 'audio.wav', compact = fal
             <>
               <button onClick={enterTrim}
                 className="p-1.5 rounded-md transition-colors hover:opacity-80"
-                title="Cắt audio"
+                title={t('audio.trim')}
                 style={{ color: 'var(--text-secondary)' }}>
                 <Scissors size={compact ? 13 : 14} />
               </button>
               <a href={src} download={filename}
                 className="p-1.5 rounded-md hover:opacity-80"
-                title="Tải xuống"
+                title={t('audio.download')}
                 style={{ color: 'var(--text-secondary)' }}>
                 <Download size={compact ? 13 : 14} />
               </a>

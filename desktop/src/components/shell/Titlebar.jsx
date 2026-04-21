@@ -62,7 +62,7 @@ export default function Titlebar({ onOpenPalette }) {
             fontSize: 12,
             minWidth: 180,
           }}
-          title="Tìm kiếm & lệnh nhanh"
+          title={t("titlebar.searchTip")}
         >
           <Search size={12} />
           <span className="flex-1 text-left">{t("shell.search")}</span>
@@ -71,9 +71,9 @@ export default function Titlebar({ onOpenPalette }) {
 
         {!isMac && (
           <div className="no-drag flex ml-2">
-            <WinCtrl onClick={win.min}  label="minimize"><Minus size={12} /></WinCtrl>
-            <WinCtrl onClick={win.max}  label="maximize"><Square size={10} /></WinCtrl>
-            <WinCtrl onClick={win.close} label="close" danger><X size={12} /></WinCtrl>
+            <WinCtrl onClick={win.min}  label={t("titlebar.minimize")}><Minus size={12} /></WinCtrl>
+            <WinCtrl onClick={win.max}  label={t("titlebar.maximize")}><Square size={10} /></WinCtrl>
+            <WinCtrl onClick={win.close} label={t("titlebar.close")} danger><X size={12} /></WinCtrl>
           </div>
         )}
       </div>

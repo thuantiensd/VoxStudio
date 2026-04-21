@@ -5,29 +5,23 @@ import AudioPlayer from '../components/AudioPlayer';
 import SpeedKnob from '../components/SpeedKnob';
 import PageHeader, { Page, PageContent } from '../components/ui/PageHeader';
 import Segmented from '../components/ui/Segmented';
+import { useT } from '../i18n/I18nContext';
 
-const LANGUAGES = [
-  { value: '', label: 'Auto Detect' },
-  { value: 'vietnamese', label: 'Vietnamese' },
-  { value: 'english', label: 'English' },
-  { value: 'chinese', label: 'Chinese' },
-  { value: 'japanese', label: 'Japanese' },
-  { value: 'korean', label: 'Korean' },
-  { value: 'french', label: 'French' },
-  { value: 'spanish', label: 'Spanish' },
-  { value: 'german', label: 'German' },
-  { value: 'portuguese', label: 'Portuguese' },
-  { value: 'russian', label: 'Russian' },
-  { value: 'thai', label: 'Thai' },
-  { value: 'arabic', label: 'Arabic' },
-  { value: 'hindi', label: 'Hindi' },
-  { value: 'italian', label: 'Italian' },
-  { value: 'dutch', label: 'Dutch' },
-  { value: 'turkish', label: 'Turkish' },
-  { value: 'polish', label: 'Polish' },
-  { value: 'indonesian', label: 'Indonesian' },
-  { value: 'malay', label: 'Malay' },
+// value khớp locale backend — label dịch qua useT() + useLanguages()
+const LANGUAGE_VALUES = [
+  'auto', 'vietnamese', 'english', 'chinese', 'japanese', 'korean',
+  'french', 'spanish', 'german', 'portuguese', 'russian', 'thai',
+  'arabic', 'hindi', 'italian', 'dutch', 'turkish', 'polish',
+  'indonesian', 'malay',
 ];
+
+function useLanguages() {
+  const t = useT();
+  return LANGUAGE_VALUES.map((v) => ({
+    value: v === 'auto' ? '' : v,
+    label: t(`langs.${v}`),
+  }));
+}
 
 const CHAR_LIMIT = 1000;
 const CHAR_WARN = 500;
@@ -123,6 +117,8 @@ function useSharedSettings() {
 
 // ── Shared settings UI ──
 function SettingsPanel({ s }) {
+  const t = useT();
+  const languages = useLanguages();
   const isCloud = s.engine === 'edge';
 
   return (
@@ -149,17 +145,17 @@ function SettingsPanel({ s }) {
 
       {/* Engine description */}
       <p className="text-xs mb-4" style={{ color: 'var(--text-secondary)' }}>
-        {isCloud ? 'Free cloud TTS — no GPU needed, fast' : 'Local GPU TTS — high quality, requires GPU'}
+        {isCloud ? t('tts.cloudDesc') : t('tts.localDesc')}
       </p>
 
       {/* Voice + Language */}
       <div className="flex gap-4 mb-4">
         <div className="flex-1">
-          <label className={labelClass} style={labelStyle}>Voice</label>
+          <label className={labelClass} style={labelStyle}>{t('tts.voice')}</label>
           {isCloud ? (
             <select value={s.edgeVoice} onChange={e => s.setEdgeVoice(e.target.value)}
               className="w-full p-2.5 rounded-lg text-sm" style={selectStyle}>
-              <option value="">Auto Voice</option>
+              <option value="">{t('tts.autoVoice')}</option>
               {s.edgeVoices.map(v => (
                 <option key={v.name} value={v.name}>
                   {v.name.replace('Neural', '')} ({v.gender})
@@ -169,7 +165,7 @@ function SettingsPanel({ s }) {
           ) : (
             <select value={s.voiceId} onChange={e => s.setVoiceId(e.target.value)}
               className="w-full p-2.5 rounded-lg text-sm" style={selectStyle}>
-              <option value="">Default (no voice clone)</option>
+              <option value="">{t('tts.voiceDefault')}</option>
               {s.voices.map(v => (
                 <option key={v.id} value={v.id}>{v.name}</option>
               ))}
@@ -177,10 +173,10 @@ function SettingsPanel({ s }) {
           )}
         </div>
         <div className="flex-1">
-          <label className={labelClass} style={labelStyle}>Language</label>
+          <label className={labelClass} style={labelStyle}>{t('tts.language')}</label>
           <select value={s.language} onChange={e => s.setLanguage(e.target.value)}
             className="w-full p-2.5 rounded-lg text-sm" style={selectStyle}>
-            {LANGUAGES.map(l => (
+            {languages.map(l => (
               <option key={l.value} value={l.value}>{l.label}</option>
             ))}
           </select>
@@ -229,48 +225,41 @@ function SettingsPanel({ s }) {
             className="flex items-center gap-2 mb-4 text-sm transition-colors"
             style={{ color: 'var(--text-secondary)' }}>
             {s.showAdvanced ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-            Advanced Settings
+            {t('tts.advanced')}
           </button>
 
           {s.showAdvanced && (
             <div className="mb-5 p-4 rounded-lg space-y-4"
               style={{ background: 'var(--bg-card)', border: '1px solid #2a2a40' }}>
               <div className="grid grid-cols-2 gap-4">
-                <SliderControl label="Inference Steps" value={s.numStep}
-                  onChange={v => s.setNumStep(Math.round(v))} min={4} max={64} step={1}
-                  description="Higher = better quality, slower" />
-                <SliderControl label="Guidance Scale (CFG)" value={s.guidanceScale.toFixed(1)}
-                  onChange={s.setGuidanceScale} min={0} max={4} step={0.1}
-                  description="How strongly to follow conditioning" />
+                <SliderControl label={t('tts.steps')} value={s.numStep}
+                  onChange={v => s.setNumStep(Math.round(v))} min={4} max={64} step={1} />
+                <SliderControl label={t('tts.guidance')} value={s.guidanceScale.toFixed(1)}
+                  onChange={s.setGuidanceScale} min={0} max={4} step={0.1} />
               </div>
               <div className="grid grid-cols-2 gap-4">
-                <SliderControl label="Time Shift (t_shift)" value={s.tShift.toFixed(2)}
-                  onChange={s.setTShift} min={0} max={1} step={0.01}
-                  description="Smaller = emphasize low-SNR regions" />
-                <SliderControl label="Layer Penalty Factor" value={s.layerPenaltyFactor.toFixed(1)}
-                  onChange={s.setLayerPenaltyFactor} min={0} max={20} step={0.5}
-                  description="Penalty for layer-wise sampling order" />
+                <SliderControl label={t('tts.tShift')} value={s.tShift.toFixed(2)}
+                  onChange={s.setTShift} min={0} max={1} step={0.01} />
+                <SliderControl label={t('tts.layerPenalty')} value={s.layerPenaltyFactor.toFixed(1)}
+                  onChange={s.setLayerPenaltyFactor} min={0} max={20} step={0.5} />
               </div>
               <div className="grid grid-cols-2 gap-4">
-                <SliderControl label="Position Temperature" value={s.positionTemperature.toFixed(1)}
-                  onChange={s.setPositionTemperature} min={0} max={20} step={0.5}
-                  description="Temperature for position selection" />
-                <SliderControl label="Class Temperature" value={s.classTemperature.toFixed(2)}
-                  onChange={s.setClassTemperature} min={0} max={2} step={0.05}
-                  description="0 = greedy, >0 = stochastic sampling" />
+                <SliderControl label={t('tts.posTemp')} value={s.positionTemperature.toFixed(1)}
+                  onChange={s.setPositionTemperature} min={0} max={20} step={0.5} />
+                <SliderControl label={t('tts.classTemp')} value={s.classTemperature.toFixed(2)}
+                  onChange={s.setClassTemperature} min={0} max={2} step={0.05} />
               </div>
-              <SliderControl label="Audio Chunk Duration (s)" value={s.audioChunkDuration.toFixed(1)}
-                onChange={s.setAudioChunkDuration} min={5} max={30} step={0.5}
-                description="Max duration per chunk for long text splitting" />
+              <SliderControl label={t('tts.chunkDur')} value={s.audioChunkDuration.toFixed(1)}
+                onChange={s.setAudioChunkDuration} min={5} max={30} step={0.5} />
               <div className="flex gap-6 pt-1">
                 <label className="flex items-center gap-2 text-xs cursor-pointer" style={labelStyle}>
-                  <input type="checkbox" checked={s.denoise} onChange={e => s.setDenoise(e.target.checked)} /> Denoise
+                  <input type="checkbox" checked={s.denoise} onChange={e => s.setDenoise(e.target.checked)} /> {t('tts.denoise')}
                 </label>
                 <label className="flex items-center gap-2 text-xs cursor-pointer" style={labelStyle}>
-                  <input type="checkbox" checked={s.preprocessPrompt} onChange={e => s.setPreprocessPrompt(e.target.checked)} /> Preprocess Prompt
+                  <input type="checkbox" checked={s.preprocessPrompt} onChange={e => s.setPreprocessPrompt(e.target.checked)} /> {t('tts.preprocess')}
                 </label>
                 <label className="flex items-center gap-2 text-xs cursor-pointer" style={labelStyle}>
-                  <input type="checkbox" checked={s.postprocessOutput} onChange={e => s.setPostprocessOutput(e.target.checked)} /> Postprocess Output
+                  <input type="checkbox" checked={s.postprocessOutput} onChange={e => s.setPostprocessOutput(e.target.checked)} /> {t('tts.postprocess')}
                 </label>
               </div>
             </div>
@@ -285,6 +274,7 @@ function SettingsPanel({ s }) {
 // Main page
 // ══════════════════════════════════════════════════════
 export default function TTSPage() {
+  const t = useT();
   const [mode, setMode] = useState('single'); // 'single' | 'batch'
   const s = useSharedSettings();
 
@@ -292,14 +282,14 @@ export default function TTSPage() {
     <Page>
       <PageHeader
         title="Text to Speech"
-        subtitle="Tạo giọng nói từ văn bản · Chọn engine VoxCloud (Edge) hoặc VoxLocal (OmniVoice)"
+        subtitle={t('tts.subtitle')}
       >
         <Segmented
           value={mode}
           onChange={setMode}
           options={[
-            { value: 'single', label: 'Single Text' },
-            { value: 'batch',  label: 'Batch Files' },
+            { value: 'single', label: t('tts.singleTab') },
+            { value: 'batch',  label: t('tts.batchTab') },
           ]}
         />
       </PageHeader>
@@ -314,6 +304,7 @@ export default function TTSPage() {
 // Single mode (original)
 // ══════════════════════════════════════════════════════
 function SingleMode({ s }) {
+  const t = useT();
   const [text, setText] = useState('');
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
@@ -341,15 +332,15 @@ function SingleMode({ s }) {
   return (
     <>
       {/* Text input */}
-      <label className={labelClass} style={labelStyle}>Text</label>
+      <label className={labelClass} style={labelStyle}>{t('tts.text')}</label>
       <textarea value={text} onChange={e => setText(e.target.value)}
-        placeholder="Nhap noi dung can doc..."
+        placeholder={t('tts.textPlaceholder')}
         rows={8} className="w-full p-3 rounded-lg mb-1 text-sm resize-none"
         style={{ background: 'var(--bg-card)', border: '1px solid #2a2a40', color: 'var(--text-primary)' }} />
       <div className="flex justify-between text-xs mb-5">
         <span style={{ color: charColor }}>
-          {text.length} / {CHAR_LIMIT} characters
-          {text.length > CHAR_LIMIT && ' — exceeds limit'}
+          {t('tts.charCount', { n: text.length, max: CHAR_LIMIT })}
+          {text.length > CHAR_LIMIT && ' — ' + t('tts.charOver')}
         </span>
       </div>
 
@@ -361,14 +352,14 @@ function SingleMode({ s }) {
         {loading ? (
           <>
             <Loader2 size={18} className="animate-spin" />
-            <span>Generating audio</span>
+            <span>{t('tts.generating')}</span>
             <span className="flex gap-1 ml-1">
               <span className="w-1.5 h-1.5 rounded-full bg-white animate-bounce" style={{ animationDelay: '0ms' }} />
               <span className="w-1.5 h-1.5 rounded-full bg-white animate-bounce" style={{ animationDelay: '150ms' }} />
               <span className="w-1.5 h-1.5 rounded-full bg-white animate-bounce" style={{ animationDelay: '300ms' }} />
             </span>
           </>
-        ) : 'Generate Audio'}
+        ) : t('tts.generate')}
       </button>
 
       {error && (
@@ -379,7 +370,7 @@ function SingleMode({ s }) {
 
       {result && (
         <div className="mt-5">
-          <p className="text-sm mb-2" style={labelStyle}>Duration: {result.duration}s</p>
+          <p className="text-sm mb-2" style={labelStyle}>{t('tts.duration')} {result.duration}s</p>
           <AudioPlayer src={audioURL(result.audio_url)} />
         </div>
       )}

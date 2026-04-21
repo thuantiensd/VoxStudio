@@ -3,6 +3,7 @@ import {
   Trash2, Copy, Magnet, ZoomIn, ZoomOut,
 } from "lucide-react";
 import { TIMELINE_CONSTANTS } from "./useTimelineState";
+import { useT } from "../../../i18n/I18nContext";
 
 function fmt(s) {
   if (!s || !isFinite(s)) return "0:00.0";
@@ -19,6 +20,7 @@ export default function TimelineToolbar({
   onUndo, onRedo, onSplit, onDelete, onDuplicate,
   canUndo = false, canRedo = false, hasSelection = false,
 }) {
+  const t = useT();
   const zoomIn = () =>
     onZoom(Math.min(TIMELINE_CONSTANTS.MAX_PX_PER_SEC, pxPerSecond * 1.5));
   const zoomOut = () =>
@@ -32,7 +34,7 @@ export default function TimelineToolbar({
         borderBottom: "1px solid rgba(127,127,160,0.15)",
       }}
     >
-      <Btn onClick={onTogglePlay} title="Space">
+      <Btn onClick={onTogglePlay} title={t("timeline.play")}>
         {playing ? <Pause size={14} /> : <Play size={14} />}
       </Btn>
       <span
@@ -44,22 +46,22 @@ export default function TimelineToolbar({
 
       <Divider />
 
-      <Btn onClick={onUndo} disabled={!canUndo} title="Undo (Ctrl+Z)">
+      <Btn onClick={onUndo} disabled={!canUndo} title={t("timeline.undo")}>
         <Undo2 size={13} />
       </Btn>
-      <Btn onClick={onRedo} disabled={!canRedo} title="Redo (Ctrl+Shift+Z)">
+      <Btn onClick={onRedo} disabled={!canRedo} title={t("timeline.redo")}>
         <Redo2 size={13} />
       </Btn>
 
       <Divider />
 
-      <Btn onClick={onSplit} disabled={!hasSelection} title="Split (K)">
+      <Btn onClick={onSplit} disabled={!hasSelection} title={t("timeline.split")}>
         <Scissors size={13} />
       </Btn>
-      <Btn onClick={onDuplicate} disabled={!hasSelection} title="Duplicate (Ctrl+D)">
+      <Btn onClick={onDuplicate} disabled={!hasSelection} title={t("timeline.duplicate")}>
         <Copy size={13} />
       </Btn>
-      <Btn onClick={onDelete} disabled={!hasSelection} title="Delete">
+      <Btn onClick={onDelete} disabled={!hasSelection} title={t("timeline.del")}>
         <Trash2 size={13} />
       </Btn>
 
@@ -68,14 +70,14 @@ export default function TimelineToolbar({
       <Btn
         onClick={onToggleSnap}
         active={snapEnabled}
-        title="Snap (S)"
+        title={t("timeline.snap")}
       >
         <Magnet size={13} />
       </Btn>
 
       <Divider />
 
-      <Btn onClick={zoomOut} title="Zoom out">
+      <Btn onClick={zoomOut} title={t("timeline.zoomOut")}>
         <ZoomOut size={13} />
       </Btn>
       <input
@@ -87,7 +89,7 @@ export default function TimelineToolbar({
         className="w-28"
         style={{ accentColor: "var(--accent)" }}
       />
-      <Btn onClick={zoomIn} title="Zoom in">
+      <Btn onClick={zoomIn} title={t("timeline.zoomIn")}>
         <ZoomIn size={13} />
       </Btn>
     </div>

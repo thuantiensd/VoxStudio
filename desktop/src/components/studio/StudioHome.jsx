@@ -224,7 +224,7 @@ export default function StudioHome() {
 
           <div className="mt-4 text-center text-xs"
                style={{ color: "var(--accent)" }}>
-            {selectedCount}/{MAX_BATCH} video đã chọn
+            {t("studioHome.selectedCount", { n: selectedCount, max: MAX_BATCH })}
           </div>
         </div>
 
@@ -256,10 +256,10 @@ export default function StudioHome() {
             <ChevronRight size={14} />
           )}
           {uploading
-            ? `Đang tải lên ${selectedCount} video…`
+            ? t("studioHome.uploading", { n: selectedCount })
             : selectedCount > 0
-            ? `Mở trong trang lồng tiếng (${selectedCount})`
-            : "Chọn video để tiếp tục"}
+            ? t("studioHome.openInDub", { n: selectedCount })
+            : t("studioHome.selectFirst")}
         </button>
 
         {/* Tiến trình / Lịch sử — nằm dưới cùng */}
@@ -291,6 +291,7 @@ function TabButton({ active, onClick, icon, label }) {
 function LibraryList({
   folder, files, loading, selected, onToggle, canAddMore, onPickFolder, onBack,
 }) {
+  const t = useT();
   // Chưa chọn folder → CTA chọn
   if (!folder) {
     return (
@@ -299,7 +300,7 @@ function LibraryList({
                 style={{ color: "var(--text-secondary)" }} />
         <p className="text-sm mb-3"
            style={{ color: "var(--text-primary)" }}>
-          Chọn thư mục từ máy để liệt kê video
+          {t("studioHome.libraryEmpty")}
         </p>
         <button
           onClick={onPickFolder}
@@ -310,7 +311,7 @@ function LibraryList({
             border: "1px solid rgba(108,92,231,0.3)",
           }}
         >
-          <FolderOpen size={14} /> Chọn thư mục
+          <FolderOpen size={14} /> {t("studioHome.pickFolder")}
         </button>
       </div>
     );
@@ -335,19 +336,19 @@ function LibraryList({
           className="text-[11px] underline"
           style={{ color: "var(--text-secondary)" }}
         >
-          Đổi thư mục
+          {t("studioHome.changeFolder")}
         </button>
       </div>
 
       {loading ? (
         <div className="flex items-center gap-2 text-xs py-6"
              style={{ color: "var(--text-secondary)" }}>
-          <Loader2 size={12} className="animate-spin" /> Đang đọc thư mục…
+          <Loader2 size={12} className="animate-spin" /> {t("studioHome.reading")}
         </div>
       ) : files.length === 0 ? (
         <p className="text-xs py-6 text-center"
            style={{ color: "var(--text-secondary)" }}>
-          Thư mục này không có video.
+          {t("studioHome.noVideos")}
         </p>
       ) : (
         <div className="space-y-1.5">

@@ -1,5 +1,6 @@
 import { Eye, EyeOff, Volume2, VolumeX, Lock, Unlock, Film, Mic, Music, Type } from "lucide-react";
 import { TIMELINE_CONSTANTS } from "./useTimelineState";
+import { useT } from "../../../i18n/I18nContext";
 
 const KIND_ICON = {
   video: Film,
@@ -8,6 +9,7 @@ const KIND_ICON = {
 };
 
 export default function TrackHeader({ track, onToggleMute, onToggleLock, onToggleHidden }) {
+  const t = useT();
   const Icon = track.kind === "audio" && track.id === "A2" ? Music : (KIND_ICON[track.kind] || Film);
   // Track text/subtitle không có âm → ẩn icon loa (không có tác dụng).
   const hasAudio = track.kind === "video" || track.kind === "audio";
@@ -32,14 +34,14 @@ export default function TrackHeader({ track, onToggleMute, onToggleLock, onToggl
         {track.label}
       </span>
       {hasAudio && (
-        <IconBtn onClick={onToggleMute} active={track.muted} title="Mute">
+        <IconBtn onClick={onToggleMute} active={track.muted} title={t("timeline.mute")}>
           {track.muted ? <VolumeX size={11} /> : <Volume2 size={11} />}
         </IconBtn>
       )}
-      <IconBtn onClick={onToggleLock} active={track.locked} title="Lock">
+      <IconBtn onClick={onToggleLock} active={track.locked} title={t("timeline.lock")}>
         {track.locked ? <Lock size={11} /> : <Unlock size={11} />}
       </IconBtn>
-      <IconBtn onClick={onToggleHidden} active={track.hidden} title="Hide">
+      <IconBtn onClick={onToggleHidden} active={track.hidden} title={t("timeline.hide")}>
         {track.hidden ? <EyeOff size={11} /> : <Eye size={11} />}
       </IconBtn>
     </div>
