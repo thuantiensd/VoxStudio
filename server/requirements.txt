@@ -19,3 +19,4 @@ silero-vad
 scikit-learn
 yt-dlp[default,curl-cffi]
 douyin-tiktok-scraper
+httpx<0.28  # Pin để tương thích với Douyin_TikTok_Download_API khi tích hợp sidecar
