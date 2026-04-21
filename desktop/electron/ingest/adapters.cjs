@@ -19,30 +19,45 @@ const tiktok = {
   platform: "tiktok",
   match: (u) => /(?:tiktok\.com|vt\.tiktok\.com|vm\.tiktok\.com|douyin\.com|iesdouyin\.com|b23\.tv)/i.test(u),
   isMediaURL: (url, ct) => {
-    // TikTok CDN patterns
-    if (/\.tiktokcdn[^\/]*\/.*\.mp4|\.tiktokv\.com.*\.mp4|\.douyinvod\.com|\.douyinpic\.com.*video/i.test(url)) return true;
-    if (ct && ct.startsWith("video/")) return true;
+    // Broad TikTok CDN hosts + all video-like content types
+    const tiktokHost = /\.(?:tiktokcdn|tiktokcdn-us|tiktokv|douyinvod|douyinpic|byteoversea|byteimg|muscdn)\.com|tiktok\.com\/(?:aweme|api)\/|v\d+-webapp(?:-prime)?\.tiktok\.com|api\d+-normal[^/]*\.tiktokv\.com/i;
+    if (tiktokHost.test(url)) {
+      if (/\.(mp4|m3u8|m4s|webm|mov|ts)(\?|$)|\/video\/|\/play\/|\/feed\//i.test(url)) return true;
+      if (ct && (ct.startsWith("video/") || ct.includes("mpegurl") || ct.includes("dash+xml"))) return true;
+    }
+    // Catch-all: any video/* content-type hoặc .mp4 trong URL
+    if (ct && (ct.startsWith("video/") || ct.includes("mpegurl") || ct.includes("dash+xml"))) return true;
     return false;
   },
   pickBest: (urls) => {
-    // Prefer "nwm" (no watermark) when available
-    const nwm = urls.find((u) => /nwm|playwm=0|play_no_watermark/i.test(u));
-    if (nwm) return nwm;
-    // Prefer HD indicators
-    const hd = urls.find((u) => /hd|h264|bytevc1/i.test(u));
-    if (hd) return hd;
-    return urls[urls.length - 1]; // latest captured
+    // Ưu tiên mp4 đầy đủ (không phải HLS segment)
+    const fullMp4 = urls.filter((u) => /\.mp4(\?|$)/i.test(u) && !/\.m3u8|\/seg-|\/segment/.test(u));
+    if (fullMp4.length) {
+      const nwm = fullMp4.find((u) => /nwm|playwm=0|play_no_watermark|\/play\//i.test(u));
+      if (nwm) return nwm;
+      const hd = fullMp4.find((u) => /720p|1080p|h264|bytevc1|_hd/i.test(u));
+      if (hd) return hd;
+      return fullMp4.sort((a, b) => b.length - a.length)[0];
+    }
+    const m3u8 = urls.find((u) => /\.m3u8(\?|$)/i.test(u));
+    if (m3u8) return m3u8;
+    return urls[urls.length - 1];
   },
   pageScripts: [
-    // Try multiple triggers — TikTok's player is finicky
-    "document.querySelector('video')?.play().catch(() => {})",
-    "setTimeout(() => document.querySelector('video')?.play().catch(() => {}), 800)",
-    "setTimeout(() => document.querySelector('video')?.play().catch(() => {}), 2000)",
-    // Click center of viewport to dismiss age gate if any
+    `(() => {
+      const v = document.querySelector('video');
+      if (v) { v.muted = true; v.volume = 0; v.play().catch(() => {}); }
+    })()`,
     `setTimeout(() => {
-      const m = document.querySelector('[data-e2e="modal-content"]');
+      const v = document.querySelector('video');
+      if (v) { v.muted = true; v.play().catch(() => {}); }
+    }, 1000)`,
+    `setTimeout(() => {
+      const v = document.querySelector('video');
+      if (v) { v.muted = true; v.play().catch(() => {}); }
+      const m = document.querySelector('[data-e2e="modal-content"], [class*="modal"]');
       if (m) m.querySelector('button')?.click();
-    }, 1500)`,
+    }, 2500)`,
   ],
   getMeta: `({
     title: document.querySelector('meta[property="og:title"]')?.content

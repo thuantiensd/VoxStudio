@@ -23,9 +23,9 @@ async function captureMediaURL(inputURL, opts = {}) {
   onProgress("opening", 5, `Đang mở trình duyệt ẩn (${adapter.platform})…`);
 
   const ingestSession = session.fromPartition(SESSION_NAME);
-  // Collect candidate media URLs + their response headers
   const candidates = new Map(); // url → { contentType, contentLength }
-  const collectedHeaders = {};  // cookies / referer cho URL chiến thắng
+  // Debug: tất cả URL trông-có-video — in console để debug khi không match.
+  const seenMediaish = [];
 
   const webRequest = ingestSession.webRequest;
 
@@ -36,6 +36,13 @@ async function captureMediaURL(inputURL, opts = {}) {
               || null;
       const url = details.url;
       if (!url || !url.startsWith("http")) return;
+      const looksVideo = ct && (
+        ct.startsWith("video/") || ct.includes("mpegurl") || ct.includes("dash+xml")
+      );
+      const urlHint = /\.(mp4|m3u8|m4s|webm|mov|ts)(\?|$)/i.test(url);
+      if (looksVideo || urlHint) {
+        seenMediaish.push({ url: url.slice(0, 180), ct });
+      }
       if (!adapter.isMediaURL(url, ct)) return;
       const len = parseInt(
         details.responseHeaders?.["content-length"]?.[0]
@@ -43,7 +50,6 @@ async function captureMediaURL(inputURL, opts = {}) {
         || "0",
         10,
       ) || 0;
-      // Keep only biggest known (skip thumbnail .mp4 tiny assets)
       if (len > 0 && len < 32 * 1024) return;
       candidates.set(url, { contentType: ct, contentLength: len });
       onProgress("detecting", 40, `Thấy media stream (${candidates.size})`);
@@ -132,9 +138,16 @@ async function captureMediaURL(inputURL, opts = {}) {
     }
 
     if (candidates.size === 0) {
+      // In danh sách URL video-ish thấy được → giúp debug
+      if (seenMediaish.length > 0) {
+        console.warn("[ingest] Detected video-like URLs but none matched filter:");
+        seenMediaish.slice(0, 8).forEach((s) => console.warn("  ·", s.ct || "(no ct)", s.url));
+      } else {
+        console.warn("[ingest] No video-like network requests detected at all");
+      }
       throw new Error(
-        "Không thấy media URL nào (video có thể bị DRM, không có stream mp4 trực "
-        + "tiếp, hoặc cần login). Thử chế độ Toàn năng."
+        "Không thấy media URL nào. Video có thể bị DRM, bị ẩn qua JS encryption, "
+        + "hoặc cần login. Thử chế độ Toàn năng hoặc tải bằng tool khác rồi kéo vào Studio."
       );
     }
 
