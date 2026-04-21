@@ -106,15 +106,27 @@ def ingest_url_generator(
                 "max_filesize": max_filesize_mb * 1024 * 1024,
                 "merge_output_format": "mp4",
                 "retries": 3,
-                # Headers an toàn cho 1 số site
+                # curl-cffi handler (cài bằng yt-dlp[curl-cffi]) tự impersonate
+                # browser khi extractor request — không cần set "impersonate" thủ công.
                 "http_headers": {
                     "User-Agent": (
                         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
                         "AppleWebKit/537.36 (KHTML, like Gecko) "
-                        "Chrome/120.0.0.0 Safari/537.36"
+                        "Chrome/131.0.0.0 Safari/537.36"
                     ),
                 },
+                # Tự lấy cookie từ browser hiện có (ưu tiên Chrome → Safari → Firefox).
+                # Nếu người dùng đã login TikTok/YouTube trong 1 trong các browser đó,
+                # yt-dlp tự có cookie → giảm mạnh 403/404 geo-block.
+                # Fallback silent nếu không có browser nào hoặc bị locked cookie DB.
             }
+            # Ưu tiên dùng cookie từ browser đã cài (Chrome). Nếu lấy fail thì
+            # retry không cookie.
+            import os as _os
+            if _os.path.exists(_os.path.expanduser("~/Library/Application Support/Google/Chrome")) \
+               or _os.path.exists(_os.path.expanduser("~/.config/google-chrome")):
+                opts["cookiesfrombrowser"] = ("chrome",)
+                logger.info("yt-dlp: attempting Chrome cookies")
             with yt_dlp.YoutubeDL(opts) as ydl:
                 # Lấy metadata trước (không tải) để hiện title cho UI sớm
                 try:

@@ -17,4 +17,4 @@ pyloudnorm
 resemblyzer
 silero-vad
 scikit-learn
-yt-dlp
+yt-dlp[default,curl-cffi]
