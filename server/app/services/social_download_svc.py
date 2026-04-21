@@ -180,7 +180,37 @@ def _fetch_via_ytdlp(url: str, platform: str) -> InfoResult:
         with yt_dlp.YoutubeDL(opts) as y:
             info = y.extract_info(url, download=False)
     except Exception as e:
-        raise RuntimeError(f"yt-dlp: {str(e)[:280]}")
+        msg = str(e)
+        # Dịch các lỗi phổ biến sang tiếng Việt dễ hiểu
+        if "Log in for access" in msg or "login" in msg.lower():
+            raise RuntimeError(
+                "Video cần ĐĂNG NHẬP để xem. Mở Chrome → login TikTok/YouTube/… "
+                "→ Cmd+Q Chrome → thử lại."
+            )
+        if "IP address is blocked" in msg:
+            raise RuntimeError(
+                "IP bị TikTok chặn. Thử dùng video không age-restricted, hoặc "
+                "dùng VPN thay đổi IP."
+            )
+        if "Private video" in msg or "Video unavailable" in msg:
+            raise RuntimeError("Video private hoặc đã bị xoá.")
+        if "Sign in to confirm your age" in msg:
+            raise RuntimeError(
+                "Video giới hạn độ tuổi. Login YouTube trong Chrome (Cmd+Q Chrome) "
+                "rồi thử lại."
+            )
+        if "HTTP Error 404" in msg:
+            raise RuntimeError("URL không tồn tại (404). Kiểm tra lại link.")
+        if "HTTP Error 403" in msg:
+            raise RuntimeError("Server chặn (403). Login vào site trong Chrome rồi thử lại.")
+        if "DRM" in msg or "widevine" in msg.lower():
+            raise RuntimeError("Video có DRM protection — không tải được.")
+        if "geo" in msg.lower() and "block" in msg.lower():
+            raise RuntimeError("Video bị chặn theo vùng địa lý.")
+        # Strip ANSI color codes cho dễ đọc
+        import re
+        clean = re.sub(r"\x1b\[[0-9;]*m", "", msg)
+        raise RuntimeError(clean[:280])
     if not info:
         raise RuntimeError("yt-dlp trả về rỗng")
     video_url = info.get("url")
@@ -213,9 +243,36 @@ def _fetch_via_ytdlp(url: str, platform: str) -> InfoResult:
 
 
 def _attach_chrome_cookies(opts: dict):
-    if os.path.exists(os.path.expanduser("~/Library/Application Support/Google/Chrome")) \
-       or os.path.exists(os.path.expanduser("~/.config/google-chrome")):
-        opts["cookiesfrombrowser"] = ("chrome",)
+    """Thử các browser user có cài — yt-dlp sẽ pick browser đầu tiên có cookie.
+    Chrome phải được ĐÓNG HẲN (Cmd+Q) để cookie DB unlock.
+    """
+    candidates = []
+    # macOS paths
+    if os.path.exists(os.path.expanduser("~/Library/Application Support/Google/Chrome")):
+        candidates.append("chrome")
+    if os.path.exists(os.path.expanduser("~/Library/Safari")):
+        candidates.append("safari")
+    if os.path.exists(os.path.expanduser("~/Library/Application Support/Firefox/Profiles")):
+        candidates.append("firefox")
+    if os.path.exists(os.path.expanduser("~/Library/Application Support/Microsoft Edge")):
+        candidates.append("edge")
+    if os.path.exists(os.path.expanduser("~/Library/Application Support/BraveSoftware/Brave-Browser")):
+        candidates.append("brave")
+    # Linux paths
+    if os.path.exists(os.path.expanduser("~/.config/google-chrome")):
+        candidates.append("chrome")
+    if os.path.exists(os.path.expanduser("~/.mozilla/firefox")):
+        candidates.append("firefox")
+    # Windows paths
+    if os.path.exists(os.path.expandvars(r"%LOCALAPPDATA%\Google\Chrome")):
+        candidates.append("chrome")
+    if candidates:
+        # Yt-dlp chỉ chấp nhận 1 browser — ưu tiên Chrome > Safari > Firefox
+        for b in ("chrome", "safari", "firefox", "edge", "brave"):
+            if b in candidates:
+                opts["cookiesfrombrowser"] = (b,)
+                logger.info("yt-dlp: using cookies from %s", b)
+                break
 
 
 # ── Download to disk with progress ─────────────────────────────
