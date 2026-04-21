@@ -104,6 +104,28 @@ ipcMain.handle("app:getPlatform", () => process.platform);
 
 ipcMain.handle("shell:openExternal", (_event, url) => shell.openExternal(url));
 
+// Mở URL bằng Chrome (nếu cài), fallback default browser. Dùng cho flow
+// "Đăng nhập để tải" — user click → app mở URL trong Chrome thật → login
+// → Cmd+Q Chrome → quay lại VoxStudio thử lại.
+ipcMain.handle("shell:openInChrome", async (_event, url) => {
+  const { spawn } = await import("node:child_process");
+  const fs = await import("node:fs/promises");
+  const chromePaths = [
+    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+    "/Applications/Google Chrome Canary.app/Contents/MacOS/Google Chrome Canary",
+  ];
+  for (const p of chromePaths) {
+    try {
+      await fs.access(p);
+      spawn(p, [url], { detached: true, stdio: "ignore" }).unref();
+      return "chrome";
+    } catch {}
+  }
+  // Fallback: system default browser
+  await shell.openExternal(url);
+  return "default";
+});
+
 // Folder picker — trả về path absolute hoặc null khi hủy.
 ipcMain.handle("dialog:pickFolder", async () => {
   const result = await dialog.showOpenDialog(mainWindow, {

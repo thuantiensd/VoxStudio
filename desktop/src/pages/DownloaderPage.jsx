@@ -12,6 +12,7 @@ import Modal from "../components/ui/Modal";
 import StatusDot from "../components/ui/StatusDot";
 import Segmented from "../components/ui/Segmented";
 import { Table, THead, TBody, Th, Tr, Td } from "../components/ui/Table";
+import { Globe as Chrome } from "lucide-react";
 import { useToast } from "../components/ui/Toast";
 import { useT } from "../i18n/I18nContext";
 import {
@@ -74,6 +75,7 @@ export default function DownloaderPage() {
     catch { return []; }
   });
   const [disclaimerOpen, setDisclaimerOpen] = useState(false);
+  const [loginNeeded, setLoginNeeded] = useState(null);  // { platform, url }
   const pendingActionRef = useRef(null);
   const abortRef = useRef(null);
   const inputRef = useRef(null);
@@ -83,16 +85,24 @@ export default function DownloaderPage() {
 
   useEffect(() => {
     setInfo(null);
+    setLoginNeeded(null);
   }, [url]);
 
   const doFetchInfo = async () => {
     if (!validUrl || fetching || downloading) return;
     setFetching(true);
+    setLoginNeeded(null);
     try {
       const data = await downloadFetchInfo(url.trim(), { engine });
       setInfo(data);
     } catch (e) {
-      showError(toast, e, { context: "fetch info" }, t);
+      // Detect "login needed" type errors → show helper card thay vì toast lỗi
+      const msg = String(e?.message || "");
+      if (/ĐĂNG NHẬP|cần login|login|sign in|cookies.*needed/i.test(msg)) {
+        setLoginNeeded({ url: url.trim(), message: msg });
+      } else {
+        showError(toast, e, { context: "fetch info" }, t);
+      }
     }
     setFetching(false);
   };
@@ -275,6 +285,39 @@ export default function DownloaderPage() {
           onEngine={setEnginePersist}
           t={t}
         />
+
+        {/* Login-needed helper */}
+        <AnimatePresence>
+          {loginNeeded && !downloading && (
+            <motion.div
+              key="login-needed"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.18 }}
+              style={{ marginTop: 16 }}
+            >
+              <LoginNeededCard
+                url={loginNeeded.url}
+                message={loginNeeded.message}
+                onOpenChrome={async () => {
+                  try {
+                    await window.voxstudio?.openInChrome?.(loginNeeded.url);
+                    toast.info("Đã mở trong Chrome. Login xong → Cmd+Q Chrome → quay lại app, bấm Phân tích.");
+                  } catch {
+                    toast.error("Không mở được Chrome.");
+                  }
+                }}
+                onRetry={() => {
+                  setLoginNeeded(null);
+                  doFetchInfo();
+                }}
+                onDismiss={() => setLoginNeeded(null)}
+                t={t}
+              />
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* Preview card */}
         <AnimatePresence mode="wait">
@@ -828,6 +871,74 @@ function HistorySection({ items, onClear, onReplay, onOpenProject, onOpenFolder,
           ))}
         </TBody>
       </Table>
+    </div>
+  );
+}
+
+// ── Login helper card ───────────────────────────────────────
+function LoginNeededCard({ url, message, onOpenChrome, onRetry, onDismiss, t }) {
+  return (
+    <div
+      style={{
+        padding: 18,
+        borderRadius: 12,
+        background: "var(--n-1)",
+        border: "1px solid var(--warn)",
+        borderLeftWidth: 3,
+      }}
+    >
+      <div className="flex items-start gap-3">
+        <div
+          style={{
+            width: 36, height: 36, borderRadius: 8,
+            background: "rgba(210,153,34,0.15)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            flexShrink: 0,
+          }}
+        >
+          <AlertTriangle size={16} style={{ color: "var(--warn)" }} />
+        </div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{
+            fontSize: 13, fontWeight: 600, color: "var(--n-10)",
+            marginBottom: 4,
+          }}>
+            Video cần đăng nhập để xem
+          </div>
+          <p style={{ fontSize: 12, color: "var(--n-8)", lineHeight: 1.55, margin: 0 }}>
+            Làm theo 3 bước:
+          </p>
+          <ol style={{
+            margin: "6px 0 12px", paddingLeft: 18,
+            fontSize: 12, color: "var(--n-9)", lineHeight: 1.7,
+          }}>
+            <li>Bấm <b>"Mở trong Chrome"</b> → login TikTok (hoặc platform đó)</li>
+            <li>Trong Chrome bấm <kbd>⌘Q</kbd> để tắt hẳn (cookie mới unlock)</li>
+            <li>Quay lại đây → bấm <b>"Thử lại"</b></li>
+          </ol>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="primary"
+              size="md"
+              icon={Chrome}
+              onClick={onOpenChrome}
+            >
+              Mở trong Chrome
+            </Button>
+            <Button
+              variant="secondary"
+              size="md"
+              icon={Sparkles}
+              onClick={onRetry}
+            >
+              Thử lại
+            </Button>
+            <Button variant="ghost" size="md" onClick={onDismiss}>
+              Bỏ qua
+            </Button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

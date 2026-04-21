@@ -12,6 +12,7 @@ contextBridge.exposeInMainWorld("voxstudio", {
 
   // External links (bypass window blocker)
   openExternal: (url) => ipcRenderer.invoke("shell:openExternal", url),
+  openInChrome: (url) => ipcRenderer.invoke("shell:openInChrome", url),
 
   // Folder picker + save remote file to folder (cho batch export)
   pickFolder: () => ipcRenderer.invoke("dialog:pickFolder"),
