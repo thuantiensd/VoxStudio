@@ -16,14 +16,18 @@ router = APIRouter(prefix="/download", tags=["Download"])
 
 
 @router.post("/info")
-async def fetch_info(url: str = Body(..., embed=True)):
+async def fetch_info(
+    url: str = Body(..., embed=True),
+    engine: str = Body("auto", embed=True),
+):
     """Lấy metadata + direct URL (không tải). Dùng cho preview card ở UI.
 
+    engine: 'auto' | 'scraper' (Douyin_TikTok_Scraper) | 'ytdlp' (yt-dlp).
     Trả: { platform, title, author, thumbnail, duration, video_url,
             watermark_url, audio_url, source }
     """
     try:
-        info = await social_download_svc.fetch_info(url)
+        info = await social_download_svc.fetch_info(url, engine=engine)
         return info.to_dict()
     except Exception as e:
         logger.warning("fetch_info failed: %s", e)
@@ -38,6 +42,7 @@ async def download_to_project(
     enable_dubbing: bool = Body(True, embed=True),
     enable_subtitle: bool = Body(False, embed=True),
     use_watermark: bool = Body(False, embed=True),
+    engine: str = Body("auto", embed=True),
 ):
     """Tải URL về → tạo dubbing project luôn. SSE stream progress.
 
@@ -57,6 +62,7 @@ async def download_to_project(
                     enable_dubbing=enable_dubbing,
                     enable_subtitle=enable_subtitle,
                     use_watermark=use_watermark,
+                    engine=engine,
                 ):
                     loop.call_soon_threadsafe(q.put_nowait, update)
             except Exception as e:

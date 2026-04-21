@@ -88,33 +88,67 @@ def _classify(url: str) -> str:
 
 
 # ── Fetch info ─────────────────────────────────────────────────
-async def fetch_info(url: str) -> InfoResult:
-    """Lấy metadata + direct URL. Try Douyin scraper trước (nếu platform
-    match), sau đó fallback yt-dlp."""
+async def fetch_info(url: str, engine: str = "auto") -> InfoResult:
+    """Lấy metadata + direct URL.
+
+    engine:
+      - "auto"    : scraper trước (nếu platform match), fallback yt-dlp
+      - "scraper" : CHỈ Douyin scraper, không fallback
+      - "ytdlp"   : CHỈ yt-dlp
+    """
     url = (url or "").strip()
     if not url or not url.lower().startswith(("http://", "https://")):
         raise ValueError("URL không hợp lệ (cần http:// hoặc https://).")
 
     platform = _classify(url)
+    engine = (engine or "auto").lower()
 
-    # 1. Douyin scraper cho TikTok/Douyin/Bilibili/Kuaishou/Weibo/Xiaohongshu
+    # Forced engine paths
+    if engine == "scraper":
+        if not _DT_OK:
+            raise RuntimeError("douyin-tiktok-scraper chưa cài trên server.")
+        info = await _fetch_via_scraper(url, platform)
+        if not info or not info.video_url:
+            raise RuntimeError(
+                "Scraper không lấy được video URL. Thuật toán signing có thể "
+                "đã lỗi thời. Thử engine 'yt-dlp'."
+            )
+        return info
+
+    if engine == "ytdlp":
+        if not _YTDLP_OK:
+            raise RuntimeError("yt-dlp chưa cài trên server.")
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, _fetch_via_ytdlp, url, platform)
+
+    # engine == "auto" — smart fallback
+    # 1. Douyin scraper cho TikTok/Douyin/Bilibili nếu khả dụng
+    scraper_err = None
     if _DT_OK and platform in ("tiktok", "douyin", "bilibili"):
         try:
             info = await _fetch_via_scraper(url, platform)
             if info and info.video_url:
                 return info
-            logger.info("Scraper returned empty video_url, falling back to yt-dlp")
+            logger.info("Scraper empty video_url, falling back to yt-dlp")
         except Exception as e:
-            logger.warning("Scraper fail for %s: %s — falling back yt-dlp", url, e)
+            scraper_err = e
+            logger.warning("Scraper fail: %s — falling back yt-dlp", e)
 
-    # 2. yt-dlp fallback cho mọi platform
+    # 2. yt-dlp fallback
     if _YTDLP_OK:
         loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(None, _fetch_via_ytdlp, url, platform)
+        try:
+            return await loop.run_in_executor(None, _fetch_via_ytdlp, url, platform)
+        except Exception as ytdlp_err:
+            # Show both errors if scraper was also tried
+            if scraper_err:
+                raise RuntimeError(
+                    f"Cả 2 engine đều fail. Scraper: {str(scraper_err)[:120]} · "
+                    f"yt-dlp: {str(ytdlp_err)[:120]}"
+                )
+            raise
 
-    raise RuntimeError(
-        "Cả douyin-tiktok-scraper và yt-dlp đều không sẵn sàng trên server."
-    )
+    raise RuntimeError("Cả 2 engine đều không sẵn sàng trên server.")
 
 
 async def _fetch_via_scraper(url: str, platform: str) -> InfoResult | None:
@@ -350,7 +384,8 @@ def download_to_project_generator(url: str,
                                   source_language: str = "auto",
                                   enable_dubbing: bool = True,
                                   enable_subtitle: bool = False,
-                                  use_watermark: bool = False):
+                                  use_watermark: bool = False,
+                                  engine: str = "auto"):
     """Full flow: fetch info → download → create dubbing project. Yields SSE.
     Cuối cùng yield {step:"done", project_id, title, filename, duration}."""
     from .dubbing_svc import _project_dir, _save_meta, _detect_tts_engine
@@ -360,7 +395,7 @@ def download_to_project_generator(url: str,
         yield {"step": "resolving", "progress": 2, "label": "Đang phân tích URL…"}
         loop = asyncio.new_event_loop()
         try:
-            info = loop.run_until_complete(fetch_info(url))
+            info = loop.run_until_complete(fetch_info(url, engine=engine))
         finally:
             loop.close()
     except Exception as e:

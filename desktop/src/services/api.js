@@ -469,7 +469,7 @@ export function ingestFromURL({
 /**
  * downloadFetchInfo — POST /download/info để lấy metadata + preview.
  */
-export async function downloadFetchInfo(url, { signal } = {}) {
+export async function downloadFetchInfo(url, { signal, engine = "auto" } = {}) {
   const res = await fetch(`${API_BASE}/download/info`, {
     method: "POST",
     signal,
@@ -477,7 +477,7 @@ export async function downloadFetchInfo(url, { signal } = {}) {
       "Content-Type": "application/json",
       "ngrok-skip-browser-warning": "true",
     },
-    body: JSON.stringify({ url }),
+    body: JSON.stringify({ url, engine }),
   });
   if (!res.ok) {
     const data = await res.json().catch(() => ({ detail: res.statusText }));
@@ -498,6 +498,7 @@ export function downloadToProject({
   enableDubbing = true,
   enableSubtitle = false,
   useWatermark = false,
+  engine = "auto",
   signal,
   onProgress,
   onDone,
@@ -510,6 +511,7 @@ export function downloadToProject({
     enable_dubbing: enableDubbing,
     enable_subtitle: enableSubtitle,
     use_watermark: useWatermark,
+    engine,
   };
   return fetch(`${API_BASE}/download/to-project`, {
     method: "POST",

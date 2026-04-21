@@ -10,6 +10,7 @@ import PageHeader, { Page, PageContent } from "../components/ui/PageHeader";
 import Button from "../components/ui/Button";
 import Modal from "../components/ui/Modal";
 import StatusDot from "../components/ui/StatusDot";
+import Segmented from "../components/ui/Segmented";
 import { Table, THead, TBody, Th, Tr, Td } from "../components/ui/Table";
 import { useToast } from "../components/ui/Toast";
 import { useT } from "../i18n/I18nContext";
@@ -20,6 +21,7 @@ import { showError } from "../services/errors";
 
 const HISTORY_KEY = "voxstudio:download:history";
 const AGREED_KEY = "voxstudio:download:disclaimerAgreed";
+const ENGINE_KEY = "voxstudio:download:engine";
 const MAX_HISTORY = 20;
 
 const PLATFORM_COLORS = {
@@ -52,6 +54,15 @@ export default function DownloaderPage() {
   const [fetching, setFetching] = useState(false);
   const [info, setInfo] = useState(null);
   const [preferNoWM, setPreferNoWM] = useState(true);
+  const [engine, setEngine] = useState(() => {
+    try { return localStorage.getItem(ENGINE_KEY) || "auto"; }
+    catch { return "auto"; }
+  });
+  const setEnginePersist = (v) => {
+    setEngine(v);
+    try { localStorage.setItem(ENGINE_KEY, v); } catch {}
+    setInfo(null);  // clear preview khi đổi engine
+  };
 
   const [downloading, setDownloading] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -78,7 +89,7 @@ export default function DownloaderPage() {
     if (!validUrl || fetching || downloading) return;
     setFetching(true);
     try {
-      const data = await downloadFetchInfo(url.trim());
+      const data = await downloadFetchInfo(url.trim(), { engine });
       setInfo(data);
     } catch (e) {
       showError(toast, e, { context: "fetch info" }, t);
@@ -150,6 +161,7 @@ export default function DownloaderPage() {
     downloadToProject({
       url: url.trim(),
       useWatermark: !preferNoWM,
+      engine,
       signal: controller.signal,
       onProgress: (d) => {
         if (d.label) setProgressLabel(d.label);
@@ -257,6 +269,8 @@ export default function DownloaderPage() {
           fetching={fetching}
           disabled={downloading}
           inputRef={inputRef}
+          engine={engine}
+          onEngine={setEnginePersist}
           t={t}
         />
 
@@ -378,8 +392,15 @@ export default function DownloaderPage() {
 }
 
 // ── Hero URL input ───────────────────────────────────────────
-function HeroInput({ url, onUrl, onPaste, onAnalyze, fetching, disabled, inputRef, t }) {
+function HeroInput({ url, onUrl, onPaste, onAnalyze, fetching, disabled,
+                     inputRef, engine, onEngine, t }) {
   const valid = /^https?:\/\/\S+$/i.test(url.trim());
+  const engineOptions = [
+    { value: "auto",    label: t("downloader.engineAuto"),    hint: t("downloader.engineAutoHint") },
+    { value: "scraper", label: t("downloader.engineScraper"), hint: t("downloader.engineScraperHint") },
+    { value: "ytdlp",   label: t("downloader.engineYtdlp"),   hint: t("downloader.engineYtdlpHint") },
+  ];
+  const currentHint = engineOptions.find((o) => o.value === engine)?.hint;
   return (
     <div
       style={{
@@ -397,7 +418,24 @@ function HeroInput({ url, onUrl, onPaste, onAnalyze, fetching, disabled, inputRe
         }}>
           {t("downloader.nav")}
         </span>
+        <span style={{ flex: 1 }} />
+        <div className="flex items-center gap-2">
+          <span style={{ fontSize: 10, fontWeight: 600, textTransform: "uppercase",
+                          letterSpacing: "0.06em", color: "var(--n-6)" }}>
+            {t("downloader.engine")}
+          </span>
+          <Segmented
+            value={engine}
+            onChange={onEngine}
+            options={engineOptions.map(({ value, label }) => ({ value, label }))}
+          />
+        </div>
       </div>
+      {currentHint && (
+        <p style={{ fontSize: 11, color: "var(--n-8)", marginTop: -8, marginBottom: 12 }}>
+          · {currentHint}
+        </p>
+      )}
       <div
         className="flex items-center gap-2"
         style={{
