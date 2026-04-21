@@ -11,8 +11,6 @@ import { useToast } from "../ui/Toast";
 import { showError } from "../../services/errors";
 import PageHeader, { Page } from "../ui/PageHeader";
 import Segmented from "../ui/Segmented";
-import IngestTab from "./IngestTab";
-import { Link2 } from "lucide-react";
 
 const MAX_BATCH = 10;
 
@@ -180,7 +178,6 @@ export default function StudioHome() {
           options={[
             { value: "library", label: t("shell.titleLibrary"), icon: LibraryIcon },
             { value: "upload",  label: "Upload",                 icon: Upload },
-            { value: "ingest",  label: t("ingest.tab"),          icon: Link2 },
           ]}
         />
       </PageHeader>
@@ -196,7 +193,7 @@ export default function StudioHome() {
             minHeight: 320,
           }}
         >
-          {tab === "library" && (
+          {tab === "library" ? (
             <LibraryList
               folder={libFolder}
               files={libFiles}
@@ -207,8 +204,7 @@ export default function StudioHome() {
               onPickFolder={pickLibraryFolder}
               onBack={backToNoFolder}
             />
-          )}
-          {tab === "upload" && (
+          ) : (
             <UploadTab
               dragOver={dragOver}
               setDragOver={setDragOver}
@@ -225,14 +221,11 @@ export default function StudioHome() {
               remaining={remaining}
             />
           )}
-          {tab === "ingest" && <IngestTab />}
 
-          {tab !== "ingest" && (
-            <div className="mt-4 text-center text-xs"
-                 style={{ color: "var(--accent)" }}>
-              {t("studioHome.selectedCount", { n: selectedCount, max: MAX_BATCH })}
-            </div>
-          )}
+          <div className="mt-4 text-center text-xs"
+               style={{ color: "var(--accent)" }}>
+            {t("studioHome.selectedCount", { n: selectedCount, max: MAX_BATCH })}
+          </div>
         </div>
 
         {/* Strip video đã chọn */}

@@ -60,6 +60,7 @@ export default function AppShell({ children }) {
       "mod+3": () => nav("/history"),
       "mod+4": () => nav("/"),
       "mod+5": () => nav("/clone"),
+      "mod+6": () => nav("/downloader"),
       "mod+,": () => nav("/settings"),
       "escape": () => setPaletteOpen(false),
     },

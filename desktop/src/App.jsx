@@ -6,6 +6,7 @@ import VoiceLibraryPage from "./pages/VoiceLibraryPage";
 import HistoryPage from "./pages/HistoryPage";
 import SettingsPage from "./pages/SettingsPage";
 import StudioPage from "./pages/StudioPage";
+import DownloaderPage from "./pages/DownloaderPage";
 
 import LoginPage from "./auth/LoginPage";
 import SignupPage from "./auth/SignupPage";
@@ -36,6 +37,7 @@ function Shell() {
         <Route path="/clone" element={<VoiceClonePage />} />
         <Route path="/library" element={<VoiceLibraryPage />} />
         <Route path="/history" element={<HistoryPage />} />
+        <Route path="/downloader" element={<DownloaderPage />} />
         <Route path="/settings" element={<SettingsPage />} />
       </Routes>
     </AppShell>

@@ -2,7 +2,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { motion } from "motion/react";
 import {
   Clapperboard, Mic2, AudioWaveform, Library,
-  ClockFading, Settings as Cog, Sparkles,
+  ClockFading, Settings as Cog, Sparkles, CloudDownload,
 } from "lucide-react";
 import { useBatch } from "../../batch/BatchContext";
 import { useT, useI18n } from "../../i18n/I18nContext";
@@ -25,8 +25,9 @@ export default function Sidebar() {
   ];
 
   const TOOLS = [
-    { path: "/",         icon: AudioWaveform, label: "TTS",                    hotkey: "4" },
-    { path: "/clone",    icon: Mic2,          label: t("shell.titleClone"),    hotkey: "5" },
+    { path: "/",           icon: AudioWaveform, label: "TTS",                        hotkey: "4" },
+    { path: "/clone",      icon: Mic2,          label: t("shell.titleClone"),        hotkey: "5" },
+    { path: "/downloader", icon: CloudDownload, label: t("shell.titleDownloader"),   hotkey: "6" },
   ];
 
   return (

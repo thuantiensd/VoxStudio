@@ -18,3 +18,4 @@ resemblyzer
 silero-vad
 scikit-learn
 yt-dlp[default,curl-cffi]
+douyin-tiktok-scraper

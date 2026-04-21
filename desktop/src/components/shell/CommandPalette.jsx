@@ -5,6 +5,7 @@ import { useNavigate } from "react-router-dom";
 import {
   Clapperboard, Mic2, AudioWaveform, Library, ClockFading,
   Settings as Cog, Search, Upload, FolderOpen, Trash2, SunMoon, Languages,
+  CloudDownload,
 } from "lucide-react";
 import { useTheme } from "../../theme/ThemeContext";
 import { useBatch } from "../../batch/BatchContext";
@@ -35,8 +36,9 @@ export default function CommandPalette({ open, onClose }) {
     { id: "nav:library",  icon: Library,       label: t("shell.titleLibrary"),  group: NAV, run: go("/library"),  hotkey: "⌘2" },
     { id: "nav:history",  icon: ClockFading,   label: t("shell.titleHistory"),  group: NAV, run: go("/history"),  hotkey: "⌘3" },
     { id: "nav:tts",      icon: AudioWaveform, label: "TTS",                    group: NAV, run: go("/"),         hotkey: "⌘4" },
-    { id: "nav:clone",    icon: Mic2,          label: t("shell.titleClone"),    group: NAV, run: go("/clone"),    hotkey: "⌘5" },
-    { id: "nav:settings", icon: Cog,           label: t("shell.titleSettings"), group: NAV, run: go("/settings"), hotkey: "⌘," },
+    { id: "nav:clone",    icon: Mic2,          label: t("shell.titleClone"),      group: NAV, run: go("/clone"),      hotkey: "⌘5" },
+    { id: "nav:download", icon: CloudDownload, label: t("shell.titleDownloader"), group: NAV, run: go("/downloader"), hotkey: "⌘6" },
+    { id: "nav:settings", icon: Cog,           label: t("shell.titleSettings"),   group: NAV, run: go("/settings"),   hotkey: "⌘," },
 
     { id: "act:upload",   icon: Upload,        label: t("palette.uploadVideo"),      group: ACT, run: go("/studio") },
     { id: "act:output",   icon: FolderOpen,    label: t("palette.openOutputFolder"), group: ACT,

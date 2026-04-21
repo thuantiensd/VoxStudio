@@ -12,8 +12,9 @@ export default function Breadcrumb() {
     "/studio":   t("shell.titleStudio"),
     "/clone":    t("shell.titleClone"),
     "/library":  t("shell.titleLibrary"),
-    "/history":  t("shell.titleHistory"),
-    "/settings": t("shell.titleSettings"),
+    "/history":    t("shell.titleHistory"),
+    "/downloader": t("shell.titleDownloader"),
+    "/settings":   t("shell.titleSettings"),
   };
 
   // Tạo crumb từ path. /studio/abc-123 → ["Studio", "abc-123" (8 ký tự)]

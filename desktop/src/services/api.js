@@ -465,6 +465,103 @@ export function ingestFromURL({
   });
 }
 
+// ── Social download (TikTok / Douyin / YouTube / FB / IG / Bilibili …)
+/**
+ * downloadFetchInfo — POST /download/info để lấy metadata + preview.
+ */
+export async function downloadFetchInfo(url, { signal } = {}) {
+  const res = await fetch(`${API_BASE}/download/info`, {
+    method: "POST",
+    signal,
+    headers: {
+      "Content-Type": "application/json",
+      "ngrok-skip-browser-warning": "true",
+    },
+    body: JSON.stringify({ url }),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({ detail: res.statusText }));
+    throw fromResponse(res, data?.detail || null);
+  }
+  return res.json();
+}
+
+/**
+ * downloadToProject — POST /download/to-project, SSE stream progress.
+ * opts: { url, targetLanguage, sourceLanguage, enableDubbing, enableSubtitle,
+ *         useWatermark, signal, onProgress, onDone, onError }
+ */
+export function downloadToProject({
+  url,
+  targetLanguage = "vietnamese",
+  sourceLanguage = "auto",
+  enableDubbing = true,
+  enableSubtitle = false,
+  useWatermark = false,
+  signal,
+  onProgress,
+  onDone,
+  onError,
+} = {}) {
+  const body = {
+    url,
+    target_language: targetLanguage,
+    source_language: sourceLanguage,
+    enable_dubbing: enableDubbing,
+    enable_subtitle: enableSubtitle,
+    use_watermark: useWatermark,
+  };
+  return fetch(`${API_BASE}/download/to-project`, {
+    method: "POST",
+    signal,
+    headers: {
+      "Content-Type": "application/json",
+      "ngrok-skip-browser-warning": "true",
+    },
+    body: JSON.stringify(body),
+  }).then(async (res) => {
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({ detail: res.statusText }));
+      throw fromResponse(res, data?.detail || null);
+    }
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    function pump() {
+      return reader.read().then(({ done, value }) => {
+        if (done) { if (onDone) onDone(); return; }
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop();
+        for (const line of lines) {
+          if (!line.startsWith("data: ")) continue;
+          try {
+            const data = JSON.parse(line.slice(6));
+            if (data.step === "error" && onError) {
+              onError(new AppError(data.label || "Download failed", {
+                kind: "network", data,
+              }));
+              return;
+            } else if (data.step === "done") {
+              if (onDone) onDone(data);
+            } else if (onProgress) {
+              onProgress(data);
+            }
+          } catch {}
+        }
+        return pump();
+      });
+    }
+    return pump();
+  }).catch((e) => {
+    if (e?.name === "AbortError") throw e;
+    if (e instanceof AppError) throw e;
+    throw new AppError(e?.message || "Download failed", {
+      kind: "network", cause: e,
+    });
+  });
+}
+
 export async function cancelAutoDub(projectId) {
   try {
     await fetch(`${API_BASE}/dubbing/projects/${projectId}/cancel`, { method: 'POST' });
