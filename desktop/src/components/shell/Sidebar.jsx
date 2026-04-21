@@ -5,7 +5,7 @@ import {
   ClockFading, Settings as Cog, Sparkles,
 } from "lucide-react";
 import { useBatch } from "../../batch/BatchContext";
-import { useT } from "../../i18n/I18nContext";
+import { useT, useI18n } from "../../i18n/I18nContext";
 
 /**
  * Sidebar — 220px fixed. Section headers uppercase nhỏ. Item 32px.
@@ -95,9 +95,51 @@ export default function Sidebar() {
           active={isActive(loc.pathname, "/settings")}
           onClick={() => nav("/settings")}
         />
-        <BackendStatus label={t("sidebar.backendOnline")} />
+        <FooterRow label={t("sidebar.backendOnline")} />
       </div>
     </aside>
+  );
+}
+
+function FooterRow({ label }) {
+  const { locale, setLocale, locales } = useI18n();
+  const toggle = () => {
+    const i = locales.indexOf(locale);
+    const next = locales[(i + 1) % locales.length];
+    setLocale(next);
+  };
+  return (
+    <div
+      className="mt-2 mx-1 flex items-center gap-2 text-[11px]"
+      style={{ color: "var(--n-8)" }}
+    >
+      <span
+        className="inline-block rounded-full"
+        style={{ width: 6, height: 6, background: "var(--ok)" }}
+      />
+      <span className="flex-1">{label}</span>
+      <button
+        onClick={toggle}
+        title="Đổi ngôn ngữ / Change language"
+        className="px-1.5 py-0.5 rounded font-mono uppercase transition-colors"
+        style={{
+          fontSize: 10, fontWeight: 600,
+          color: "var(--n-8)",
+          background: "var(--n-2)",
+          border: "1px solid var(--n-3)",
+        }}
+        onMouseEnter={(e) => {
+          e.currentTarget.style.color = "var(--n-10)";
+          e.currentTarget.style.borderColor = "var(--n-4)";
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.color = "var(--n-8)";
+          e.currentTarget.style.borderColor = "var(--n-3)";
+        }}
+      >
+        {locale}
+      </button>
+    </div>
   );
 }
 
@@ -165,15 +207,3 @@ function NavItem({ item, active, onClick, badge }) {
   );
 }
 
-function BackendStatus({ label }) {
-  return (
-    <div className="mt-2 mx-1 flex items-center gap-2 text-[11px]"
-         style={{ color: "var(--n-8)" }}>
-      <span
-        className="inline-block rounded-full"
-        style={{ width: 6, height: 6, background: "var(--ok)" }}
-      />
-      <span>{label}</span>
-    </div>
-  );
-}

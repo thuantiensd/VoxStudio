@@ -4,11 +4,11 @@ import { AnimatePresence, motion } from "motion/react";
 import { useNavigate } from "react-router-dom";
 import {
   Clapperboard, Mic2, AudioWaveform, Library, ClockFading,
-  Settings as Cog, Search, Upload, FolderOpen, Trash2, SunMoon,
+  Settings as Cog, Search, Upload, FolderOpen, Trash2, SunMoon, Languages,
 } from "lucide-react";
 import { useTheme } from "../../theme/ThemeContext";
 import { useBatch } from "../../batch/BatchContext";
-import { useT } from "../../i18n/I18nContext";
+import { useT, useI18n } from "../../i18n/I18nContext";
 
 /**
  * CommandPalette — ⌘K. Navigate + actions + recent projects.
@@ -17,6 +17,7 @@ export default function CommandPalette({ open, onClose }) {
   const t = useT();
   const nav = useNavigate();
   const { theme, setTheme } = useTheme() || { theme: "dark", setTheme: () => {} };
+  const { locale, setLocale, locales } = useI18n();
   const { clearDone } = useBatch() || {};
   const [value, setValue] = useState("");
 
@@ -52,8 +53,14 @@ export default function CommandPalette({ open, onClose }) {
         setTheme(next);
         onClose();
       } },
+    { id: "act:lang",     icon: Languages,     label: `${locale === "vi" ? "Switch to English" : "Chuyển sang Tiếng Việt"}`, group: ACT,
+      run: () => {
+        const i = locales.indexOf(locale);
+        setLocale(locales[(i + 1) % locales.length]);
+        onClose();
+      } },
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  ], [theme, clearDone, onClose, t]);
+  ], [theme, locale, clearDone, onClose, t]);
 
   return (
     <AnimatePresence>

@@ -3,7 +3,7 @@ import {
   User, CreditCard, BarChart3, Bell, Lock, Server, Info, Loader2,
   Palette, Sun, Moon, Monitor,
 } from "lucide-react";
-import { useT } from "../i18n/I18nContext";
+import { useT, useI18n } from "../i18n/I18nContext";
 import { useAuth } from "../auth/AuthContext";
 import { useTheme } from "../theme/ThemeContext";
 import { checkHealth } from "../services/api";
@@ -261,37 +261,86 @@ function AccountTab() {
 function AppearanceTab() {
   const t = useT();
   const { theme, setTheme } = useTheme();
-  const options = [
-    { id: "light", icon: Sun, label: t("settings.appearance.light") },
-    { id: "dark", icon: Moon, label: t("settings.appearance.dark") },
+  const { locale, setLocale } = useI18n();
+
+  const themeOptions = [
+    { id: "light",  icon: Sun,     label: t("settings.appearance.light") },
+    { id: "dark",   icon: Moon,    label: t("settings.appearance.dark") },
     { id: "system", icon: Monitor, label: t("settings.appearance.system") },
   ];
+  const langOptions = [
+    { id: "vi", label: "Tiếng Việt", hint: "Vietnamese" },
+    { id: "en", label: "English",    hint: "Tiếng Anh" },
+  ];
+
   return (
-    <Section title={t("settings.appearance.theme")}
-             description={t("settings.appearance.themeDesc")}>
-      <Card>
-        <div className="grid grid-cols-3 gap-3">
-          {options.map(({ id, icon: Icon, label }) => {
+    <>
+      <Section title={t("settings.appearance.theme")}
+               description={t("settings.appearance.themeDesc")}>
+        <div className="grid grid-cols-3 gap-2">
+          {themeOptions.map(({ id, icon: Icon, label }) => {
             const active = theme === id;
             return (
               <button
                 key={id}
                 onClick={() => setTheme(id)}
-                className="flex flex-col items-center gap-2 rounded-lg py-4 transition-colors"
+                className="flex flex-col items-center gap-2 py-4 transition-colors"
                 style={{
-                  background: active ? "rgba(108,92,231,0.12)" : "transparent",
-                  border: `1px solid ${active ? "var(--accent)" : "rgba(127,127,160,0.2)"}`,
-                  color: "var(--text-primary)",
+                  background: active ? "var(--accent-soft)" : "var(--n-1)",
+                  border: `1px solid ${active ? "var(--accent)" : "var(--n-3)"}`,
+                  borderRadius: 8,
+                  color: "var(--n-10)",
+                  cursor: "pointer",
                 }}
               >
-                <Icon size={20} style={{ color: active ? "var(--accent)" : "var(--text-secondary)" }} />
+                <Icon size={20} style={{ color: active ? "var(--accent)" : "var(--n-8)" }} />
                 <span className="text-sm">{label}</span>
               </button>
             );
           })}
         </div>
-      </Card>
-    </Section>
+      </Section>
+
+      <Section title={t("user.language") || "Ngôn ngữ"}
+               description="Chọn ngôn ngữ giao diện · Choose interface language">
+        <div className="grid grid-cols-2 gap-2">
+          {langOptions.map(({ id, label, hint }) => {
+            const active = locale === id;
+            return (
+              <button
+                key={id}
+                onClick={() => setLocale(id)}
+                className="flex items-center justify-between px-4 py-3 transition-colors"
+                style={{
+                  background: active ? "var(--accent-soft)" : "var(--n-1)",
+                  border: `1px solid ${active ? "var(--accent)" : "var(--n-3)"}`,
+                  borderRadius: 8,
+                  color: "var(--n-10)",
+                  cursor: "pointer",
+                }}
+              >
+                <div className="flex flex-col items-start">
+                  <span style={{ fontSize: 14, fontWeight: 500 }}>{label}</span>
+                  <span style={{ fontSize: 11, color: "var(--n-8)" }}>{hint}</span>
+                </div>
+                {active && (
+                  <span
+                    style={{
+                      width: 18, height: 18, borderRadius: "50%",
+                      background: "var(--accent)", color: "#fff",
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                      fontSize: 11, fontWeight: 700,
+                    }}
+                  >
+                    ✓
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      </Section>
+    </>
   );
 }
 
