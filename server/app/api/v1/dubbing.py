@@ -3,7 +3,7 @@
 import json
 import logging
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Body, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
 
 from app.models.dubbing_schemas import (
@@ -11,7 +11,7 @@ from app.models.dubbing_schemas import (
 )
 import os
 
-from app.services import dubbing_svc, edge_tts_svc, gemini_translate_svc
+from app.services import dubbing_svc, edge_tts_svc, gemini_translate_svc, ingest_svc
 
 logger = logging.getLogger(__name__)
 
@@ -368,6 +368,55 @@ async def auto_dub(project_id: str, engine: str = "google"):
 
         threading.Thread(target=producer, daemon=True).start()
 
+        while True:
+            item = await queue.get()
+            if item is SENTINEL:
+                break
+            yield f"data: {json.dumps(item)}\n\n"
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+
+@router.post("/projects/from-url")
+async def create_project_from_url(
+    url: str = Body(..., embed=True),
+    target_language: str = Body("vietnamese", embed=True),
+    source_language: str = Body("auto", embed=True),
+    enable_dubbing: bool = Body(True, embed=True),
+    enable_subtitle: bool = Body(False, embed=True),
+):
+    """Tạo project bằng cách tải video từ URL (TikTok / Douyin / YouTube / FB / IG
+    / Bilibili / Twitter …) qua yt-dlp. Stream SSE progress về.
+
+    Payload từng event:
+      { step, label, progress, detail?, project_id? }
+    Khi step == 'done' → payload có project_id, frontend navigate tới dubbing.
+    """
+    import asyncio
+    import threading
+
+    async def event_generator():
+        loop = asyncio.get_running_loop()
+        queue: asyncio.Queue = asyncio.Queue()
+        SENTINEL = object()
+
+        def producer():
+            try:
+                for update in ingest_svc.ingest_url_generator(
+                    url,
+                    target_language=target_language,
+                    source_language=source_language,
+                    enable_dubbing=enable_dubbing,
+                    enable_subtitle=enable_subtitle,
+                ):
+                    loop.call_soon_threadsafe(queue.put_nowait, update)
+            except Exception as e:
+                loop.call_soon_threadsafe(queue.put_nowait,
+                    {"step": "error", "label": str(e), "progress": -1})
+            finally:
+                loop.call_soon_threadsafe(queue.put_nowait, SENTINEL)
+
+        threading.Thread(target=producer, daemon=True).start()
         while True:
             item = await queue.get()
             if item is SENTINEL:

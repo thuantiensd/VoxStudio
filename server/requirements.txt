@@ -17,3 +17,4 @@ pyloudnorm
 resemblyzer
 silero-vad
 scikit-learn
+yt-dlp

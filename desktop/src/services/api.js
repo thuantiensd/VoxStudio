@@ -385,6 +385,86 @@ export function autoDub(projectId, { engine = 'google', onProgress, onDone, onEr
   });
 }
 
+/**
+ * ingestFromURL — POST /dubbing/projects/from-url, đọc SSE progress stream.
+ *
+ * opts: { url, targetLanguage, sourceLanguage, enableDubbing, enableSubtitle,
+ *         signal, onProgress(data), onDone(data), onError(err) }
+ * Returns promise resolved khi SSE kết thúc hoặc reject khi error.
+ */
+export function ingestFromURL({
+  url,
+  targetLanguage = "vietnamese",
+  sourceLanguage = "auto",
+  enableDubbing = true,
+  enableSubtitle = false,
+  signal,
+  onProgress,
+  onDone,
+  onError,
+} = {}) {
+  const body = {
+    url,
+    target_language: targetLanguage,
+    source_language: sourceLanguage,
+    enable_dubbing: enableDubbing,
+    enable_subtitle: enableSubtitle,
+  };
+  return fetch(`${API_BASE}/dubbing/projects/from-url`, {
+    method: "POST",
+    signal,
+    headers: {
+      "Content-Type": "application/json",
+      "ngrok-skip-browser-warning": "true",
+    },
+    body: JSON.stringify(body),
+  }).then(async (res) => {
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({ detail: res.statusText }));
+      throw fromResponse(res, data?.detail || null);
+    }
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+
+    function pump() {
+      return reader.read().then(({ done, value }) => {
+        if (done) {
+          if (onDone) onDone();
+          return;
+        }
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop();
+        for (const line of lines) {
+          if (!line.startsWith("data: ")) continue;
+          try {
+            const data = JSON.parse(line.slice(6));
+            if (data.step === "error" && onError) {
+              onError(new AppError(data.label || "Ingest failed", {
+                kind: "network", data,
+              }));
+              return;
+            } else if (data.step === "done") {
+              if (onDone) onDone(data);
+            } else if (onProgress) {
+              onProgress(data);
+            }
+          } catch {}
+        }
+        return pump();
+      });
+    }
+    return pump();
+  }).catch((e) => {
+    if (e?.name === "AbortError") throw e;
+    if (e instanceof AppError) throw e;
+    throw new AppError(e?.message || "Ingest failed", {
+      kind: "network", cause: e,
+    });
+  });
+}
+
 export async function cancelAutoDub(projectId) {
   try {
     await fetch(`${API_BASE}/dubbing/projects/${projectId}/cancel`, { method: 'POST' });
