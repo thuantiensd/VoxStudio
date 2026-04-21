@@ -3,9 +3,11 @@ import { motion } from "motion/react";
 import {
   Clapperboard, Mic2, AudioWaveform, Library,
   ClockFading, Settings as Cog, Sparkles, CloudDownload,
+  Sun, Moon, Monitor,
 } from "lucide-react";
 import { useBatch } from "../../batch/BatchContext";
 import { useT, useI18n } from "../../i18n/I18nContext";
+import { useTheme } from "../../theme/ThemeContext";
 
 /**
  * Sidebar — 220px fixed. Section headers uppercase nhỏ. Item 32px.
@@ -88,17 +90,67 @@ export default function Sidebar() {
         ))}
       </nav>
 
-      {/* Footer — settings + backend status */}
+      {/* Footer — settings + theme toggle + backend status */}
       <div className="px-2 py-2"
            style={{ borderTop: "1px solid var(--n-3)" }}>
-        <NavItem
-          item={{ path: "/settings", icon: Cog, label: t("shell.titleSettings"), hotkey: "," }}
-          active={isActive(loc.pathname, "/settings")}
-          onClick={() => nav("/settings")}
-        />
+        <div className="flex items-center gap-1">
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <NavItem
+              item={{ path: "/settings", icon: Cog, label: t("shell.titleSettings"), hotkey: "," }}
+              active={isActive(loc.pathname, "/settings")}
+              onClick={() => nav("/settings")}
+            />
+          </div>
+          <ThemeToggle />
+        </div>
         <FooterRow label={t("sidebar.backendOnline")} />
       </div>
     </aside>
+  );
+}
+
+/**
+ * ThemeToggle — icon button 30×30 cycle dark/light/system.
+ * Hiển thị icon theo theme hiện tại: Sun (light) · Moon (dark) · Monitor (system).
+ */
+function ThemeToggle() {
+  const theme = useTheme();
+  if (!theme) return null;
+  const { theme: cur, setTheme } = theme;
+  const ICONS = { light: Sun, dark: Moon, system: Monitor };
+  const ORDER = ["dark", "light", "system"];
+  const Icon = ICONS[cur] || Monitor;
+  const next = ORDER[(ORDER.indexOf(cur) + 1) % ORDER.length];
+  const titles = {
+    light: "Sáng (click → Tối)",
+    dark: "Tối (click → Sáng)",
+    system: "Theo hệ thống (click → Tối)",
+  };
+  return (
+    <button
+      onClick={() => setTheme(next)}
+      title={titles[cur]}
+      aria-label={`Theme: ${cur}`}
+      className="flex items-center justify-center rounded transition-colors flex-shrink-0"
+      style={{
+        width: 30, height: 30,
+        color: "var(--n-8)",
+        background: "transparent",
+        border: "1px solid transparent",
+      }}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.background = "var(--n-2)";
+        e.currentTarget.style.color = "var(--n-10)";
+        e.currentTarget.style.borderColor = "var(--n-3)";
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.background = "transparent";
+        e.currentTarget.style.color = "var(--n-8)";
+        e.currentTarget.style.borderColor = "transparent";
+      }}
+    >
+      <Icon size={13} />
+    </button>
   );
 }
 
