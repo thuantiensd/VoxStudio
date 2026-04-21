@@ -2,6 +2,8 @@ import { createContext, useContext, useEffect, useRef, useState } from "react";
 import {
   autoDub, exportVideo, exportDownloadURL, getDubbingProject, cancelAutoDub,
 } from "../services/api";
+import { showError } from "../services/errors";
+import { useToast } from "../components/ui/Toast";
 
 const STORAGE_KEY = "voxstudio:batch:outputFolder";
 const QUEUE_KEY = "voxstudio:batch:queue";
@@ -21,6 +23,7 @@ const BatchCtx = createContext(null);
  * Status: "pending" | "running" | "done" | "error"
  */
 export function BatchProvider({ children }) {
+  const toast = useToast();
   const [outputFolder, setOutputFolderState] = useState(() => {
     try { return localStorage.getItem(STORAGE_KEY) || ""; } catch { return ""; }
   });
@@ -234,11 +237,14 @@ export function BatchProvider({ children }) {
               : it
           )
         );
-        if (!wasCanceled && window.voxstudio?.notify) {
-          window.voxstudio.notify({
-            title: "VoxStudio — lỗi",
-            body: `${next.filename || next.projectId}: ${String(e?.message || e).slice(0, 120)}`,
-          }).catch(() => {});
+        if (!wasCanceled) {
+          showError(toast, e, { context: "pipeline", filename: next.filename });
+          if (window.voxstudio?.notify) {
+            window.voxstudio.notify({
+              title: "VoxStudio — lỗi",
+              body: `${next.filename || next.projectId}: ${String(e?.message || e).slice(0, 120)}`,
+            }).catch(() => {});
+          }
         }
       } finally {
         runningSetRef.current.delete(next.projectId);

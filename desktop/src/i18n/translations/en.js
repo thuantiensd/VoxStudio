@@ -40,6 +40,62 @@ export default {
     clearDone: "Clear completed jobs from history",
     toggleTheme: "Toggle theme (current: {theme})",
   },
+  errors: {
+    network: {
+      title: "Can't reach server",
+      message: "Unable to connect to the processing backend.",
+      hint: "Check VITE_API_URL, uvicorn backend, or ngrok tunnel.",
+    },
+    timeout: {
+      title: "Timed out",
+      hint: "Server took too long. Retry or check GPU load.",
+    },
+    auth: {
+      title: "Not authorized",
+      message: "Session expired or wrong credentials.",
+      hint: "Sign in again to continue.",
+    },
+    notFound: {
+      title: "Not found",
+      message: "This resource no longer exists.",
+    },
+    validation: {
+      title: "Invalid input",
+    },
+    server: {
+      title: "Server error",
+      hint: "Check server logs. Restart backend if it persists.",
+    },
+    pipeline: {
+      title: "Pipeline failed",
+      hint: "Stopped mid-run — check logs and retry.",
+      hintAt: "Stopped at step: {step}",
+    },
+    fs: {
+      title: "File error",
+      hint: "Check write permission and disk space.",
+    },
+    electron: {
+      title: "Electron IPC error",
+      hint: "Quit and reopen the app to reload handlers.",
+    },
+    parse: {
+      title: "Invalid response",
+      message: "Server returned non-JSON data.",
+      hint: "Backend may be returning HTML (ngrok warning?) — check headers.",
+    },
+    unknown: {
+      title: "Something went wrong",
+      message: "Unable to determine the cause.",
+    },
+    boundary: {
+      title: "App crashed",
+      subtitle: "Something broke — try Reload or report if it keeps happening.",
+      continue: "Continue",
+      reload: "Reload app",
+      stack: "Stack trace",
+    },
+  },
   toast: {
     backendDown: "Backend offline. Start the server and try again.",
     backendNoEnv: "Can't reach backend. Check VITE_API_URL.",

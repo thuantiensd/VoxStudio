@@ -14,6 +14,8 @@ import { I18nProvider } from "./i18n/I18nContext";
 import { ThemeProvider } from "./theme/ThemeContext";
 import { BatchProvider } from "./batch/BatchContext";
 import { ToastProvider } from "./components/ui/Toast";
+import ErrorBoundary from "./components/ui/ErrorBoundary";
+import GlobalErrorHook from "./components/ui/GlobalErrorHook";
 
 function ProtectedRoute({ children }) {
   const { isAuthenticated } = useAuth();
@@ -42,9 +44,11 @@ function Shell() {
 
 export default function App() {
   return (
+    <ErrorBoundary>
     <I18nProvider>
       <ThemeProvider>
       <ToastProvider>
+      <GlobalErrorHook />
       <AuthProvider>
       <BatchProvider>
         <BrowserRouter>
@@ -66,5 +70,6 @@ export default function App() {
       </ToastProvider>
       </ThemeProvider>
     </I18nProvider>
+    </ErrorBoundary>
   );
 }

@@ -8,6 +8,7 @@ import { createDubbingProject, thumbnailURL } from "../../services/api";
 import { useT } from "../../i18n/I18nContext";
 import { useBatch } from "../../batch/BatchContext";
 import { useToast } from "../ui/Toast";
+import { showError } from "../../services/errors";
 import PageHeader, { Page } from "../ui/PageHeader";
 import Segmented from "../ui/Segmented";
 
@@ -70,7 +71,7 @@ export default function StudioHome() {
       const files = await window.voxstudio.listVideosInFolder(folder);
       setLibFiles(Array.isArray(files) ? files : []);
     } catch (e) {
-      toast.error("Không đọc được thư mục: " + (e?.message || e));
+      showError(toast, e, { context: "read folder" });
       setLibFolder("");
       setLibFiles([]);
     }
@@ -752,7 +753,7 @@ function QueueCard({ item }) {
     if (!isDone || !item.outputPath) return;
     if (window.voxstudio?.openFileInApp) {
       window.voxstudio.openFileInApp(item.outputPath).catch((e) => {
-        toast.error("Không mở được file: " + (e?.message || e));
+        showError(toast, e, { context: "open file" });
       });
     } else {
       toast.info(`File đã lưu tại: ${item.outputPath}`);

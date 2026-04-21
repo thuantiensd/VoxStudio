@@ -40,6 +40,62 @@ export default {
     clearDone: "Xoá các job đã xong khỏi lịch sử",
     toggleTheme: "Đổi theme (hiện: {theme})",
   },
+  errors: {
+    network: {
+      title: "Mất kết nối",
+      message: "Không thể kết nối tới máy chủ xử lý.",
+      hint: "Kiểm tra VITE_API_URL, backend uvicorn hoặc tunnel ngrok.",
+    },
+    timeout: {
+      title: "Hết thời gian",
+      hint: "Server phản hồi quá lâu. Thử lại hoặc kiểm tra tải GPU.",
+    },
+    auth: {
+      title: "Không có quyền",
+      message: "Session đã hết hạn hoặc sai credential.",
+      hint: "Đăng nhập lại để tiếp tục.",
+    },
+    notFound: {
+      title: "Không tìm thấy",
+      message: "Tài nguyên không còn tồn tại.",
+    },
+    validation: {
+      title: "Dữ liệu chưa hợp lệ",
+    },
+    server: {
+      title: "Lỗi máy chủ",
+      hint: "Kiểm tra log server. Nếu tiếp diễn, khởi động lại backend.",
+    },
+    pipeline: {
+      title: "Pipeline lỗi",
+      hint: "Đã dừng giữa chừng — check log và thử lại.",
+      hintAt: "Dừng tại bước: {step}",
+    },
+    fs: {
+      title: "Lỗi file",
+      hint: "Kiểm tra quyền ghi + dung lượng ổ đĩa.",
+    },
+    electron: {
+      title: "Electron IPC lỗi",
+      hint: "Thoát app và mở lại để nạp lại handler.",
+    },
+    parse: {
+      title: "Response không hợp lệ",
+      message: "Server trả dữ liệu không phải JSON.",
+      hint: "Có thể backend đang trả HTML (ngrok warning?) — kiểm tra header.",
+    },
+    unknown: {
+      title: "Có lỗi xảy ra",
+      message: "Không xác định được nguyên nhân.",
+    },
+    boundary: {
+      title: "Ứng dụng gặp lỗi",
+      subtitle: "App has crashed · Thử Reload hoặc báo lại lỗi nếu lặp lại.",
+      continue: "Tiếp tục",
+      reload: "Reload app",
+      stack: "Stack trace",
+    },
+  },
   toast: {
     backendDown: "Backend offline. Khởi động server rồi thử lại.",
     backendNoEnv: "Không kết nối được backend. Kiểm tra VITE_API_URL.",

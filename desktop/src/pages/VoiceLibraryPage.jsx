@@ -7,6 +7,7 @@ import PageHeader from "../components/ui/PageHeader";
 import Button from "../components/ui/Button";
 import { Table, THead, TBody, Th, Tr, Td } from "../components/ui/Table";
 import { useToast } from "../components/ui/Toast";
+import { showError } from "../services/errors";
 import { useT } from "../i18n/I18nContext";
 
 export default function VoiceLibraryPage() {
@@ -37,7 +38,7 @@ export default function VoiceLibraryPage() {
       setVoices((prev) => prev.filter((x) => x.id !== v.id));
       toast.success(`Đã xoá ${v.name}`);
     } catch (e) {
-      toast.error(`Xoá thất bại: ${e?.message || e}`);
+      showError(toast, e, { context: "delete voice" }, t);
     }
     setDeleting(null);
   };

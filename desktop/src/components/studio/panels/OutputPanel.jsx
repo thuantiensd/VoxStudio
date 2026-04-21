@@ -12,6 +12,7 @@ import { Section } from "./LanguageVoicePanel";
 import { useT } from "../../../i18n/I18nContext";
 import { useBatch } from "../../../batch/BatchContext";
 import { useToast } from "../../ui/Toast";
+import { showError } from "../../../services/errors";
 
 /**
  * OutputPanel — chọn bật Lồng tiếng / Phụ đề + nút Bắt đầu chạy pipeline.
@@ -141,7 +142,7 @@ export default function OutputPanel({ project, onToggle, onProjectUpdated }) {
       onProjectUpdated(p);
       window.open(exportDownloadURL(project.id), "_blank");
     } catch (e) {
-      toast.error("Export thất bại: " + e.message);
+      showError(toast, e, { context: "export" }, t);
     }
     setExporting(false);
   };

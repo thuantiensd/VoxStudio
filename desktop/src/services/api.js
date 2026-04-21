@@ -1,3 +1,5 @@
+import { AppError, fromResponse } from './errors';
+
 const SERVER_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 const API_BASE = SERVER_URL + '/api/v1';
 
@@ -28,18 +30,29 @@ function buildHeaders(extra = {}) {
 
 async function request(path, options = {}) {
   const { headers = {}, ...rest } = options;
-  const res = await fetch(`${API_BASE}${path}`, {
-    ...rest,
-    headers: buildHeaders(headers),
-  });
+  let res;
+  try {
+    res = await fetch(`${API_BASE}${path}`, {
+      ...rest,
+      headers: buildHeaders(headers),
+    });
+  } catch (e) {
+    // AbortError bubbles up as-is
+    if (e?.name === 'AbortError') throw e;
+    // TypeError: Failed to fetch — DNS/CORS/offline
+    throw new AppError(e?.message || 'Network error', {
+      kind: 'network', cause: e,
+    });
+  }
   if (res.status === 401) {
-    // Clear stale auth on unauthorized
     try { localStorage.removeItem(AUTH_STORAGE_KEY); } catch {}
-    throw new Error('Unauthorized — please sign in again');
+    throw new AppError('Unauthorized — please sign in again', {
+      kind: 'auth', status: 401,
+    });
   }
   if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: res.statusText }));
-    throw new Error(err.detail || 'API Error');
+    const body = await res.json().catch(() => ({ detail: res.statusText }));
+    throw fromResponse(res, body?.detail || body?.message || null);
   }
   return res;
 }
@@ -317,10 +330,19 @@ export function autoDub(projectId, { engine = 'google', onProgress, onDone, onEr
   const qs = params.toString();
   const url = `${API_BASE}/dubbing/projects/${projectId}/auto-dub${qs ? '?' + qs : ''}`;
 
-  return fetch(url, { method: 'POST', signal }).then(res => {
+  return fetch(url, {
+    method: 'POST',
+    signal,
+    headers: { 'ngrok-skip-browser-warning': 'true' },
+  }).then(async (res) => {
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({ detail: res.statusText }));
+      throw fromResponse(res, body?.detail || body?.message || null);
+    }
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
+    let lastStep = null;
 
     function pump() {
       return reader.read().then(({ done, value }) => {
@@ -330,14 +352,23 @@ export function autoDub(projectId, { engine = 'google', onProgress, onDone, onEr
         }
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split('\n');
-        buffer = lines.pop(); // keep incomplete line
+        buffer = lines.pop();
         for (const line of lines) {
           if (line.startsWith('data: ')) {
             try {
               const data = JSON.parse(line.slice(6));
-              if (data.step === 'error' && onError) onError(data.label);
-              else if (data.step === 'done' && onDone) onDone(data);
-              else if (onProgress) onProgress(data);
+              if (data.step) lastStep = data.step;
+              if (data.step === 'error' && onError) {
+                onError(new AppError(data.label || 'Pipeline error', {
+                  kind: 'pipeline', data: { step: lastStep },
+                }));
+              } else if (data.step === 'canceled') {
+                if (onError) onError(new AppError('Canceled', { kind: 'abort' }));
+              } else if (data.step === 'done' && onDone) {
+                onDone(data);
+              } else if (onProgress) {
+                onProgress(data);
+              }
             } catch {}
           }
         }
@@ -345,6 +376,12 @@ export function autoDub(projectId, { engine = 'google', onProgress, onDone, onEr
       });
     }
     return pump();
+  }).catch((e) => {
+    if (e?.name === 'AbortError') throw e;
+    if (e instanceof AppError) throw e;
+    throw new AppError(e?.message || 'Auto-dub failed', {
+      kind: 'network', cause: e,
+    });
   });
 }
 
