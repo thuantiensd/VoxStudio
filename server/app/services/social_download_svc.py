@@ -106,18 +106,18 @@ async def fetch_info(url: str, engine: str = "auto") -> InfoResult:
     # Forced engine paths
     if engine == "scraper":
         if not _DT_OK:
-            raise RuntimeError("douyin-tiktok-scraper chưa cài trên server.")
+            raise RuntimeError("Chế độ Nhanh chưa sẵn sàng trên server.")
         info = await _fetch_via_scraper(url, platform)
         if not info or not info.video_url:
             raise RuntimeError(
-                "Scraper không lấy được video URL. Thuật toán signing có thể "
-                "đã lỗi thời. Thử engine 'yt-dlp'."
+                "Chế độ Nhanh không lấy được video. Chuyển sang chế độ "
+                "Toàn năng rồi thử lại."
             )
         return info
 
     if engine == "ytdlp":
         if not _YTDLP_OK:
-            raise RuntimeError("yt-dlp chưa cài trên server.")
+            raise RuntimeError("Chế độ Toàn năng chưa sẵn sàng trên server.")
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, _fetch_via_ytdlp, url, platform)
 
@@ -143,12 +143,12 @@ async def fetch_info(url: str, engine: str = "auto") -> InfoResult:
             # Show both errors if scraper was also tried
             if scraper_err:
                 raise RuntimeError(
-                    f"Cả 2 engine đều fail. Scraper: {str(scraper_err)[:120]} · "
-                    f"yt-dlp: {str(ytdlp_err)[:120]}"
+                    f"Cả 2 chế độ đều thất bại. Nhanh: {str(scraper_err)[:120]} · "
+                    f"Toàn năng: {str(ytdlp_err)[:120]}"
                 )
             raise
 
-    raise RuntimeError("Cả 2 engine đều không sẵn sàng trên server.")
+    raise RuntimeError("Cả 2 chế độ đều không sẵn sàng trên server.")
 
 
 async def _fetch_via_scraper(url: str, platform: str) -> InfoResult | None:
@@ -214,7 +214,7 @@ def _fetch_via_ytdlp(url: str, platform: str) -> InfoResult:
         with yt_dlp.YoutubeDL(opts) as y:
             info = y.extract_info(url, download=False)
     except Exception as e:
-        msg = str(e)
+        msg = str(e).replace("yt-dlp:", "").replace("[yt-dlp]", "").strip()
         # Dịch các lỗi phổ biến sang tiếng Việt dễ hiểu
         if "Log in for access" in msg or "login" in msg.lower():
             raise RuntimeError(
@@ -241,10 +241,14 @@ def _fetch_via_ytdlp(url: str, platform: str) -> InfoResult:
             raise RuntimeError("Video có DRM protection — không tải được.")
         if "geo" in msg.lower() and "block" in msg.lower():
             raise RuntimeError("Video bị chặn theo vùng địa lý.")
-        # Strip ANSI color codes cho dễ đọc
+        # Strip ANSI color + technical names cho dễ đọc
         import re
         clean = re.sub(r"\x1b\[[0-9;]*m", "", msg)
-        raise RuntimeError(clean[:280])
+        clean = re.sub(r"\[?(yt-dlp|TikTok|YouTube|Facebook|Instagram|Douyin|Bilibili)\]?\s*:?\s*",
+                       "", clean, flags=re.IGNORECASE)
+        clean = re.sub(r"ERROR:\s*", "", clean, flags=re.IGNORECASE)
+        clean = clean.strip()
+        raise RuntimeError(clean[:280] or "Không tải được video.")
     if not info:
         raise RuntimeError("yt-dlp trả về rỗng")
     video_url = info.get("url")

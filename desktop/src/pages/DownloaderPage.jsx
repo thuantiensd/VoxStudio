@@ -626,13 +626,13 @@ function SourceBadge({ source, t }) {
     <span
       style={{
         fontSize: 10, color: "var(--n-8)",
-        padding: "1px 6px", borderRadius: 4,
+        padding: "1px 8px", borderRadius: 4,
         border: "1px solid var(--n-3)",
         background: "var(--n-2)",
       }}
       title={label}
     >
-      {source}
+      {label}
     </span>
   );
 }
