@@ -11,6 +11,7 @@ import {
 import { Section } from "./LanguageVoicePanel";
 import { useT } from "../../../i18n/I18nContext";
 import { useBatch } from "../../../batch/BatchContext";
+import { useToast } from "../../ui/Toast";
 
 /**
  * OutputPanel — chọn bật Lồng tiếng / Phụ đề + nút Bắt đầu chạy pipeline.
@@ -27,6 +28,7 @@ export default function OutputPanel({ project, onToggle, onProjectUpdated }) {
   // sẽ copy setting cho toàn bộ batch rồi enqueue cả đám.
   const batchIds = location.state?.batchIds || [project.id];
   const { outputFolder, setOutputFolder, enqueue, queue } = useBatch();
+  const toast = useToast();
   const [exporting, setExporting] = useState(false);
   const [presetMsg, setPresetMsg] = useState(null);
 
@@ -139,14 +141,14 @@ export default function OutputPanel({ project, onToggle, onProjectUpdated }) {
       onProjectUpdated(p);
       window.open(exportDownloadURL(project.id), "_blank");
     } catch (e) {
-      alert("Export thất bại: " + e.message);
+      toast.error("Export thất bại: " + e.message);
     }
     setExporting(false);
   };
 
   const pickOutputFolder = async () => {
     if (!window.voxstudio?.pickFolder) {
-      alert("Chức năng chọn thư mục chỉ khả dụng trong app desktop (Electron).");
+      toast.warn("Chọn thư mục chỉ khả dụng trong app desktop.");
       return;
     }
     const path = await window.voxstudio.pickFolder();
@@ -155,24 +157,22 @@ export default function OutputPanel({ project, onToggle, onProjectUpdated }) {
 
   const run = async () => {
     if (!enableDubbing && !enableSubtitle) {
-      alert(t("studio.panels.needEnable"));
+      toast.warn(t("studio.panels.needEnable"));
       return;
     }
     if (!outputFolder) {
-      alert("Vui lòng chọn thư mục lưu trước khi bắt đầu.");
+      toast.warn("Chọn thư mục lưu trước khi bắt đầu.");
       return;
     }
     // Check backend trước khi enqueue — tránh job treo pending vì backend offline
     try {
       const h = await checkHealth();
       if (h?.status !== "ok") {
-        alert(
-          "Backend hiện offline. Vui lòng khởi động server (uvicorn app.main:app) rồi thử lại."
-        );
+        toast.error("Backend offline. Khởi động server rồi thử lại.");
         return;
       }
     } catch {
-      alert("Không kết nối được backend. Kiểm tra VITE_API_URL + uvicorn đang chạy.");
+      toast.error("Không kết nối được backend. Kiểm tra VITE_API_URL.");
       return;
     }
     // Flush MỌI setting hiện tại lên toàn bộ batch (kể cả project hiện tại).

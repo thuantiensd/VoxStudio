@@ -20,6 +20,9 @@ function buildHeaders(extra = {}) {
   const headers = { ...extra };
   const token = getAuthToken();
   if (token) headers['Authorization'] = `Bearer ${token}`;
+  // Ngrok free domains chặn request bằng warning page cho tới khi click qua
+  // 1 lần. Header này bypass warning cho mọi request từ app.
+  headers['ngrok-skip-browser-warning'] = 'true';
   return headers;
 }
 

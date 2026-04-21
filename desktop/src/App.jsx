@@ -1,5 +1,5 @@
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom";
-import Sidebar from "./components/Sidebar";
+import AppShell from "./components/shell/AppShell";
 import TTSPage from "./pages/TTSPage";
 import VoiceClonePage from "./pages/VoiceClonePage";
 import VoiceLibraryPage from "./pages/VoiceLibraryPage";
@@ -13,6 +13,7 @@ import { AuthProvider, useAuth } from "./auth/AuthContext";
 import { I18nProvider } from "./i18n/I18nContext";
 import { ThemeProvider } from "./theme/ThemeContext";
 import { BatchProvider } from "./batch/BatchContext";
+import { ToastProvider } from "./components/ui/Toast";
 
 function ProtectedRoute({ children }) {
   const { isAuthenticated } = useAuth();
@@ -23,23 +24,19 @@ function ProtectedRoute({ children }) {
   return children;
 }
 
-function AppShell() {
+function Shell() {
   return (
-    <div className="flex h-screen overflow-hidden">
-      <Sidebar />
-      <main className="flex-1 overflow-y-auto">
-        <Routes>
-          <Route path="/" element={<TTSPage />} />
-          <Route path="/studio/*" element={<StudioPage />} />
-          {/* Legacy redirect */}
-          <Route path="/dubbing" element={<Navigate to="/studio" replace />} />
-          <Route path="/clone" element={<VoiceClonePage />} />
-          <Route path="/library" element={<VoiceLibraryPage />} />
-          <Route path="/history" element={<HistoryPage />} />
-          <Route path="/settings" element={<SettingsPage />} />
-        </Routes>
-      </main>
-    </div>
+    <AppShell>
+      <Routes>
+        <Route path="/" element={<TTSPage />} />
+        <Route path="/studio/*" element={<StudioPage />} />
+        <Route path="/dubbing" element={<Navigate to="/studio" replace />} />
+        <Route path="/clone" element={<VoiceClonePage />} />
+        <Route path="/library" element={<VoiceLibraryPage />} />
+        <Route path="/history" element={<HistoryPage />} />
+        <Route path="/settings" element={<SettingsPage />} />
+      </Routes>
+    </AppShell>
   );
 }
 
@@ -47,6 +44,7 @@ export default function App() {
   return (
     <I18nProvider>
       <ThemeProvider>
+      <ToastProvider>
       <AuthProvider>
       <BatchProvider>
         <BrowserRouter>
@@ -57,7 +55,7 @@ export default function App() {
               path="/*"
               element={
                 <ProtectedRoute>
-                  <AppShell />
+                  <Shell />
                 </ProtectedRoute>
               }
             />
@@ -65,6 +63,7 @@ export default function App() {
         </BrowserRouter>
       </BatchProvider>
       </AuthProvider>
+      </ToastProvider>
       </ThemeProvider>
     </I18nProvider>
   );

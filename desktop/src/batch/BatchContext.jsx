@@ -51,6 +51,14 @@ export function BatchProvider({ children }) {
     } catch {}
   }, [queue]);
 
+  // Dock/taskbar badge = số job đang chạy
+  useEffect(() => {
+    const running = queue.filter((q) => q.status === "running").length;
+    if (window.voxstudio?.setBadge) {
+      window.voxstudio.setBadge(running).catch(() => {});
+    }
+  }, [queue]);
+
   const setOutputFolder = (path) => {
     setOutputFolderState(path);
     try { localStorage.setItem(STORAGE_KEY, path || ""); } catch {}
@@ -204,6 +212,13 @@ export function BatchProvider({ children }) {
               : it
           )
         );
+        // Native notification khi xong
+        if (window.voxstudio?.notify) {
+          window.voxstudio.notify({
+            title: "VoxStudio — xong",
+            body: `${next.filename || next.projectId} đã lồng tiếng xong.`,
+          }).catch(() => {});
+        }
       } catch (e) {
         const wasCanceled = canceledRef.current.has(next.projectId)
           || controller.signal.aborted
@@ -219,6 +234,12 @@ export function BatchProvider({ children }) {
               : it
           )
         );
+        if (!wasCanceled && window.voxstudio?.notify) {
+          window.voxstudio.notify({
+            title: "VoxStudio — lỗi",
+            body: `${next.filename || next.projectId}: ${String(e?.message || e).slice(0, 120)}`,
+          }).catch(() => {});
+        }
       } finally {
         runningSetRef.current.delete(next.projectId);
         abortMapRef.current.delete(next.projectId);

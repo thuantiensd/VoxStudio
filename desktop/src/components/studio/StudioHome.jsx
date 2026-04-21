@@ -7,6 +7,7 @@ import {
 import { createDubbingProject, thumbnailURL } from "../../services/api";
 import { useT } from "../../i18n/I18nContext";
 import { useBatch } from "../../batch/BatchContext";
+import { useToast } from "../ui/Toast";
 
 const MAX_BATCH = 10;
 
@@ -20,6 +21,7 @@ const MAX_BATCH = 10;
 export default function StudioHome() {
   const t = useT();
   const navigate = useNavigate();
+  const toast = useToast();
   const { queue } = useBatch();
   const fileRef = useRef(null);
   const [tab, setTab] = useState("library"); // "library" | "upload"
@@ -51,13 +53,11 @@ export default function StudioHome() {
   // Chọn folder từ máy + liệt kê video bên trong
   const pickLibraryFolder = async () => {
     if (!window.voxstudio?.pickFolder) {
-      alert("Chức năng chọn thư mục chỉ khả dụng trong app desktop (Electron).");
+      toast.warn("Chọn thư mục chỉ khả dụng trong app desktop.");
       return;
     }
     if (!window.voxstudio?.listVideosInFolder) {
-      alert(
-        "IPC quét video chưa sẵn sàng. Vui lòng TẮT app và MỞ LẠI để load handler mới."
-      );
+      toast.error("IPC chưa sẵn sàng. Hãy Cmd+Q app rồi mở lại.");
       return;
     }
     const folder = await window.voxstudio.pickFolder();
@@ -68,7 +68,7 @@ export default function StudioHome() {
       const files = await window.voxstudio.listVideosInFolder(folder);
       setLibFiles(Array.isArray(files) ? files : []);
     } catch (e) {
-      alert("Không đọc được thư mục: " + (e?.message || e));
+      toast.error("Không đọc được thư mục: " + (e?.message || e));
       setLibFolder("");
       setLibFiles([]);
     }
@@ -149,16 +149,12 @@ export default function StudioHome() {
     setUploading(false);
 
     if (createdIds.length === 0) {
-      alert(
-        "Không tạo được project nào. Kiểm tra kết nối backend (VITE_API_URL).\n\n" +
-        errors.join("\n")
-      );
+      toast.error("Không tạo được project. Kiểm tra VITE_API_URL. " + errors.join("; "));
       return;
     }
 
     if (errors.length > 0) {
-      alert("Một số file lỗi, nhưng vẫn mở trang cho các file thành công:\n\n" +
-            errors.join("\n"));
+      toast.warn("Một số file lỗi: " + errors.join("; "));
     }
 
     clearSelection();
@@ -752,6 +748,7 @@ function QueuePanel({ queue }) {
 
 function QueueCard({ item }) {
   const { cancelItem, removeItem } = useBatch();
+  const toast = useToast();
   const isRunning = item.status === "running";
   const isDone = item.status === "done";
   const isErr = item.status === "error";
@@ -774,10 +771,10 @@ function QueueCard({ item }) {
     if (!isDone || !item.outputPath) return;
     if (window.voxstudio?.openFileInApp) {
       window.voxstudio.openFileInApp(item.outputPath).catch((e) => {
-        alert("Không mở được file: " + (e?.message || e));
+        toast.error("Không mở được file: " + (e?.message || e));
       });
     } else {
-      alert(`File đã lưu tại:\n${item.outputPath}`);
+      toast.info(`File đã lưu tại: ${item.outputPath}`);
     }
   };
 

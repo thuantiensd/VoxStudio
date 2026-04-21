@@ -26,6 +26,16 @@ contextBridge.exposeInMainWorld("voxstudio", {
   revealFileInFolder: (filepath) =>
     ipcRenderer.invoke("shell:revealInFolder", filepath),
 
+  // Custom window controls (Win/Linux) — Mac dùng traffic lights native
+  winControl: (action) => ipcRenderer.invoke("win:control", action),
+
+  // Native notification + dock/taskbar badge
+  notify: (opts) => ipcRenderer.invoke("notify:show", opts),
+  setBadge: (count) => ipcRenderer.invoke("badge:set", count),
+
+  // Platform đồng bộ (để React render titlebar theo OS ngay lần đầu)
+  platform: process.platform,
+
   // Marker so React can detect Electron runtime
   isElectron: true,
 });

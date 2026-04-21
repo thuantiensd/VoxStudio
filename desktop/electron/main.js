@@ -1,6 +1,7 @@
-import { app, BrowserWindow, Menu, shell, ipcMain, dialog } from "electron";
+import { app, BrowserWindow, Menu, shell, ipcMain, dialog, Notification } from "electron";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import windowStateKeeper from "electron-window-state";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -11,23 +12,39 @@ const VITE_DEV_URL = process.env.VITE_DEV_SERVER_URL || "http://localhost:5174";
 let mainWindow = null;
 
 function createWindow() {
+  // Persist size + position qua các lần mở app.
+  const winState = windowStateKeeper({
+    defaultWidth: 1440,
+    defaultHeight: 900,
+  });
+
+  const isMac = process.platform === "darwin";
+
   mainWindow = new BrowserWindow({
-    width: 1440,
-    height: 900,
+    x: winState.x,
+    y: winState.y,
+    width: winState.width,
+    height: winState.height,
     minWidth: 1024,
     minHeight: 640,
     title: "VoxStudio",
-    backgroundColor: "#0b1120", // dark navy matching theme
-    titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "default",
-    trafficLightPosition: process.platform === "darwin" ? { x: 16, y: 16 } : undefined,
+    backgroundColor: "#0a0a0a",
+    // Mac: traffic lights native chừa sẵn; Win/Linux: tắt chrome, custom React titlebar.
+    titleBarStyle: isMac ? "hiddenInset" : "hidden",
+    trafficLightPosition: isMac ? { x: 16, y: 12 } : undefined,
+    titleBarOverlay: !isMac ? {
+      color: "#0a0a0a", symbolColor: "#e4e4e7", height: 36,
+    } : undefined,
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
-      webSecurity: false,  // cho phép renderer load file:// (dùng cho thumbnail local)
+      webSecurity: false,  // cho phép renderer load file:// (thumbnail local)
     },
   });
+
+  winState.manage(mainWindow);
 
   if (isDev) {
     mainWindow.loadURL(VITE_DEV_URL);
@@ -140,6 +157,35 @@ ipcMain.handle("shell:openFileInApp", async (_event, filepath) => {
 // Hiện file trong Finder/Explorer
 ipcMain.handle("shell:revealInFolder", async (_event, filepath) => {
   shell.showItemInFolder(filepath);
+  return true;
+});
+
+// Custom window controls (Windows/Linux - Mac dùng traffic lights native)
+ipcMain.handle("win:control", async (_event, action) => {
+  if (!mainWindow) return;
+  switch (action) {
+    case "minimize":       mainWindow.minimize(); break;
+    case "toggleMaximize": mainWindow.isMaximized() ? mainWindow.unmaximize() : mainWindow.maximize(); break;
+    case "close":          mainWindow.close(); break;
+  }
+});
+
+// Native notification
+ipcMain.handle("notify:show", async (_event, { title, body } = {}) => {
+  if (!Notification.isSupported()) return false;
+  new Notification({ title: title || "VoxStudio", body: body || "" }).show();
+  return true;
+});
+
+// Dock / taskbar badge
+ipcMain.handle("badge:set", async (_event, count) => {
+  const n = Math.max(0, parseInt(count, 10) || 0);
+  if (process.platform === "darwin" && app.dock) {
+    app.dock.setBadge(n > 0 ? String(n) : "");
+  } else if (mainWindow) {
+    // Windows: setOverlayIcon cần icon file — hiện tại để null.
+    try { mainWindow.setOverlayIcon(null, n > 0 ? `${n} đang chạy` : ""); } catch {}
+  }
   return true;
 });
 

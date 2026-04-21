@@ -23,8 +23,12 @@
     "build:linux": "npm run vite:build && electron-builder --linux"
   },
   "dependencies": {
+    "@fontsource/inter": "^5.2.8",
+    "@fontsource/jetbrains-mono": "^5.2.8",
     "@tailwindcss/vite": "^4.2.2",
+    "cmdk": "^1.1.1",
     "lucide-react": "^1.8.0",
+    "motion": "^12.38.0",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
     "react-router-dom": "^7.14.1",
@@ -39,6 +43,7 @@
     "cross-env": "^10.1.0",
     "electron": "^41.2.1",
     "electron-builder": "^26.8.1",
+    "electron-window-state": "^5.0.3",
     "eslint": "^9.39.4",
     "eslint-plugin-react-hooks": "^7.0.1",
     "eslint-plugin-react-refresh": "^0.5.2",
@@ -61,18 +66,30 @@
     "mac": {
       "category": "public.app-category.video",
       "target": [
-        { "target": "dmg", "arch": ["universal"] }
+        {
+          "target": "dmg",
+          "arch": [
+            "universal"
+          ]
+        }
       ],
       "hardenedRuntime": true,
       "gatekeeperAssess": false
     },
     "win": {
       "target": [
-        { "target": "nsis", "arch": ["x64"] }
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
       ]
     },
     "linux": {
-      "target": ["AppImage"],
+      "target": [
+        "AppImage"
+      ],
       "category": "AudioVideo"
     },
     "publish": null
