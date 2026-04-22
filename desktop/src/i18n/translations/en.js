@@ -26,6 +26,7 @@ export default {
     titleLibrary: "Voices",
     titleHistory: "History",
     titleClone: "Voice Clone",
+    titleTTS: "Text to Speech",
     titleSettings: "Settings",
     titleDownloader: "Download",
     drop: "Drop video here",

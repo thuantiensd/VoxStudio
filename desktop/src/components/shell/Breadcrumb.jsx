@@ -8,7 +8,7 @@ export default function Breadcrumb() {
   const navigate = useNavigate();
 
   const ROUTE_LABELS = {
-    "/":         t("shell.titleHome"),
+    "/":         t("shell.titleTTS"),
     "/studio":   t("shell.titleStudio"),
     "/clone":    t("shell.titleClone"),
     "/library":  t("shell.titleLibrary"),

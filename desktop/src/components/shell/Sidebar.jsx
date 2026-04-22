@@ -27,7 +27,7 @@ export default function Sidebar() {
   ];
 
   const TOOLS = [
-    { path: "/",           icon: AudioWaveform, label: "TTS",                        hotkey: "4" },
+    { path: "/",           icon: AudioWaveform, label: t("shell.titleTTS"),          hotkey: "4" },
     { path: "/clone",      icon: Mic2,          label: t("shell.titleClone"),        hotkey: "5" },
     { path: "/downloader", icon: CloudDownload, label: t("shell.titleDownloader"),   hotkey: "6" },
   ];
