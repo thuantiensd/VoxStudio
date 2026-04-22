@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import {
   FileAudio, FileVideo, FolderOpen, UploadCloud, Play, X,
@@ -10,7 +10,7 @@ import Button from "../components/ui/Button";
 import { useToast } from "../components/ui/Toast";
 import { transcribe, translateTexts } from "../services/api";
 import { showError } from "../services/errors";
-import { getKey } from "../services/keyvault";
+import { getKey, listKeys } from "../services/keyvault";
 
 /* ─────────────────────────────────────────────────────────
    Speech-to-Text page
@@ -208,6 +208,20 @@ export default function STTPage() {
     try { localStorage.setItem(LS_TR_ENG, v); } catch {}
   };
 
+  // Track key nào đã có trong vault (để warning live khi user chọn engine)
+  const [savedKeys, setSavedKeys] = useState({});
+  useEffect(() => {
+    let active = true;
+    listKeys().then(({ ids }) => { if (active) setSavedKeys(ids || {}); });
+    // Re-check khi cửa sổ focus lại (user có thể vừa sửa trong Settings)
+    const onFocus = () => listKeys().then(({ ids }) => setSavedKeys(ids || {}));
+    window.addEventListener("focus", onFocus);
+    return () => { active = false; window.removeEventListener("focus", onFocus); };
+  }, []);
+
+  const trEngineMeta = TRANSLATE_ENGINES.find((e) => e.id === trEngine);
+  const trMissingKey = trOn && trEngineMeta?.needsKey && !savedKeys[trEngine];
+
   const [outputFolder, setOutputFolder] = useState(() => {
     try { return localStorage.getItem(LS_FOLDER) || ""; }
     catch { return ""; }
@@ -373,6 +387,24 @@ export default function STTPage() {
       toast.info("Chưa có output folder — file sẽ tải về qua Downloads của trình duyệt.",
                   { title: "Chọn thư mục lưu" });
     }
+
+    // Pre-flight: nếu bật dịch + engine cần key → check key trước khi chạy
+    // Whisper rất tốn thời gian, không thể để STT xong rồi mới phát hiện thiếu key.
+    let translateApiKey = null;
+    if (trOn) {
+      const engineMeta = TRANSLATE_ENGINES.find((e) => e.id === trEngine);
+      if (engineMeta?.needsKey) {
+        translateApiKey = await getKey(trEngine);
+        if (!translateApiKey) {
+          toast.error(
+            `Mở Cài đặt → AI & API keys để thêm key ${engineMeta.label}, hoặc đổi engine sang Google (miễn phí).`,
+            { title: `Thiếu API key cho ${engineMeta.label}` },
+          );
+          return;
+        }
+      }
+    }
+
     setRunning(true);
     abortRef.current = false;
     try {
@@ -394,17 +426,12 @@ export default function STTPage() {
             translated: null,
           };
 
-          // Optional translation step
+          // Optional translation step — key đã validate ở pre-flight
           if (trOn && segments.length) {
-            const engineMeta = TRANSLATE_ENGINES.find((e) => e.id === trEngine);
-            const apiKey = engineMeta?.needsKey ? await getKey(trEngine) : null;
-            if (engineMeta?.needsKey && !apiKey) {
-              throw new Error(`Thiếu API key cho ${engineMeta.label}. Vào Cài đặt → AI & API keys để thêm.`);
-            }
             const texts = segments.map((s) => (s.text || "").trim());
             const tr = await translateTexts({
               texts, target: trTarget, source: r?.language || "auto",
-              engine: trEngine, apiKey,
+              engine: trEngine, apiKey: translateApiKey,
             });
             patch.translated = tr?.translations || [];
           }
@@ -452,7 +479,10 @@ export default function STTPage() {
         ) : (
           <Button size="md" variant="primary" icon={Play}
                   onClick={runAll}
-                  disabled={!items.length || !formats.length}>
+                  disabled={!items.length || !formats.length || trMissingKey}
+                  title={trMissingKey
+                    ? `Thiếu API key cho ${trEngineMeta.label} — mở Cài đặt → AI & API keys`
+                    : undefined}>
             Bắt đầu {items.filter((x) => x.status !== "done").length > 0
               ? `(${items.filter((x) => x.status !== "done").length})` : ""}
           </Button>
@@ -606,10 +636,24 @@ export default function STTPage() {
                   >
                     {TRANSLATE_ENGINES.map((E) => (
                       <option key={E.id} value={E.id}>
-                        {E.label}{E.needsKey ? " (cần key)" : ""}
+                        {E.label}
+                        {E.needsKey ? (savedKeys[E.id] ? " ✓" : " (cần key)") : ""}
                       </option>
                     ))}
                   </select>
+
+                  {trMissingKey && (
+                    <div style={{
+                      marginTop: 8, padding: "8px 10px", borderRadius: 6,
+                      background: "rgba(239,68,68,0.08)",
+                      border: "1px solid rgba(239,68,68,0.3)",
+                      fontSize: 11.5, color: "var(--err)", lineHeight: 1.5,
+                    }}>
+                      Chưa có API key cho <b>{trEngineMeta.label}</b>. Vào{" "}
+                      <b>Cài đặt → AI & API keys</b> để thêm, hoặc chọn{" "}
+                      <b>Google (miễn phí)</b>.
+                    </div>
+                  )}
 
                   <p style={{ marginTop: 8, fontSize: 11, color: "var(--n-7)",
                                lineHeight: 1.5 }}>
