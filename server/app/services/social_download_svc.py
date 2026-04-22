@@ -448,13 +448,9 @@ def _download_via_ytdlp(url: str, pdir: Path, final_path: Path, max_height: int 
                 # video thành nhiều fragments, mặc định tải tuần tự 1 connection.
                 # concurrent_fragments=8 = tải 8 chunk song song → x4-6 tốc độ.
                 "concurrent_fragment_downloads": 8,
-                # YouTube throttle aggressive cho web_safari client. iOS client
-                # (bypass throttle) thường cho tốc độ full bandwidth.
-                "extractor_args": {
-                    "youtube": {
-                        "player_client": ["ios", "web"],
-                    },
-                },
+                # KHÔNG ép player_client — YouTube thay đổi liên tục, "ios"
+                # client có thể bị reject "Requested format not available".
+                # Để yt-dlp tự pick client mặc định (web/tv_embedded).
                 "http_headers": {
                     "User-Agent": (
                         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
