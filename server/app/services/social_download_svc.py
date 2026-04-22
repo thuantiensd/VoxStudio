@@ -442,6 +442,17 @@ def _download_via_ytdlp(url: str, pdir: Path, final_path: Path):
                 "noplaylist": True,
                 "retries": 3,
                 "max_filesize": 500 * 1024 * 1024,
+                # Tăng tốc download DASH segments song song — YouTube/FB chia
+                # video thành nhiều fragments, mặc định tải tuần tự 1 connection.
+                # concurrent_fragments=8 = tải 8 chunk song song → x4-6 tốc độ.
+                "concurrent_fragment_downloads": 8,
+                # YouTube throttle aggressive cho web_safari client. iOS client
+                # (bypass throttle) thường cho tốc độ full bandwidth.
+                "extractor_args": {
+                    "youtube": {
+                        "player_client": ["ios", "web"],
+                    },
+                },
                 "http_headers": {
                     "User-Agent": (
                         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
@@ -457,14 +468,25 @@ def _download_via_ytdlp(url: str, pdir: Path, final_path: Path):
                 common_opts["ffmpeg_location"] = ffbin
             _attach_chrome_cookies(common_opts)
 
-            # Strategy: yt-dlp default "bv*+ba/b" đã handle 99% cases — progressive
-            # cho TikTok/Douyin/IG, DASH merge cho YouTube/FB. Chỉ cần tự chỉ định
-            # explicit để chắc chắn pick audio:
-            #   bestvideo+bestaudio (DASH merge)
-            #   /best[vcodec!=none][acodec!=none] (progressive combined)
-            # KHÔNG có bare "/best" cuối vì sẽ pick video-only stream cho FB DASH.
+            # Format selector priority (ưu tiên H.264 để SKIP transcode step
+            # trên Mac, tiết kiệm 10-30s/video):
+            #   1. H.264 video (avc1/avc3/h264) + AAC audio → no transcode needed
+            #   2. Any combined progressive stream (có cả video+audio sẵn)
+            #   3. Any bestvideo+bestaudio (DASH merge + transcode sau nếu AV1)
+            # Cap 1080p vì 4K/8K không đáng tải cho dubbing use case (tốn dung
+            # lượng + thời gian, chất lượng vẫn thừa cho social upload).
             opts_final = dict(common_opts,
-                format="bestvideo*+bestaudio/best[vcodec!=none][acodec!=none]")
+                format=(
+                    # 1. H.264 merge (bỏ transcode)
+                    "bestvideo[vcodec^=avc][height<=1080]+bestaudio[acodec=aac]/"
+                    "bestvideo[vcodec^=avc][height<=1080]+bestaudio/"
+                    # 2. Progressive combined (TikTok/Douyin)
+                    "best[vcodec^=avc][acodec!=none][height<=1080]/"
+                    "best[acodec!=none][vcodec!=none][height<=1080]/"
+                    # 3. Fallback: any video+audio merge (có thể AV1 → transcode)
+                    "bestvideo[height<=1080]+bestaudio/"
+                    "best[height<=1080]/best"
+                ))
             with yt_dlp.YoutubeDL(opts_final) as ydl:
                 info = ydl.extract_info(url, download=True)
                 logger.info("yt-dlp picked format: %s (vcodec=%s acodec=%s)",
