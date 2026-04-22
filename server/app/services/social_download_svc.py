@@ -400,6 +400,99 @@ def download_to_file_generator(info: InfoResult, dest_path: Path,
         yield item
 
 
+# ── yt-dlp download (auto-merge video+audio) ────────────────────
+def _download_via_ytdlp(url: str, pdir: Path, final_path: Path):
+    """Generator yield progress. Dùng yt-dlp download+merge thay vì httpx
+    stream 1 URL — fix case DASH có video/audio tách riêng (FB/YouTube).
+    yt-dlp tự merge qua ffmpeg khi merge_output_format='mp4'."""
+    q: "queue.Queue[dict | None]" = queue.Queue()
+
+    def progress_hook(d):
+        status = d.get("status")
+        if status == "downloading":
+            downloaded = d.get("downloaded_bytes") or 0
+            total = d.get("total_bytes") or d.get("total_bytes_estimate") or 0
+            pct = (downloaded / total * 100) if total else 0
+            progress = round(5 + pct * 0.83, 1)  # 5→88%
+            speed = d.get("speed") or 0
+            speed_str = f"{speed / 1024 / 1024:.1f} MB/s" if speed > 0 else ""
+            eta = d.get("eta")
+            eta_str = f" · còn {eta}s" if eta else ""
+            detail = (speed_str + eta_str).strip(" ·")
+            q.put({"step": "downloading", "progress": progress,
+                   "label": "Đang tải video…", "detail": detail or None})
+        elif status == "finished":
+            # Có thể là video xong, chuẩn bị merge audio
+            q.put({"step": "processing", "progress": 90,
+                   "label": "Đang ghép video + audio…"})
+
+    def worker():
+        try:
+            outtmpl = str(pdir / "original.%(ext)s")
+            opts = {
+                "format": "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
+                "outtmpl": outtmpl,
+                "merge_output_format": "mp4",
+                "progress_hooks": [progress_hook],
+                "quiet": True,
+                "no_warnings": True,
+                "noplaylist": True,
+                "retries": 3,
+                "max_filesize": 500 * 1024 * 1024,
+                "postprocessors": [],
+                "http_headers": {
+                    "User-Agent": (
+                        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                        "AppleWebKit/537.36 (KHTML, like Gecko) "
+                        "Chrome/131.0.0.0 Safari/537.36"
+                    ),
+                },
+            }
+            _attach_chrome_cookies(opts)
+
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                ydl.download([url])
+
+            # yt-dlp đã save theo outtmpl — file có thể là .mp4 hoặc extension khác.
+            # Tìm file và rename về original.mp4 nếu cần.
+            import os as _os
+            for ext in ("mp4", "mkv", "webm", "mov"):
+                cand = pdir / f"original.{ext}"
+                if cand.exists():
+                    if cand != final_path:
+                        # Remux sang mp4 nếu extension khác
+                        try:
+                            (
+                                ffmpeg.input(str(cand))
+                                .output(str(final_path), vcodec="copy", acodec="copy")
+                                .overwrite_output().run(quiet=True)
+                            )
+                            cand.unlink()
+                        except Exception as e:
+                            logger.warning("remux fail, using as-is: %s", e)
+                            shutil.move(str(cand), str(final_path))
+                    break
+            if not final_path.exists():
+                raise RuntimeError("yt-dlp không tạo ra file output.")
+            q.put({"step": "processing", "progress": 92,
+                   "label": "Hoàn tất tải, xử lý audio…"})
+        except Exception as e:
+            msg = str(e)
+            import re as _re
+            clean = _re.sub(r"\x1b\[[0-9;]*m", "", msg)
+            clean = _re.sub(r"\[?(yt-dlp|TikTok|YouTube|Facebook|Instagram|Douyin|Bilibili)\]?\s*:?\s*",
+                            "", clean, flags=_re.IGNORECASE)
+            q.put({"step": "error", "progress": -1, "label": clean[:280]})
+        finally:
+            q.put(None)
+
+    threading.Thread(target=worker, daemon=True).start()
+    while True:
+        item = q.get()
+        if item is None: break
+        yield item
+
+
 # ── High-level: download URL → VoxStudio project ───────────────
 def download_to_project_generator(url: str,
                                   target_language: str = "vietnamese",
@@ -438,15 +531,28 @@ def download_to_project_generator(url: str,
     pdir.mkdir(parents=True, exist_ok=True)
     final_path = pdir / "original.mp4"
 
-    # Download
+    # Download — 2 paths khác nhau:
+    #   source='ytdlp': dùng yt-dlp download() để auto merge video+audio
+    #                   (DASH streams như YouTube/FB thường tách riêng).
+    #   source='scraper': httpx stream URL đơn (TikTok/Douyin mobile API
+    #                     thường trả URL combined sẵn).
     had_error = False
-    for tick in download_to_file_generator(info, final_path):
-        if tick.get("step") == "error":
-            shutil.rmtree(pdir, ignore_errors=True)
-            had_error = True
+    if info.source == "ytdlp":
+        for tick in _download_via_ytdlp(url, pdir, final_path):
+            if tick.get("step") == "error":
+                shutil.rmtree(pdir, ignore_errors=True)
+                had_error = True
+                yield tick
+                break
             yield tick
-            break
-        yield tick
+    else:
+        for tick in download_to_file_generator(info, final_path):
+            if tick.get("step") == "error":
+                shutil.rmtree(pdir, ignore_errors=True)
+                had_error = True
+                yield tick
+                break
+            yield tick
     if had_error:
         return
 
