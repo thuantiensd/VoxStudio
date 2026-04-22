@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   Clapperboard, Mic2, AudioWaveform, Library,
   ClockFading, Settings as Cog, Sparkles, CloudDownload,
+  FileText,
   Sun, Moon, Monitor, LogIn, LogOut, User as UserIcon,
 } from "lucide-react";
 import { useBatch } from "../../batch/BatchContext";
@@ -32,6 +33,7 @@ export default function Sidebar() {
     { path: "/",           icon: AudioWaveform, label: t("shell.titleTTS"),          hotkey: "4" },
     { path: "/clone",      icon: Mic2,          label: t("shell.titleClone"),        hotkey: "5" },
     { path: "/downloader", icon: CloudDownload, label: t("shell.titleDownloader"),   hotkey: "6" },
+    { path: "/stt",        icon: FileText,      label: t("shell.titleSTT"),          hotkey: "7" },
   ];
 
   return (

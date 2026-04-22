@@ -29,6 +29,7 @@ export default {
     titleTTS: "Text to Speech",
     titleSettings: "Settings",
     titleDownloader: "Download",
+    titleSTT: "Subtitles (STT)",
     drop: "Drop video here",
     dropHint: "MP4 · MOV · MKV · AVI · WEBM",
   },

@@ -7,6 +7,7 @@ import HistoryPage from "./pages/HistoryPage";
 import SettingsPage from "./pages/SettingsPage";
 import StudioPage from "./pages/StudioPage";
 import DownloaderPage from "./pages/DownloaderPage";
+import STTPage from "./pages/STTPage";
 
 import LoginPage from "./auth/LoginPage";
 import SignupPage from "./auth/SignupPage";
@@ -29,6 +30,7 @@ function Shell() {
         <Route path="/library" element={<VoiceLibraryPage />} />
         <Route path="/history" element={<HistoryPage />} />
         <Route path="/downloader" element={<DownloaderPage />} />
+        <Route path="/stt" element={<STTPage />} />
         <Route path="/settings" element={<SettingsPage />} />
       </Routes>
     </AppShell>

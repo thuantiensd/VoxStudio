@@ -193,6 +193,36 @@ ipcMain.handle("fs:listVideosInFolder", async (_event, folder) => {
   return out;
 });
 
+// Liệt kê media (audio + video) trong thư mục local — dùng cho STT batch.
+ipcMain.handle("fs:listMediaInFolder", async (_event, folder) => {
+  const fs = await import("node:fs/promises");
+  const path = await import("node:path");
+  const entries = await fs.readdir(folder);
+  const RE = /\.(mp4|mov|mkv|avi|webm|wav|mp3|m4a|flac|ogg|aac|wma|opus)$/i;
+  const media = entries.filter((f) => RE.test(f));
+  const out = [];
+  for (const name of media) {
+    const full = path.join(folder, name);
+    try {
+      const s = await fs.stat(full);
+      if (s.isFile()) out.push({ name, path: full, size: s.size });
+    } catch {}
+  }
+  return out;
+});
+
+// Ghi text file vào folder (SRT / VTT / TXT / JSON / CSV …).
+// Auto-unique tên nếu trùng (trừ khi overwrite=true).
+ipcMain.handle("fs:writeText", async (_event, { folder, filename, content, overwrite }) => {
+  const fs = await import("node:fs/promises");
+  const path = await import("node:path");
+  const dest = overwrite
+    ? path.join(folder, filename)
+    : await _uniquePath(folder, filename);
+  await fs.writeFile(dest, content, "utf8");
+  return dest;
+});
+
 // Đọc file thành buffer để renderer wrap thành File và gửi lên backend.
 ipcMain.handle("fs:readFileAsBuffer", async (_event, filepath) => {
   const fs = await import("node:fs/promises");

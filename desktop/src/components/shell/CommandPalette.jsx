@@ -5,7 +5,7 @@ import { useNavigate } from "react-router-dom";
 import {
   Clapperboard, Mic2, AudioWaveform, Library, ClockFading,
   Settings as Cog, Search, Upload, FolderOpen, Trash2, SunMoon, Languages,
-  CloudDownload,
+  CloudDownload, FileText,
 } from "lucide-react";
 import { useTheme } from "../../theme/ThemeContext";
 import { useBatch } from "../../batch/BatchContext";
@@ -38,6 +38,7 @@ export default function CommandPalette({ open, onClose }) {
     { id: "nav:tts",      icon: AudioWaveform, label: t("shell.titleTTS"),      group: NAV, run: go("/"),         hotkey: "⌘4" },
     { id: "nav:clone",    icon: Mic2,          label: t("shell.titleClone"),      group: NAV, run: go("/clone"),      hotkey: "⌘5" },
     { id: "nav:download", icon: CloudDownload, label: t("shell.titleDownloader"), group: NAV, run: go("/downloader"), hotkey: "⌘6" },
+    { id: "nav:stt",      icon: FileText,      label: t("shell.titleSTT"),         group: NAV, run: go("/stt"),        hotkey: "⌘7" },
     { id: "nav:settings", icon: Cog,           label: t("shell.titleSettings"),   group: NAV, run: go("/settings"),   hotkey: "⌘," },
 
     { id: "act:upload",   icon: Upload,        label: t("palette.uploadVideo"),      group: ACT, run: go("/studio") },

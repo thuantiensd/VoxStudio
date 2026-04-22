@@ -22,6 +22,10 @@ contextBridge.exposeInMainWorld("voxstudio", {
     ipcRenderer.invoke("fs:getUniqueFilename", opts),
   listVideosInFolder: (folder) =>
     ipcRenderer.invoke("fs:listVideosInFolder", folder),
+  listMediaInFolder: (folder) =>
+    ipcRenderer.invoke("fs:listMediaInFolder", folder),
+  writeText: (opts) =>
+    ipcRenderer.invoke("fs:writeText", opts),
   readFileAsBuffer: (filepath) =>
     ipcRenderer.invoke("fs:readFileAsBuffer", filepath),
   openFileInApp: (filepath) =>

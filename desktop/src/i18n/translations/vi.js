@@ -29,6 +29,7 @@ export default {
     titleTTS: "Tạo giọng",
     titleSettings: "Cài đặt",
     titleDownloader: "Tải video",
+    titleSTT: "Phụ đề (STT)",
     drop: "Thả video vào đây",
     dropHint: "MP4 · MOV · MKV · AVI · WEBM",
   },

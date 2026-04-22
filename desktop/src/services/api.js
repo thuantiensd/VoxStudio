@@ -138,9 +138,10 @@ export async function deleteVoice(voiceId) {
 }
 
 // ── STT ─────────────────────────────────────────────
-export async function transcribe(audioFile) {
+export async function transcribe(audioFile, { language } = {}) {
   const form = new FormData();
   form.append('audio', audioFile);
+  if (language && language !== 'auto') form.append('language', language);
   const res = await request('/stt/transcribe', { method: 'POST', body: form });
   return res.json();
 }

@@ -14,6 +14,7 @@ export default function Breadcrumb() {
     "/library":  t("shell.titleLibrary"),
     "/history":    t("shell.titleHistory"),
     "/downloader": t("shell.titleDownloader"),
+    "/stt":        t("shell.titleSTT"),
     "/settings":   t("shell.titleSettings"),
   };
 
