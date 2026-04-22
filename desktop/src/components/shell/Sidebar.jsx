@@ -1,13 +1,12 @@
 import { useLocation, useNavigate } from "react-router-dom";
 import { motion } from "motion/react";
-import { useEffect, useRef, useState } from "react";
 import {
   Clapperboard, Mic2, AudioWaveform, Library,
   ClockFading, Settings as Cog, Sparkles, CloudDownload,
-  Sun, Moon, Monitor, Info, Check, ExternalLink,
+  Sun, Moon, Monitor,
 } from "lucide-react";
 import { useBatch } from "../../batch/BatchContext";
-import { useT, useI18n } from "../../i18n/I18nContext";
+import { useT } from "../../i18n/I18nContext";
 import { useTheme } from "../../theme/ThemeContext";
 
 /**
@@ -103,7 +102,6 @@ export default function Sidebar() {
             />
           </div>
           <ThemeToggle />
-          <InfoPopover />
         </div>
       </div>
     </aside>
@@ -155,183 +153,6 @@ function ThemeToggle() {
   );
 }
 
-/**
- * InfoPopover — icon ⓘ 30×30, click mở popover 240px với:
- *   - Backend status (dot online/offline + nhãn)
- *   - Language picker (VI / EN dạng Check list)
- *   - App version
- *   - Link "Tìm hiểu thêm" về Chrome cookie flow
- */
-function InfoPopover() {
-  const t = useT();
-  const { locale, setLocale, locales } = useI18n();
-  const [open, setOpen] = useState(false);
-  const [version, setVersion] = useState("");
-  const rootRef = useRef(null);
-
-  useEffect(() => {
-    window.voxstudio?.getVersion?.().then(setVersion).catch(() => {});
-  }, []);
-
-  useEffect(() => {
-    if (!open) return;
-    const onDoc = (e) => {
-      if (rootRef.current && !rootRef.current.contains(e.target)) setOpen(false);
-    };
-    document.addEventListener("mousedown", onDoc);
-    return () => document.removeEventListener("mousedown", onDoc);
-  }, [open]);
-
-  return (
-    <div ref={rootRef} style={{ position: "relative" }}>
-      <button
-        onClick={() => setOpen((o) => !o)}
-        title={t("shell.moreTip") || "Thông tin & ngôn ngữ"}
-        className="flex items-center justify-center rounded transition-colors flex-shrink-0"
-        style={{
-          width: 30, height: 30,
-          color: open ? "var(--n-10)" : "var(--n-8)",
-          background: open ? "var(--n-2)" : "transparent",
-          border: `1px solid ${open ? "var(--n-3)" : "transparent"}`,
-        }}
-        onMouseEnter={(e) => {
-          if (open) return;
-          e.currentTarget.style.background = "var(--n-2)";
-          e.currentTarget.style.color = "var(--n-10)";
-          e.currentTarget.style.borderColor = "var(--n-3)";
-        }}
-        onMouseLeave={(e) => {
-          if (open) return;
-          e.currentTarget.style.background = "transparent";
-          e.currentTarget.style.color = "var(--n-8)";
-          e.currentTarget.style.borderColor = "transparent";
-        }}
-      >
-        <Info size={13} />
-      </button>
-
-      {open && (
-        <div
-          style={{
-            position: "absolute",
-            bottom: "calc(100% + 6px)", right: 0,
-            width: 240,
-            background: "var(--n-1)",
-            border: "1px solid var(--n-3)",
-            borderRadius: 10,
-            boxShadow: "var(--shadow-pop)",
-            padding: 8,
-            zIndex: 60,
-            fontSize: 12,
-          }}
-        >
-          {/* Backend status */}
-          <div
-            style={{
-              display: "flex", alignItems: "center", gap: 8,
-              padding: "8px 10px", borderRadius: 6,
-            }}
-          >
-            <span
-              className="inline-block rounded-full"
-              style={{
-                width: 8, height: 8, background: "var(--ok)",
-                boxShadow: "0 0 0 3px rgba(63,185,80,0.18)",
-              }}
-            />
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ color: "var(--n-10)", fontWeight: 500, fontSize: 12 }}>
-                {t("sidebar.backendOnline")}
-              </div>
-              <div style={{ fontSize: 10, color: "var(--n-6)" }}>
-                {version ? `v${version}` : "VoxStudio"}
-              </div>
-            </div>
-          </div>
-
-          {/* Separator */}
-          <div style={{ height: 1, background: "var(--n-3)", margin: "4px 0" }} />
-
-          {/* Language picker */}
-          <div style={{
-            padding: "4px 10px 2px",
-            fontSize: 10, fontWeight: 600, textTransform: "uppercase",
-            letterSpacing: "0.06em", color: "var(--n-6)",
-          }}>
-            {t("user.language") || "Ngôn ngữ"}
-          </div>
-          {locales.map((lc) => {
-            const active = lc === locale;
-            const label = lc === "vi" ? "Tiếng Việt" : lc === "en" ? "English" : lc.toUpperCase();
-            return (
-              <button
-                key={lc}
-                onClick={() => { setLocale(lc); setOpen(false); }}
-                className="w-full flex items-center gap-2 px-2.5 rounded transition-colors"
-                style={{
-                  height: 30,
-                  background: active ? "var(--accent-soft)" : "transparent",
-                  color: active ? "var(--n-10)" : "var(--n-9)",
-                  border: "none", cursor: "pointer",
-                  fontWeight: active ? 500 : 400,
-                  textAlign: "left",
-                }}
-                onMouseEnter={(e) => {
-                  if (!active) e.currentTarget.style.background = "var(--n-2)";
-                }}
-                onMouseLeave={(e) => {
-                  if (!active) e.currentTarget.style.background = "transparent";
-                }}
-              >
-                <span style={{
-                  fontSize: 10, fontWeight: 600, fontFamily: "var(--font-mono)",
-                  width: 22, textAlign: "center",
-                  color: active ? "var(--accent)" : "var(--n-6)",
-                }}>
-                  {lc.toUpperCase()}
-                </span>
-                <span style={{ flex: 1, fontSize: 12 }}>{label}</span>
-                {active && <Check size={12} style={{ color: "var(--accent)" }} />}
-              </button>
-            );
-          })}
-
-          {/* Separator */}
-          <div style={{ height: 1, background: "var(--n-3)", margin: "4px 0" }} />
-
-          {/* Learn more */}
-          <button
-            onClick={() => {
-              window.voxstudio?.openExternal?.("https://github.com/thuantiensd/VoxStudio");
-              setOpen(false);
-            }}
-            className="w-full flex items-center gap-2 px-2.5 rounded transition-colors"
-            style={{
-              height: 28,
-              background: "transparent",
-              color: "var(--n-8)",
-              border: "none", cursor: "pointer",
-              fontSize: 11,
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.background = "var(--n-2)";
-              e.currentTarget.style.color = "var(--n-10)";
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.background = "transparent";
-              e.currentTarget.style.color = "var(--n-8)";
-            }}
-          >
-            <ExternalLink size={11} />
-            <span style={{ flex: 1, textAlign: "left" }}>
-              {t("shell.learnMore") || "Tìm hiểu thêm"}
-            </span>
-          </button>
-        </div>
-      )}
-    </div>
-  );
-}
 
 function isActive(current, path) {
   if (path === "/") return current === "/";
