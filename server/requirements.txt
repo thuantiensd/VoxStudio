@@ -25,6 +25,7 @@ pyjwt
 bcrypt
 sqlalchemy
 aiosqlite
+greenlet  # SQLAlchemy async engine runtime
 email-validator
 python-dotenv
 google-auth
