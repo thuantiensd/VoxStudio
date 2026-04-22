@@ -452,17 +452,35 @@ def download_to_project_generator(url: str,
 
     # Post process — audio + duration + thumb
     try:
-        audio_path = pdir / "original_audio.wav"
-        (
-            ffmpeg.input(str(final_path))
-            .output(str(audio_path), acodec="pcm_s16le", ac=1, ar=16000)
-            .overwrite_output().run(quiet=True)
-        )
+        # Probe trước để biết có audio stream không + lấy duration thật
         try:
             probe = ffmpeg.probe(str(final_path))
             duration = float(probe["format"]["duration"])
-        except Exception:
+            streams = probe.get("streams", [])
+            has_audio = any(s.get("codec_type") == "audio" for s in streams)
+        except Exception as e:
+            logger.warning("ffprobe fail: %s", e)
             duration = info.duration or 0.0
+            has_audio = True  # giả định có audio để thử extract
+
+        audio_path = pdir / "original_audio.wav"
+        if has_audio:
+            try:
+                (
+                    ffmpeg.input(str(final_path))
+                    .output(str(audio_path), acodec="pcm_s16le", ac=1, ar=16000)
+                    .overwrite_output().run(quiet=True, capture_stderr=True)
+                )
+            except ffmpeg.Error as e:
+                err = (e.stderr.decode("utf-8", errors="ignore") if e.stderr else "")[:300]
+                logger.warning("audio extract fail (will create silent): %s", err)
+                _create_silent_wav(audio_path, duration or 1.0)
+        else:
+            # Video không có audio track → tạo audio im lặng để pipeline dub
+            # (transcribe sẽ thấy silence → empty segments → user vẫn export được
+            # video gốc + thêm phụ đề/dub thủ công).
+            logger.info("Video không có audio stream — tạo silent track placeholder")
+            _create_silent_wav(audio_path, duration or 1.0)
         # Thumbnail
         try:
             thumb_path = pdir / "thumbnail.jpg"
@@ -514,6 +532,28 @@ def _safe_filename(name: str) -> str:
     keep = "".join(c if c.isalnum() or c in " _-." else "_" for c in (name or ""))
     keep = keep.strip().strip(".") or "video"
     return keep[:80]
+
+
+def _create_silent_wav(path: Path, duration_s: float):
+    """Tạo file WAV im lặng 16kHz mono — placeholder khi video không có audio."""
+    try:
+        (
+            ffmpeg
+            .input(f"anullsrc=channel_layout=mono:sample_rate=16000",
+                   f="lavfi", t=max(0.5, duration_s))
+            .output(str(path), acodec="pcm_s16le", ac=1, ar=16000)
+            .overwrite_output().run(quiet=True)
+        )
+    except Exception as e:
+        logger.warning("silent wav fail: %s", e)
+        # Last resort: write minimal valid WAV header
+        try:
+            import wave
+            with wave.open(str(path), "wb") as w:
+                w.setnchannels(1); w.setsampwidth(2); w.setframerate(16000)
+                w.writeframes(b"\x00\x00" * 16000)  # 1s silence
+        except Exception as e2:
+            logger.error("fallback silent wav fail: %s", e2)
 
 
 def _default_subtitle_style():
