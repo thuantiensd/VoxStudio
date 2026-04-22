@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Mic, Loader2 } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { useAuth } from "./AuthContext";
 import { useT } from "../i18n/I18nContext";
 
@@ -30,10 +30,14 @@ export default function SignupPage() {
          style={{ background: "var(--bg-base)" }}>
       <div className="w-full max-w-md">
         <div className="mb-8 text-center">
-          <div className="inline-flex h-12 w-12 items-center justify-center rounded-xl mb-3"
-               style={{ background: "var(--accent)" }}>
-            <Mic size={24} color="#fff" />
-          </div>
+          <img
+            src="/favicon.svg"
+            alt="VoxStudio"
+            width={56}
+            height={56}
+            className="mb-3 mx-auto block"
+            style={{ filter: "drop-shadow(0 8px 20px rgba(108, 92, 231, 0.35))" }}
+          />
           <h1 className="text-2xl font-semibold" style={{ color: "var(--text-primary)" }}>
             {t("brand.name")}
           </h1>

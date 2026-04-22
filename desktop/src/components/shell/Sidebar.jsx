@@ -3,7 +3,7 @@ import { motion } from "motion/react";
 import { useEffect, useRef, useState } from "react";
 import {
   Clapperboard, Mic2, AudioWaveform, Library,
-  ClockFading, Settings as Cog, Sparkles, CloudDownload,
+  ClockFading, Settings as Cog, CloudDownload,
   FileText,
   Sun, Moon, Monitor, LogIn, LogOut, User as UserIcon,
 } from "lucide-react";
@@ -235,12 +235,12 @@ function BrandUserBlock() {
         onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
       >
         <div
-          className="rounded-md flex items-center justify-center flex-shrink-0"
+          className="rounded-md flex items-center justify-center flex-shrink-0 overflow-hidden"
           style={{
             width: 22, height: 22,
-            background: isAuthenticated
+            background: isAuthenticated && !user?.avatar
               ? "linear-gradient(135deg, var(--accent), #8b5cf6)"
-              : "linear-gradient(135deg, var(--n-3), var(--n-4))",
+              : "transparent",
             fontSize: 10, fontWeight: 700, color: "#fff",
           }}
         >
@@ -248,7 +248,8 @@ function BrandUserBlock() {
             ? (user?.avatar
                 ? <img src={user.avatar} alt="" style={{ width: "100%", height: "100%", borderRadius: 6 }} />
                 : initial)
-            : <Sparkles size={12} color="#fff" />}
+            : <img src="/favicon.svg" alt=""
+                   style={{ width: "100%", height: "100%" }} />}
         </div>
         <div className="flex flex-col leading-tight min-w-0 flex-1">
           <span className="text-[13px] font-semibold truncate"
