@@ -132,11 +132,11 @@ function ProviderRow({ provider, hasKey, onChanged, toast }) {
     setLoading(true);
     try {
       await setKey(provider.id, value.trim());
-      toast?.show({ title: "Đã lưu", message: provider.name, kind: "ok" });
+      toast.success(provider.name, { title: "Đã lưu" });
       setEditing(false);
       onChanged?.();
     } catch (e) {
-      toast?.show({ title: "Lỗi lưu key", message: e?.message || "", kind: "error" });
+      toast.error(e?.message || "Không lưu được key.", { title: "Lỗi lưu key" });
     } finally {
       setLoading(false);
     }
@@ -147,7 +147,7 @@ function ProviderRow({ provider, hasKey, onChanged, toast }) {
     setLoading(true);
     try {
       await setKey(provider.id, "");
-      toast?.show({ title: "Đã xoá", message: provider.name, kind: "info" });
+      toast.info(provider.name, { title: "Đã xoá" });
       setEditing(false);
       setValue("");
       onChanged?.();
@@ -162,7 +162,7 @@ function ProviderRow({ provider, hasKey, onChanged, toast }) {
     try {
       const key = editing ? value.trim() : await getKey(provider.id);
       if (!key) {
-        toast?.show({ title: "Chưa có key", message: "Paste trước rồi test.", kind: "warn" });
+        toast.warn("Paste key trước rồi test.", { title: "Chưa có key" });
         return;
       }
       const res = await translateTexts({
@@ -174,22 +174,16 @@ function ProviderRow({ provider, hasKey, onChanged, toast }) {
       const out = (res?.translations || [])[0];
       if (out) {
         setTestResult("ok");
-        toast?.show({
-          title: `${provider.name} OK`,
-          message: `"Hello world" → "${out}"`,
-          kind: "ok",
-        });
+        toast.success(`"Hello world" → "${out}"`, { title: `${provider.name} OK` });
       } else {
         setTestResult("fail");
-        toast?.show({ title: "Không trả về kết quả", kind: "warn" });
+        toast.warn("Provider trả về rỗng. Kiểm tra key hoặc quota.",
+                    { title: "Không có kết quả" });
       }
     } catch (e) {
       setTestResult("fail");
-      toast?.show({
-        title: `${provider.name} thất bại`,
-        message: e?.message || "",
-        kind: "error",
-      });
+      toast.error(e?.message || "Không rõ nguyên nhân.",
+                   { title: `${provider.name} thất bại` });
     } finally {
       setTesting(false);
     }

@@ -222,11 +222,8 @@ export default function STTPage() {
 
   const pickFolder = async () => {
     if (!isElectron) {
-      toast?.show({
-        title: "Chế độ web",
-        message: "Chọn thư mục chỉ có trong app desktop. Kết quả sẽ tải về qua trình duyệt.",
-        kind: "info",
-      });
+      toast.info("Chọn thư mục chỉ có trong app desktop. Kết quả sẽ tải về qua trình duyệt.",
+                  { title: "Chế độ web" });
       return;
     }
     const folder = await window.voxstudio.pickFolder();
@@ -260,22 +257,20 @@ export default function STTPage() {
 
   const pickFolderForBatch = async () => {
     if (!isElectron) {
-      toast?.show({
-        title: "Không khả dụng",
-        message: "Quét thư mục chỉ có trong app desktop.",
-        kind: "warn",
-      });
+      toast.warn("Quét thư mục chỉ có trong app desktop.",
+                  { title: "Không khả dụng" });
       return;
     }
     const folder = await window.voxstudio.pickFolder();
     if (!folder) return;
     const list = await window.voxstudio.listMediaInFolder(folder);
     if (!list?.length) {
-      toast?.show({ title: "Không có media", message: "Thư mục không chứa audio/video hỗ trợ.", kind: "warn" });
+      toast.warn("Thư mục không chứa audio/video hỗ trợ.",
+                  { title: "Không có media" });
       return;
     }
     addFiles(list.map((f) => ({ name: f.name, path: f.path, size: f.size })));
-    toast?.show({ title: "Đã thêm", message: `${list.length} file từ ${folder}`, kind: "ok" });
+    toast.success(`${list.length} file từ ${folder}`, { title: "Đã thêm" });
   };
 
   const onDrop = (e) => {
@@ -283,7 +278,7 @@ export default function STTPage() {
     const dropped = Array.from(e.dataTransfer.files || []);
     const filtered = dropped.filter((f) => MEDIA_RE.test(f.name));
     if (!filtered.length) {
-      toast?.show({ title: "File không hỗ trợ", message: "Chỉ nhận audio/video.", kind: "warn" });
+      toast.warn("Chỉ nhận audio/video.", { title: "File không hỗ trợ" });
       return;
     }
     addFiles(filtered.map((f) => ({
@@ -367,19 +362,16 @@ export default function STTPage() {
     if (running) return;
     const pending = items.filter((x) => x.status !== "done");
     if (!pending.length) {
-      toast?.show({ title: "Không có file", message: "Thêm file rồi bấm chạy.", kind: "warn" });
+      toast.warn("Thêm file rồi bấm chạy.", { title: "Không có file" });
       return;
     }
     if (!formats.length) {
-      toast?.show({ title: "Chọn định dạng", message: "Tick ít nhất 1 format đầu ra.", kind: "warn" });
+      toast.warn("Tick ít nhất 1 format đầu ra.", { title: "Chọn định dạng" });
       return;
     }
     if (isElectron && !outputFolder) {
-      toast?.show({
-        title: "Chọn thư mục lưu",
-        message: "Chưa có output folder — file sẽ tải về qua Downloads của trình duyệt.",
-        kind: "info",
-      });
+      toast.info("Chưa có output folder — file sẽ tải về qua Downloads của trình duyệt.",
+                  { title: "Chọn thư mục lưu" });
     }
     setRunning(true);
     abortRef.current = false;
