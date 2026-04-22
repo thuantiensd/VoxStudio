@@ -491,18 +491,28 @@ def _download_via_ytdlp(url: str, pdir: Path, final_path: Path):
                     break
             if not final_path.exists():
                 raise RuntimeError("yt-dlp không tạo ra file output.")
-            # Verify — file có audio stream không?
+            # Verify + transcode nếu codec không phổ thông (AV1, HEVC 10-bit…).
+            # FB/YouTube giờ hay dùng AV1 (av01) — QuickTime + một số player
+            # không decode được. Transcode sang H.264 + AAC để tương thích
+            # toàn bộ: QuickTime, VLC, iOS, Windows, ffmpeg pipeline dubbing.
             try:
                 probe = ffmpeg.probe(str(final_path))
-                has_audio = any(s.get("codec_type") == "audio"
-                                for s in probe.get("streams", []))
+                streams = probe.get("streams", [])
+                vstream = next((s for s in streams if s.get("codec_type") == "video"), None)
+                astreams = [s for s in streams if s.get("codec_type") == "audio"]
+                has_audio = len(astreams) > 0
+                vcodec = (vstream or {}).get("codec_name", "")
                 if not has_audio:
-                    logger.warning(
-                        "Tải xong nhưng file KHÔNG có audio stream — "
-                        "yt-dlp có thể đã chọn sai format. File: %s", final_path
-                    )
+                    logger.warning("File KHÔNG có audio stream (yt-dlp format lỗi?).")
+                # Transcode nếu vcodec không phải h264 (AVC) hoặc chưa có audio
+                needs_transcode = vcodec.lower() in ("av1", "av01", "hevc", "vp9", "vp8")
+                if needs_transcode:
+                    q.put({"step": "processing", "progress": 91,
+                           "label": "Đang chuyển mã sang H.264 (QuickTime compat)…"})
+                    _transcode_to_h264(final_path)
+                    logger.info("Transcoded %s → H.264", vcodec)
             except Exception as e:
-                logger.warning("post-download probe fail: %s", e)
+                logger.warning("post-download probe/transcode fail: %s", e)
             q.put({"step": "processing", "progress": 92,
                    "label": "Hoàn tất tải, xử lý audio…"})
         except Exception as e:
@@ -667,6 +677,41 @@ def _safe_filename(name: str) -> str:
     keep = "".join(c if c.isalnum() or c in " _-." else "_" for c in (name or ""))
     keep = keep.strip().strip(".") or "video"
     return keep[:80]
+
+
+def _transcode_to_h264(path: Path):
+    """Re-encode video sang H.264 + AAC để tương thích QuickTime / iOS /
+    Windows Media Player. Giữ original nếu transcode fail."""
+    tmp = path.with_suffix(".h264.mp4")
+    try:
+        (
+            ffmpeg.input(str(path))
+            .output(
+                str(tmp),
+                vcodec="libx264",
+                **{
+                    "preset": "fast",
+                    "crf": 22,           # chất lượng ~visually lossless cho web video
+                    "pix_fmt": "yuv420p", # QuickTime require yuv420p
+                    "profile:v": "high",
+                    "level": "4.0",
+                },
+                acodec="aac",
+                **{"b:a": "128k", "ac": 2, "ar": 44100},
+                movflags="+faststart",   # moov atom ở đầu → QuickTime open nhanh
+            )
+            .overwrite_output().run(quiet=True, capture_stderr=True)
+        )
+        # Replace original
+        path.unlink(missing_ok=True)
+        tmp.rename(path)
+    except ffmpeg.Error as e:
+        err = (e.stderr.decode("utf-8", errors="ignore") if e.stderr else "")[:300]
+        logger.warning("transcode fail: %s", err)
+        if tmp.exists():
+            try: tmp.unlink()
+            except Exception: pass
+        raise
 
 
 def _create_silent_wav(path: Path, duration_s: float):
