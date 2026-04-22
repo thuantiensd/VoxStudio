@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Privacy Policy — VoxStudio</title>
+<link rel="icon" href="./logo.svg" type="image/svg+xml">
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{font-family:-apple-system,'Segoe UI','Helvetica Neue',sans-serif;background:#0a0a0a;color:#e4e4e7;line-height:1.7;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:760px;margin:0 auto;padding:60px 24px}
+  .back{color:#a1a1aa;text-decoration:none;font-size:13px;display:inline-block;margin-bottom:24px}
+  .back:hover{color:#5e6ad2}
+  h1{font-size:36px;margin-bottom:8px;color:#fafafa;letter-spacing:-0.02em}
+  .date{color:#71717a;margin-bottom:32px;font-size:13px}
+  h2{font-size:20px;margin:32px 0 12px;color:#fafafa;font-weight:600}
+  h3{font-size:15px;margin:20px 0 8px;color:#e4e4e7;font-weight:600}
+  p,li{color:#a1a1aa;font-size:14px;margin-bottom:10px}
+  ul{padding-left:22px;margin-bottom:14px}
+  strong{color:#e4e4e7}
+  hr{border:none;border-top:1px solid #242428;margin:40px 0}
+  a{color:#5e6ad2}
+</style>
+</head>
+<body>
+<div class="wrap">
+<a class="back" href="./index.html">← VoxStudio</a>
+<h1>Chính sách Bảo mật</h1>
+<p class="date">Hiệu lực: 2026-04-22 · Version 1.0</p>
+
+<p>VoxStudio (<strong>"chúng tôi"</strong>, <strong>"ứng dụng"</strong>) tôn trọng quyền riêng tư của bạn. Tài liệu này giải thích dữ liệu nào được thu thập, mục đích sử dụng, và quyền của bạn.</p>
+
+<h2>1. Thông tin chúng tôi thu thập</h2>
+
+<h3>1.1 Thông tin tài khoản</h3>
+<p>Khi bạn đăng ký hoặc đăng nhập bằng Google, chúng tôi thu thập:</p>
+<ul>
+<li><strong>Email</strong> — xác định tài khoản + gửi thông báo quan trọng.</li>
+<li><strong>Tên</strong> — hiển thị trong giao diện.</li>
+<li><strong>Ảnh đại diện</strong> (nếu đăng nhập Google) — hiển thị trong app.</li>
+<li><strong>Google Account ID</strong> (sub) — liên kết đăng nhập.</li>
+</ul>
+<p>Chúng tôi <strong>KHÔNG</strong> truy cập bất kỳ thông tin nào khác trong tài khoản Google của bạn (Gmail, Drive, Contacts, v.v.). Chỉ dùng 3 scopes: <code>openid</code>, <code>email</code>, <code>profile</code>.</p>
+
+<h3>1.2 Dữ liệu người dùng tạo</h3>
+<ul>
+<li><strong>Video/audio bạn upload</strong> — lưu tạm trong thư mục làm việc cục bộ hoặc server xử lý (tuỳ config). Không chia sẻ với bên thứ 3.</li>
+<li><strong>Giọng nói clone</strong> — lưu cục bộ. Không dùng để train model công khai.</li>
+<li><strong>Phụ đề, bản dịch, kết quả dubbing</strong> — lưu cục bộ hoặc server của bạn.</li>
+</ul>
+
+<h3>1.3 Dữ liệu kỹ thuật</h3>
+<ul>
+<li>Version app — để tương thích API.</li>
+<li>Log lỗi (chỉ khi bạn chủ động gửi báo cáo) — không bao gồm credentials.</li>
+</ul>
+
+<h2>2. Mục đích sử dụng</h2>
+<ul>
+<li>Xác thực tài khoản.</li>
+<li>Cung cấp tính năng: dubbing, TTS, clone giọng, dịch thuật, tải video.</li>
+<li>Đồng bộ dữ liệu giữa các máy (tuỳ chọn).</li>
+<li>Gửi thông báo sản phẩm quan trọng qua email (có thể tắt).</li>
+</ul>
+
+<h2>3. Chia sẻ dữ liệu</h2>
+<p>Chúng tôi <strong>KHÔNG</strong> bán, cho thuê, hoặc chia sẻ dữ liệu cá nhân của bạn cho bên thứ 3 để quảng cáo.</p>
+<p>Dữ liệu chỉ được chia sẻ khi:</p>
+<ul>
+<li><strong>Dịch vụ AI bạn chọn</strong> (OpenAI, Anthropic Claude, DeepL, Google Translate, Gemini): khi bạn bật tính năng, text/audio của bạn được gửi đến nhà cung cấp đó theo điều khoản của họ. API keys bạn paste chỉ lưu trên máy bạn qua OS Keychain — không gửi server của chúng tôi.</li>
+<li><strong>Yêu cầu pháp lý</strong> — khi có lệnh của cơ quan có thẩm quyền.</li>
+</ul>
+
+<h2>4. Bảo mật</h2>
+<ul>
+<li>Mật khẩu mã hoá bằng <strong>bcrypt</strong> (không lưu plain text).</li>
+<li>Session qua <strong>JWT</strong> 7 ngày.</li>
+<li>API keys bên thứ 3 lưu qua <strong>OS Keychain</strong> (macOS Keychain, Windows DPAPI, Linux libsecret).</li>
+<li>Kết nối <strong>HTTPS</strong> cho mọi API cloud.</li>
+<li>Video/audio gốc lưu trên máy bạn, không upload server chúng tôi trừ khi bạn tự deploy.</li>
+</ul>
+
+<h2>5. Quyền của bạn</h2>
+<ul>
+<li><strong>Xem + chỉnh sửa</strong> thông tin tài khoản (trong <em>Cài đặt → Tài khoản</em>).</li>
+<li><strong>Xuất dữ liệu</strong> — tải toàn bộ project + voices (<em>Cài đặt → Bảo mật</em>).</li>
+<li><strong>Xoá tài khoản</strong> — xoá vĩnh viễn sau 30 ngày (<em>Cài đặt → Tài khoản</em>).</li>
+<li><strong>Rút quyền Google</strong> — vào <a href="https://myaccount.google.com/permissions">myaccount.google.com/permissions</a> để thu hồi quyền truy cập.</li>
+</ul>
+
+<h2>6. Cookies & Lưu trữ cục bộ</h2>
+<ul>
+<li><strong>localStorage</strong> (trong Electron) lưu: theme, ngôn ngữ, output folder, lịch sử download.</li>
+<li><strong>OS Keychain</strong> lưu API keys bên thứ 3.</li>
+<li><strong>SQLite file cục bộ</strong> (trên server của bạn) lưu user + project.</li>
+</ul>
+<p>Không dùng cookies tracking hoặc analytics bên thứ 3.</p>
+
+<h2>7. Trẻ em dưới 13 tuổi</h2>
+<p>App không hướng tới và không cố tình thu thập dữ liệu trẻ em dưới 13 tuổi.</p>
+
+<h2>8. Thay đổi chính sách</h2>
+<p>Chúng tôi có thể cập nhật Privacy Policy. Thay đổi quan trọng sẽ được thông báo qua email + trong app trước khi có hiệu lực.</p>
+
+<h2>9. Liên hệ</h2>
+<ul>
+<li>Email: <a href="mailto:hello@voxstudio.app">hello@voxstudio.app</a></li>
+<li>Issues: <a href="https://github.com/thuantiensd/VoxStudio/issues">github.com/thuantiensd/VoxStudio/issues</a></li>
+</ul>
+
+<hr>
+<p style="color:#71717a;font-size:12px">© 2026 VoxStudio · <a href="./terms.html">Terms of Service</a> · <a href="./index.html">Trang chủ</a></p>
+</div>
+</body>
+</html>

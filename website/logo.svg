@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <defs>
+    <linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#5e6ad2"/>
+      <stop offset="100%" stop-color="#8b5cf6"/>
+    </linearGradient>
+  </defs>
+  <rect width="256" height="256" rx="56" fill="url(#g)"/>
+  <!-- Sound wave + V letterform hybrid -->
+  <g fill="#fff" stroke="#fff" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="70"  y="110" width="12" height="36" rx="6" opacity="0.65"/>
+    <rect x="96"  y="86"  width="12" height="84" rx="6" opacity="0.9"/>
+    <rect x="122" y="60"  width="12" height="136" rx="6"/>
+    <rect x="148" y="86"  width="12" height="84" rx="6" opacity="0.9"/>
+    <rect x="174" y="110" width="12" height="36" rx="6" opacity="0.65"/>
+  </g>
+  <!-- Dot above for 'AI spark' -->
+  <circle cx="128" cy="38" r="8" fill="#fff"/>
+</svg>
