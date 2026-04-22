@@ -31,7 +31,33 @@ const TABS = [
 
 export default function SettingsPage() {
   const t = useT();
-  const [active, setActive] = useState("account");
+  // Initial tab từ URL hash (vd /settings#integrations từ deep link)
+  const initialTab = () => {
+    const h = typeof window !== "undefined"
+      ? window.location.hash.replace(/^#/, "") : "";
+    return TABS.find((tb) => tb.id === h) ? h : "account";
+  };
+  const [active, setActive] = useState(initialTab);
+
+  // Đồng bộ hash khi user click tab (để deep-link lần sau mở đúng)
+  useEffect(() => {
+    try {
+      const newHash = `#${active}`;
+      if (window.location.hash !== newHash) {
+        window.history.replaceState(null, "", `${window.location.pathname}${newHash}`);
+      }
+    } catch {}
+  }, [active]);
+
+  // Listen hashchange — cho phép deep-link tới tab cụ thể khi đang ở trang Settings
+  useEffect(() => {
+    const onHash = () => {
+      const h = window.location.hash.replace(/^#/, "");
+      if (TABS.find((tb) => tb.id === h)) setActive(h);
+    };
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
+  }, []);
 
   const activeTab = TABS.find((tb) => tb.id === active) || TABS[0];
 

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { AnimatePresence, motion } from "motion/react";
 import {
   FileAudio, FileVideo, FolderOpen, UploadCloud, Play, X,
@@ -148,8 +149,11 @@ function browserDownload(filename, content) {
 
 export default function STTPage() {
   const toast = useToast();
+  const nav = useNavigate();
   const isElectron = !!window.voxstudio?.isElectron;
   const fileInputRef = useRef(null);
+
+  const openIntegrations = () => nav("/settings#integrations");
 
   const [items, setItems] = useState([]); // {id, name, path?, file?, size, status, progress?, error?, segments?, lang?}
   const [running, setRunning] = useState(false);
@@ -644,14 +648,41 @@ export default function STTPage() {
 
                   {trMissingKey && (
                     <div style={{
-                      marginTop: 8, padding: "8px 10px", borderRadius: 6,
+                      marginTop: 8, padding: "10px",
                       background: "rgba(239,68,68,0.08)",
                       border: "1px solid rgba(239,68,68,0.3)",
-                      fontSize: 11.5, color: "var(--err)", lineHeight: 1.5,
+                      borderRadius: 6,
                     }}>
-                      Chưa có API key cho <b>{trEngineMeta.label}</b>. Vào{" "}
-                      <b>Cài đặt → AI & API keys</b> để thêm, hoặc chọn{" "}
-                      <b>Google (miễn phí)</b>.
+                      <div style={{ fontSize: 11.5, color: "var(--err)",
+                                     lineHeight: 1.5, marginBottom: 8 }}>
+                        Chưa có API key cho <b>{trEngineMeta.label}</b>.
+                      </div>
+                      <div style={{ display: "flex", gap: 6 }}>
+                        <button
+                          onClick={openIntegrations}
+                          style={{
+                            flex: 1,
+                            height: 28, padding: "0 10px", borderRadius: 5,
+                            background: "var(--err)", color: "#fff",
+                            border: "none", cursor: "pointer",
+                            fontSize: 12, fontWeight: 500,
+                          }}
+                        >
+                          Thêm key ngay →
+                        </button>
+                        <button
+                          onClick={() => setTrEnginePersist("google_free")}
+                          style={{
+                            height: 28, padding: "0 10px", borderRadius: 5,
+                            background: "transparent", color: "var(--n-9)",
+                            border: "1px solid var(--n-4)", cursor: "pointer",
+                            fontSize: 12,
+                          }}
+                          title="Đổi sang Google (miễn phí)"
+                        >
+                          Dùng Google
+                        </button>
+                      </div>
                     </div>
                   )}
 
