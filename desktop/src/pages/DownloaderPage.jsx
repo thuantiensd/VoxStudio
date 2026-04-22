@@ -79,9 +79,23 @@ export default function DownloaderPage() {
   };
 
   const [downloading, setDownloading] = useState(false);
-  const [progress, setProgress] = useState(0);
+  const [progress, _setProgress] = useState(0);
   const [progressLabel, setProgressLabel] = useState("");
   const [progressDetail, setProgressDetail] = useState("");
+  // Monotonic progress — chỉ tiến, không bao giờ lùi. Reset về 0 khi
+  // bắt đầu job mới (gọi setProgress(0)).
+  const progressMaxRef = useRef(0);
+  const setProgress = (v) => {
+    const n = Number.isFinite(v) ? v : 0;
+    if (n === 0) {
+      progressMaxRef.current = 0;
+      _setProgress(0);
+      return;
+    }
+    const next = Math.max(progressMaxRef.current, n);
+    progressMaxRef.current = next;
+    _setProgress(next);
+  };
 
   const [history, setHistory] = useState(() => {
     try { return JSON.parse(localStorage.getItem(HISTORY_KEY) || "[]"); }
