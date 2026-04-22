@@ -15,6 +15,8 @@ server/voices/
 server/audio_output/
 server/*.wav
 server/*.mp3
+server/*.db
+server/*.db-journal
 
 # Node / Frontend
 desktop/node_modules/
