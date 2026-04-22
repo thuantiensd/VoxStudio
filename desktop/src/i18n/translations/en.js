@@ -341,6 +341,8 @@ export default {
     engineScraperHint: "Optimized for Douyin, Bilibili · no login required",
     engineYtdlp: "Universal",
     engineYtdlpHint: "Works on most sites · may need Chrome login",
+    resolution: "Resolution",
+    resBest: "Best",
     actions: "Actions",
     toDub: "Download & Dub",
     toDubDesc: "Create a dubbing project and jump to the editor.",

@@ -341,6 +341,8 @@ export default {
     engineScraperHint: "Tối ưu cho Douyin, Bilibili · không cần đăng nhập",
     engineYtdlp: "Toàn năng",
     engineYtdlpHint: "Hỗ trợ hầu hết mọi trang · có thể cần đăng nhập qua Chrome",
+    resolution: "Độ phân giải",
+    resBest: "Gốc",
     actions: "Hành động",
     toDub: "Tải & Lồng tiếng",
     toDubDesc: "Tạo project dubbing và chuyển sang trang lồng tiếng.",

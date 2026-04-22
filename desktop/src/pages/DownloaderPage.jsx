@@ -25,6 +25,7 @@ import { showError } from "../services/errors";
 const HISTORY_KEY = "voxstudio:download:history";
 const AGREED_KEY = "voxstudio:download:disclaimerAgreed";
 const ENGINE_KEY = "voxstudio:download:engine";
+const RES_KEY = "voxstudio:download:maxHeight";
 const MAX_HISTORY = 20;
 
 const PLATFORM_COLORS = {
@@ -65,6 +66,16 @@ export default function DownloaderPage() {
     setEngine(v);
     try { localStorage.setItem(ENGINE_KEY, v); } catch {}
     setInfo(null);  // clear preview khi đổi engine
+  };
+  const [maxHeight, setMaxHeight] = useState(() => {
+    try {
+      const v = parseInt(localStorage.getItem(RES_KEY) || "", 10);
+      return Number.isFinite(v) ? v : 1080;
+    } catch { return 1080; }
+  });
+  const setMaxHeightPersist = (v) => {
+    setMaxHeight(v);
+    try { localStorage.setItem(RES_KEY, String(v)); } catch {}
   };
 
   const [downloading, setDownloading] = useState(false);
@@ -176,6 +187,7 @@ export default function DownloaderPage() {
       url: url.trim(),
       useWatermark: !preferNoWM,
       engine,
+      maxHeight,
       signal: controller.signal,
       onProgress: (d) => {
         if (d.label) setProgressLabel(d.label);
@@ -259,6 +271,7 @@ export default function DownloaderPage() {
           url: url.trim(),
           useWatermark: !preferNoWM,
           engine,
+          maxHeight,
           signal: controller.signal,
           onProgress: (d) => {
             if (d.label) setProgressLabel(d.label);
@@ -333,6 +346,8 @@ export default function DownloaderPage() {
           inputRef={inputRef}
           engine={engine}
           onEngine={setEnginePersist}
+          maxHeight={maxHeight}
+          onMaxHeight={setMaxHeightPersist}
           t={t}
         />
 
@@ -498,12 +513,19 @@ export default function DownloaderPage() {
 
 // ── Hero URL input ───────────────────────────────────────────
 function HeroInput({ url, onUrl, onPaste, onAnalyze, fetching, disabled,
-                     inputRef, engine, onEngine, t }) {
+                     inputRef, engine, onEngine,
+                     maxHeight, onMaxHeight, t }) {
   const valid = /^https?:\/\/\S+$/i.test(url.trim());
   const engineOptions = [
     { value: "auto",    label: t("downloader.engineAuto"),    hint: t("downloader.engineAutoHint") },
     { value: "scraper", label: t("downloader.engineScraper"), hint: t("downloader.engineScraperHint") },
     { value: "ytdlp",   label: t("downloader.engineYtdlp"),   hint: t("downloader.engineYtdlpHint") },
+  ];
+  const resOptions = [
+    { value: 480,   label: "480p" },
+    { value: 720,   label: "720p" },
+    { value: 1080,  label: "1080p" },
+    { value: 99999, label: t("downloader.resBest") },
   ];
   const currentHint = engineOptions.find((o) => o.value === engine)?.hint;
   return (
@@ -541,6 +563,19 @@ function HeroInput({ url, onUrl, onPaste, onAnalyze, fetching, disabled,
           · {currentHint}
         </p>
       )}
+
+      {/* Resolution row */}
+      <div className="flex items-center gap-2 mb-3">
+        <span style={{ fontSize: 10, fontWeight: 600, textTransform: "uppercase",
+                        letterSpacing: "0.06em", color: "var(--n-6)" }}>
+          {t("downloader.resolution")}
+        </span>
+        <Segmented
+          value={maxHeight}
+          onChange={onMaxHeight}
+          options={resOptions}
+        />
+      </div>
       <div
         className="flex items-center gap-2"
         style={{

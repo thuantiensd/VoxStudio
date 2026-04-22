@@ -499,6 +499,7 @@ export function downloadToProject({
   enableSubtitle = false,
   useWatermark = false,
   engine = "auto",
+  maxHeight = 1080,
   signal,
   onProgress,
   onDone,
@@ -512,6 +513,7 @@ export function downloadToProject({
     enable_subtitle: enableSubtitle,
     use_watermark: useWatermark,
     engine,
+    max_height: maxHeight,
   };
   return fetch(`${API_BASE}/download/to-project`, {
     method: "POST",

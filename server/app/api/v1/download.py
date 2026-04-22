@@ -43,6 +43,7 @@ async def download_to_project(
     enable_subtitle: bool = Body(False, embed=True),
     use_watermark: bool = Body(False, embed=True),
     engine: str = Body("auto", embed=True),
+    max_height: int = Body(1080, embed=True),
 ):
     """Tải URL về → tạo dubbing project luôn. SSE stream progress.
 
@@ -63,6 +64,7 @@ async def download_to_project(
                     enable_subtitle=enable_subtitle,
                     use_watermark=use_watermark,
                     engine=engine,
+                    max_height=max_height,
                 ):
                     loop.call_soon_threadsafe(q.put_nowait, update)
             except Exception as e:

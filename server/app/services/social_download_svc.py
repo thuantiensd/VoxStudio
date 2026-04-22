@@ -401,10 +401,12 @@ def download_to_file_generator(info: InfoResult, dest_path: Path,
 
 
 # ── yt-dlp download (auto-merge video+audio) ────────────────────
-def _download_via_ytdlp(url: str, pdir: Path, final_path: Path):
+def _download_via_ytdlp(url: str, pdir: Path, final_path: Path, max_height: int = 1080):
     """Generator yield progress. Dùng yt-dlp download+merge thay vì httpx
     stream 1 URL — fix case DASH có video/audio tách riêng (FB/YouTube).
-    yt-dlp tự merge qua ffmpeg khi merge_output_format='mp4'."""
+
+    max_height: cap chiều cao video (360/480/720/1080). Đặt 99999 = "best available".
+    """
     q: "queue.Queue[dict | None]" = queue.Queue()
 
     def progress_hook(d):
@@ -475,17 +477,18 @@ def _download_via_ytdlp(url: str, pdir: Path, final_path: Path):
             #   3. Any bestvideo+bestaudio (DASH merge + transcode sau nếu AV1)
             # Cap 1080p vì 4K/8K không đáng tải cho dubbing use case (tốn dung
             # lượng + thời gian, chất lượng vẫn thừa cho social upload).
+            h = max(144, int(max_height or 1080))
             opts_final = dict(common_opts,
                 format=(
                     # 1. H.264 merge (bỏ transcode)
-                    "bestvideo[vcodec^=avc][height<=1080]+bestaudio[acodec=aac]/"
-                    "bestvideo[vcodec^=avc][height<=1080]+bestaudio/"
+                    f"bestvideo[vcodec^=avc][height<={h}]+bestaudio[acodec=aac]/"
+                    f"bestvideo[vcodec^=avc][height<={h}]+bestaudio/"
                     # 2. Progressive combined (TikTok/Douyin)
-                    "best[vcodec^=avc][acodec!=none][height<=1080]/"
-                    "best[acodec!=none][vcodec!=none][height<=1080]/"
+                    f"best[vcodec^=avc][acodec!=none][height<={h}]/"
+                    f"best[acodec!=none][vcodec!=none][height<={h}]/"
                     # 3. Fallback: any video+audio merge (có thể AV1 → transcode)
-                    "bestvideo[height<=1080]+bestaudio/"
-                    "best[height<=1080]/best"
+                    f"bestvideo[height<={h}]+bestaudio/"
+                    f"best[height<={h}]/best"
                 ))
             with yt_dlp.YoutubeDL(opts_final) as ydl:
                 info = ydl.extract_info(url, download=True)
@@ -561,7 +564,8 @@ def download_to_project_generator(url: str,
                                   enable_dubbing: bool = True,
                                   enable_subtitle: bool = False,
                                   use_watermark: bool = False,
-                                  engine: str = "auto"):
+                                  engine: str = "auto",
+                                  max_height: int = 1080):
     """Full flow: fetch info → download → create dubbing project. Yields SSE.
     Cuối cùng yield {step:"done", project_id, title, filename, duration}."""
     from .dubbing_svc import _project_dir, _save_meta, _detect_tts_engine
@@ -599,7 +603,7 @@ def download_to_project_generator(url: str,
     #                     thường trả URL combined sẵn).
     had_error = False
     if info.source == "ytdlp":
-        for tick in _download_via_ytdlp(url, pdir, final_path):
+        for tick in _download_via_ytdlp(url, pdir, final_path, max_height=max_height):
             if tick.get("step") == "error":
                 shutil.rmtree(pdir, ignore_errors=True)
                 had_error = True
