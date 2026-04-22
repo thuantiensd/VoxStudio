@@ -593,9 +593,12 @@ function ServerTab() {
             {checking ? <Loader2 size={14} className="animate-spin" /> : t("settings.server.refresh")}
           </GhostButton>
         </div>
-        <div className="text-xs space-y-1" style={{ color: "var(--text-secondary)" }}>
-          <div>URL: {import.meta.env.VITE_API_URL || "http://localhost:8000"}</div>
-          {health?.device && <div>Device: {health.device}</div>}
+        <div className="text-xs" style={{ color: "var(--text-secondary)" }}>
+          {health?.status === "ok"
+            ? "Dịch vụ đang hoạt động bình thường."
+            : health?.status === "error"
+            ? "Dịch vụ tạm ngưng. Vui lòng thử lại sau ít phút."
+            : "Đang kiểm tra kết nối…"}
         </div>
       </Card>
     </Section>

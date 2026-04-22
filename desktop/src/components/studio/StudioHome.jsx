@@ -60,7 +60,7 @@ export default function StudioHome() {
       return;
     }
     if (!window.voxstudio?.listVideosInFolder) {
-      toast.error("IPC chưa sẵn sàng. Hãy Cmd+Q app rồi mở lại.");
+      toast.error("Ứng dụng chưa sẵn sàng. Vui lòng thoát và mở lại.");
       return;
     }
     const folder = await window.voxstudio.pickFolder();
@@ -152,7 +152,8 @@ export default function StudioHome() {
     setUploading(false);
 
     if (createdIds.length === 0) {
-      toast.error("Không tạo được project. Kiểm tra VITE_API_URL. " + errors.join("; "));
+      toast.error("Không tạo được dự án. Vui lòng thử lại sau ít phút.");
+      console.error("[StudioHome] upload failed:", errors);
       return;
     }
 

@@ -41,7 +41,7 @@ const PROVIDERS = [
   },
   {
     id: "google_cloud", name: "Google Cloud Translate",
-    hint: "Enterprise-grade. Cần tạo API key trong GCP.",
+    hint: "Chất lượng cao, độ chính xác tốt. Cần đăng ký tài khoản Google Cloud.",
     link: "https://console.cloud.google.com/apis/credentials",
     placeholder: "AIza…",
   },
@@ -82,15 +82,16 @@ export default function IntegrationsTab() {
         <div style={{ fontSize: 12.5, lineHeight: 1.55, color: "var(--n-9)" }}>
           {secure ? (
             <>
-              <b>Mã hoá bởi OS Keychain.</b> Key được lưu ở máy bạn, không gửi
-              về server VoxStudio. Mỗi lần dịch, app chỉ attach key vào request
-              tới provider tương ứng (OpenAI / Claude / DeepL …) qua HTTPS.
+              <b>Được mã hoá an toàn trên máy bạn.</b> Key chỉ lưu cục bộ,
+              không bao giờ được gửi đến chúng tôi. Khi dịch, key được gửi
+              trực tiếp tới nhà cung cấp bạn chọn (OpenAI / Claude / DeepL …)
+              qua kết nối mã hoá HTTPS.
             </>
           ) : (
             <>
-              <b>Chế độ web — key lưu ở localStorage, KHÔNG được mã hoá.</b>
-              Chỉ dùng tạm để test. Dùng app desktop để được bảo vệ bởi OS
-              Keychain / DPAPI / libsecret.
+              <b>Phiên bản trình duyệt — key chưa được mã hoá.</b>
+              Chỉ nên dùng tạm để thử. Hãy dùng app desktop để key được bảo
+              vệ bằng kho khoá an toàn của hệ điều hành.
             </>
           )}
         </div>

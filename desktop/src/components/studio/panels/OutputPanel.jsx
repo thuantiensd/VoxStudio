@@ -165,15 +165,15 @@ export default function OutputPanel({ project, onToggle, onProjectUpdated }) {
       toast.warn("Chọn thư mục lưu trước khi bắt đầu.");
       return;
     }
-    // Check backend trước khi enqueue — tránh job treo pending vì backend offline
+    // Check dịch vụ trước khi enqueue — tránh job treo pending
     try {
       const h = await checkHealth();
       if (h?.status !== "ok") {
-        toast.error("Backend offline. Khởi động server rồi thử lại.");
+        toast.error("Dịch vụ xử lý tạm ngưng. Vui lòng thử lại sau ít phút.");
         return;
       }
     } catch {
-      toast.error("Không kết nối được backend. Kiểm tra VITE_API_URL.");
+      toast.error("Không kết nối được dịch vụ xử lý. Vui lòng thử lại sau ít phút.");
       return;
     }
     // Flush MỌI setting hiện tại lên toàn bộ batch (kể cả project hiện tại).

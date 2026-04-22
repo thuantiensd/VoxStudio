@@ -82,14 +82,14 @@ export default class ErrorBoundary extends Component {
             {msg}
           </p>
           <p style={{ fontSize: 11, color: "var(--n-6)", marginBottom: 20 }}>
-            App has crashed · Thử Reload hoặc báo lại lỗi nếu lặp lại.
+            Vui lòng tải lại. Nếu vẫn lỗi, hãy đóng app và mở lại.
           </p>
           <div style={{ display: "flex", gap: 8, justifyContent: "center" }}>
             <Button variant="secondary" size="md" onClick={this.reset}>
               Tiếp tục
             </Button>
             <Button variant="primary" size="md" icon={RefreshCw} onClick={this.reload}>
-              Reload app
+              Tải lại
             </Button>
           </div>
           {stack && (
@@ -98,7 +98,7 @@ export default class ErrorBoundary extends Component {
               fontSize: 11, color: "var(--n-6)",
             }}>
               <summary style={{ cursor: "pointer", color: "var(--n-8)" }}>
-                Stack trace
+                Chi tiết kỹ thuật
               </summary>
               <pre
                 className="font-mono"
