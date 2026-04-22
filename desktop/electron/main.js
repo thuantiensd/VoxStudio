@@ -134,14 +134,44 @@ ipcMain.handle("dialog:pickFolder", async () => {
   return result.canceled ? null : result.filePaths[0];
 });
 
-// Download URL remote → lưu vào folder chỉ định.
-ipcMain.handle("fs:saveRemoteFile", async (_event, { url, folder, filename }) => {
+// Helper — tìm tên file unique trong folder. Nếu 'name.ext' đã tồn tại
+// thì trả về 'name (1).ext', 'name (2).ext' …
+async function _uniquePath(folder, filename) {
+  const fs = await import("node:fs/promises");
+  const path = await import("node:path");
+  const ext = path.extname(filename);
+  const base = path.basename(filename, ext);
+  let candidate = path.join(folder, filename);
+  let i = 1;
+  while (true) {
+    try {
+      await fs.access(candidate);
+      // Tồn tại rồi → thử số khác
+      candidate = path.join(folder, `${base} (${i})${ext}`);
+      i += 1;
+      if (i > 999) throw new Error("Too many duplicate filenames");
+    } catch {
+      return candidate;  // không tồn tại → OK
+    }
+  }
+}
+
+// Trả tên file unique cho renderer (để preview trong SaveAsModal)
+ipcMain.handle("fs:getUniqueFilename", async (_event, { folder, filename }) => {
+  return await _uniquePath(folder, filename);
+});
+
+// Download URL remote → lưu vào folder chỉ định. Nếu trùng tên, auto
+// thêm (1), (2) vào tên trừ khi overwrite=true.
+ipcMain.handle("fs:saveRemoteFile", async (_event, { url, folder, filename, overwrite }) => {
   const fs = await import("node:fs/promises");
   const path = await import("node:path");
   const res = await fetch(url);
   if (!res.ok) throw new Error(`Download failed: ${res.status}`);
   const buf = Buffer.from(await res.arrayBuffer());
-  const dest = path.join(folder, filename);
+  const dest = overwrite
+    ? path.join(folder, filename)
+    : await _uniquePath(folder, filename);
   await fs.writeFile(dest, buf);
   return dest;
 });

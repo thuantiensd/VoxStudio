@@ -12,6 +12,7 @@ import Modal from "../components/ui/Modal";
 import StatusDot from "../components/ui/StatusDot";
 import Segmented from "../components/ui/Segmented";
 import { Table, THead, TBody, Th, Tr, Td } from "../components/ui/Table";
+import SaveAsModal, { cleanName } from "../components/ui/SaveAsModal";
 import { Globe as Chrome } from "lucide-react";
 import { useToast } from "../components/ui/Toast";
 import { useT } from "../i18n/I18nContext";
@@ -76,6 +77,7 @@ export default function DownloaderPage() {
   });
   const [disclaimerOpen, setDisclaimerOpen] = useState(false);
   const [loginNeeded, setLoginNeeded] = useState(null);  // { platform, url }
+  const [saveAsOpen, setSaveAsOpen] = useState(false);
   const pendingActionRef = useRef(null);
   const abortRef = useRef(null);
   const inputRef = useRef(null);
@@ -219,33 +221,28 @@ export default function DownloaderPage() {
   };
 
 
-  const handleToFolder = () => withDisclaimer(doDownloadToFolder);
-
-  const doDownloadToFolder = async () => {
+  const handleToFolder = () => withDisclaimer(() => {
     if (!info?.video_url) {
       toast.warn("Hãy phân tích link trước.");
       return;
     }
-    if (!window.voxstudio?.pickFolder) {
+    if (!window.voxstudio?.saveRemoteFileToFolder) {
       toast.warn("Chức năng tải về thư mục cần chạy trong desktop app.");
       return;
     }
-    const folder = await window.voxstudio.pickFolder();
-    if (!folder) return;
-    if (!window.voxstudio.saveRemoteFileToFolder) {
-      toast.error("IPC thiếu saveRemoteFileToFolder — restart app.");
-      return;
-    }
+    setSaveAsOpen(true);
+  });
+
+  const doDownloadToFolder = async ({ folder, filename, overwrite }) => {
+    setSaveAsOpen(false);
     setDownloading(true);
     setProgress(20);
     setProgressLabel(t("downloader.downloading"));
     setProgressDetail("");
     try {
-      const filename = safeName(info.title || "video") + ".mp4";
       const path = await window.voxstudio.saveRemoteFileToFolder({
         url: info.video_url,
-        folder,
-        filename,
+        folder, filename, overwrite,
       });
       setProgress(100);
       pushHistory({
@@ -391,6 +388,16 @@ export default function DownloaderPage() {
           t={t}
         />
       </PageContent>
+
+      {/* Save As modal — pick folder + filename trước khi tải về máy */}
+      <SaveAsModal
+        open={saveAsOpen}
+        onClose={() => setSaveAsOpen(false)}
+        defaultName={cleanName(info?.title || "video")}
+        defaultFolder={localStorage.getItem("voxstudio:batch:outputFolder")}
+        ext=".mp4"
+        onSave={doDownloadToFolder}
+      />
 
       {/* Disclaimer modal */}
       <Modal

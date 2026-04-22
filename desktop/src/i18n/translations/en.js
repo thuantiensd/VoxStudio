@@ -97,6 +97,13 @@ export default {
       stack: "Stack trace",
     },
   },
+  save: {
+    title: "Save file",
+    folder: "Folder",
+    filename: "File name",
+    action: "Save",
+    overwrite: "Overwrite if name exists",
+  },
   toast: {
     backendDown: "Backend offline. Start the server and try again.",
     backendNoEnv: "Can't reach backend. Check VITE_API_URL.",

@@ -429,8 +429,11 @@ def _download_via_ytdlp(url: str, pdir: Path, final_path: Path):
     def worker():
         try:
             outtmpl = str(pdir / "original.%(ext)s")
-            opts = {
-                "format": "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
+            # Ưu tiên format đã combined (video+audio trong 1 stream) để
+            # không cần ffmpeg merge — tránh lỗi merge khi ffmpeg binary
+            # path không match. Fallback merge bestvideo+bestaudio nếu
+            # không có combined sẵn.
+            common_opts = {
                 "outtmpl": outtmpl,
                 "merge_output_format": "mp4",
                 "progress_hooks": [progress_hook],
@@ -439,7 +442,6 @@ def _download_via_ytdlp(url: str, pdir: Path, final_path: Path):
                 "noplaylist": True,
                 "retries": 3,
                 "max_filesize": 500 * 1024 * 1024,
-                "postprocessors": [],
                 "http_headers": {
                     "User-Agent": (
                         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
@@ -448,10 +450,26 @@ def _download_via_ytdlp(url: str, pdir: Path, final_path: Path):
                     ),
                 },
             }
-            _attach_chrome_cookies(opts)
+            # Set ffmpeg_location từ PATH nếu có — yt-dlp cần binary để merge
+            import shutil as _shutil
+            ffbin = _shutil.which("ffmpeg")
+            if ffbin:
+                common_opts["ffmpeg_location"] = ffbin
+            _attach_chrome_cookies(common_opts)
 
-            with yt_dlp.YoutubeDL(opts) as ydl:
-                ydl.download([url])
+            # Try 1: format "best" = progressive stream đã có audio
+            try:
+                opts1 = dict(common_opts,
+                             format="best[ext=mp4][vcodec!=none][acodec!=none]/best[vcodec!=none][acodec!=none]")
+                with yt_dlp.YoutubeDL(opts1) as ydl:
+                    ydl.download([url])
+            except Exception as e1:
+                logger.warning("yt-dlp best-combined fail, retry with merge: %s", e1)
+                # Try 2: separate streams + merge
+                opts2 = dict(common_opts,
+                             format="bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best")
+                with yt_dlp.YoutubeDL(opts2) as ydl:
+                    ydl.download([url])
 
             # yt-dlp đã save theo outtmpl — file có thể là .mp4 hoặc extension khác.
             # Tìm file và rename về original.mp4 nếu cần.

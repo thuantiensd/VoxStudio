@@ -18,6 +18,8 @@ contextBridge.exposeInMainWorld("voxstudio", {
   pickFolder: () => ipcRenderer.invoke("dialog:pickFolder"),
   saveRemoteFileToFolder: (opts) =>
     ipcRenderer.invoke("fs:saveRemoteFile", opts),
+  getUniqueFilename: (opts) =>
+    ipcRenderer.invoke("fs:getUniqueFilename", opts),
   listVideosInFolder: (folder) =>
     ipcRenderer.invoke("fs:listVideosInFolder", folder),
   readFileAsBuffer: (filepath) =>

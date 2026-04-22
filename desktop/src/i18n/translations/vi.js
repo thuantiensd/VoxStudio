@@ -97,6 +97,13 @@ export default {
       stack: "Stack trace",
     },
   },
+  save: {
+    title: "Lưu file",
+    folder: "Thư mục lưu",
+    filename: "Tên file",
+    action: "Lưu",
+    overwrite: "Ghi đè nếu trùng tên",
+  },
   toast: {
     backendDown: "Backend offline. Khởi động server rồi thử lại.",
     backendNoEnv: "Không kết nối được backend. Kiểm tra VITE_API_URL.",
