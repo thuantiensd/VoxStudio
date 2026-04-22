@@ -21,6 +21,13 @@ function createWindow() {
 
   const isMac = process.platform === "darwin";
 
+  // Icon file phù hợp theo OS (chỉ cần cho Win/Linux — Mac dùng .icns
+  // thông qua electron-builder lúc build, dock icon set riêng bên dưới).
+  const iconFile = process.platform === "win32" ? "icon.ico"
+                  : process.platform === "linux" ? "icon.png"
+                  : "icon.png";  // mac dev: PNG là OK cho dock
+  const iconPath = path.join(__dirname, "..", "build", "icons", iconFile);
+
   mainWindow = new BrowserWindow({
     x: winState.x,
     y: winState.y,
@@ -29,6 +36,7 @@ function createWindow() {
     minWidth: 1024,
     minHeight: 640,
     title: "VoxStudio",
+    icon: iconPath,
     backgroundColor: "#0a0a0a",
     // Mac: traffic lights native chừa sẵn; Win/Linux: tắt chrome, custom React titlebar.
     titleBarStyle: isMac ? "hiddenInset" : "hidden",
@@ -70,6 +78,12 @@ function createWindow() {
 
 // ── App lifecycle ──────────────────────────────────────
 app.whenReady().then(() => {
+  // macOS dev: set dock icon (production build sẽ dùng .icns trong app bundle)
+  if (process.platform === "darwin" && app.dock && isDev) {
+    try {
+      app.dock.setIcon(path.join(__dirname, "..", "build", "icons", "icon.png"));
+    } catch {}
+  }
   createWindow();
 
   app.on("activate", () => {

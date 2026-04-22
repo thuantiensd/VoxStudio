@@ -56,15 +56,18 @@
     "productName": "VoxStudio",
     "copyright": "Copyright © 2026 VoxStudio",
     "directories": {
-      "output": "release"
+      "output": "release",
+      "buildResources": "build"
     },
     "files": [
       "dist/**/*",
       "electron/**/*",
+      "build/icons/**/*",
       "package.json"
     ],
     "mac": {
       "category": "public.app-category.video",
+      "icon": "build/icons/icon.icns",
       "target": [
         {
           "target": "dmg",
@@ -77,6 +80,7 @@
       "gatekeeperAssess": false
     },
     "win": {
+      "icon": "build/icons/icon.ico",
       "target": [
         {
           "target": "nsis",
@@ -87,6 +91,7 @@
       ]
     },
     "linux": {
+      "icon": "build/icons/icon.png",
       "target": [
         "AppImage"
       ],
