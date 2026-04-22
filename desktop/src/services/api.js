@@ -137,6 +137,25 @@ export async function deleteVoice(voiceId) {
   return res.json();
 }
 
+// ── Translate (multi-provider) ──────────────────────
+export async function translateTexts({ texts, target, source = 'auto', engine = 'google_free', apiKey, model } = {}) {
+  const res = await request('/translate', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      texts, target, source, engine,
+      api_key: apiKey || null,
+      model: model || null,
+    }),
+  });
+  return res.json();
+}
+
+export async function listTranslateEngines() {
+  const res = await request('/translate/engines');
+  return res.json();
+}
+
 // ── STT ─────────────────────────────────────────────
 export async function transcribe(audioFile, { language } = {}) {
   const form = new FormData();

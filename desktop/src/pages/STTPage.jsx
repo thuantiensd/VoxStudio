@@ -8,8 +8,9 @@ import {
 import PageHeader, { Page, PageContent } from "../components/ui/PageHeader";
 import Button from "../components/ui/Button";
 import { useToast } from "../components/ui/Toast";
-import { transcribe } from "../services/api";
+import { transcribe, translateTexts } from "../services/api";
 import { showError } from "../services/errors";
+import { getKey } from "../services/keyvault";
 
 /* ─────────────────────────────────────────────────────────
    Speech-to-Text page
@@ -61,6 +62,18 @@ const FORMATS = [
 const LS_LANG   = "voxstudio:stt:language";
 const LS_FMTS   = "voxstudio:stt:formats";
 const LS_FOLDER = "voxstudio:stt:outputFolder";
+const LS_TR_ON  = "voxstudio:stt:translateOn";
+const LS_TR_TGT = "voxstudio:stt:translateTarget";
+const LS_TR_ENG = "voxstudio:stt:translateEngine";
+
+const TRANSLATE_ENGINES = [
+  { id: "google_free",  label: "Google (miễn phí)",   needsKey: false },
+  { id: "google_cloud", label: "Google Cloud",         needsKey: true  },
+  { id: "deepl",        label: "DeepL",                needsKey: true  },
+  { id: "gemini",       label: "Gemini",               needsKey: true  },
+  { id: "openai",       label: "OpenAI (GPT)",         needsKey: true  },
+  { id: "claude",       label: "Claude",               needsKey: true  },
+];
 
 /* ─── Format serializers ──────────────────────────────── */
 
@@ -103,6 +116,13 @@ const SERIALIZERS = { srt: toSRT, vtt: toVTT, txt: toTXT,
                        json: (segs, meta) => toJSON(segs, meta), csv: toCSV };
 
 function stripExt(name) { return name.replace(/\.[^.]+$/, ""); }
+
+const selectStyle = {
+  width: "100%", height: 32,
+  background: "var(--n-1)", color: "var(--n-10)",
+  border: "1px solid var(--n-3)", borderRadius: 6,
+  padding: "0 8px", fontSize: 13,
+};
 
 /* ─── File reading helpers ────────────────────────────── */
 
@@ -161,6 +181,31 @@ export default function STTPage() {
       try { localStorage.setItem(LS_FMTS, JSON.stringify(final)); } catch {}
       return final;
     });
+  };
+
+  const [trOn, setTrOn] = useState(() => {
+    try { return localStorage.getItem(LS_TR_ON) === "1"; }
+    catch { return false; }
+  });
+  const setTrOnPersist = (v) => {
+    setTrOn(v);
+    try { localStorage.setItem(LS_TR_ON, v ? "1" : "0"); } catch {}
+  };
+  const [trTarget, setTrTarget] = useState(() => {
+    try { return localStorage.getItem(LS_TR_TGT) || "vi"; }
+    catch { return "vi"; }
+  });
+  const setTrTargetPersist = (v) => {
+    setTrTarget(v);
+    try { localStorage.setItem(LS_TR_TGT, v); } catch {}
+  };
+  const [trEngine, setTrEngine] = useState(() => {
+    try { return localStorage.getItem(LS_TR_ENG) || "google_free"; }
+    catch { return "google_free"; }
+  });
+  const setTrEnginePersist = (v) => {
+    setTrEngine(v);
+    try { localStorage.setItem(LS_TR_ENG, v); } catch {}
   };
 
   const [outputFolder, setOutputFolder] = useState(() => {
@@ -268,22 +313,51 @@ export default function STTPage() {
 
   /* ── Export results for one item ── */
   async function exportResult(item) {
-    const { name, segments, lang: detected } = item;
+    const { name, segments, lang: detected, translated } = item;
     const base = stripExt(name);
     const meta = { file: name, language: detected || null,
                    count: segments?.length || 0,
                    created_at: new Date().toISOString() };
+
+    const writeOne = async (outName, content) => {
+      if (isElectron && outputFolder) {
+        await window.voxstudio.writeText({ folder: outputFolder,
+                                            filename: outName, content });
+      } else {
+        browserDownload(outName, content);
+      }
+    };
+
     for (const k of formats) {
       const ser = SERIALIZERS[k];
       if (!ser) continue;
       const content = ser(segments || [], meta);
       const outName = `${base}.${FORMATS.find((f) => f.key === k).ext}`;
-      if (isElectron && outputFolder) {
-        await window.voxstudio.writeText({
-          folder: outputFolder, filename: outName, content,
-        });
-      } else {
-        browserDownload(outName, content);
+      await writeOne(outName, content);
+    }
+
+    // Bilingual / translated outputs (chỉ khi bật translate)
+    if (translated && segments?.length) {
+      const bilingual = segments.map((s, i) => ({
+        start: s.start, end: s.end,
+        text: ((s.text || "").trim()
+          + (translated[i] ? `\n${translated[i].trim()}` : "")).trim(),
+      }));
+      const transOnly = segments.map((s, i) => ({
+        start: s.start, end: s.end,
+        text: (translated[i] || "").trim(),
+      }));
+      for (const k of formats) {
+        const ser = SERIALIZERS[k];
+        if (!ser) continue;
+        const ext = FORMATS.find((f) => f.key === k).ext;
+        // translated-only (.${trTarget}.ext)
+        await writeOne(`${base}.${trTarget}.${ext}`,
+                        ser(transOnly, { ...meta, translated_to: trTarget }));
+        // bilingual (.bilingual.ext) — SRT/VTT/TXT hợp lý, JSON/CSV bỏ qua
+        if (["srt", "vtt", "txt"].includes(k)) {
+          await writeOne(`${base}.bilingual.${ext}`, ser(bilingual, meta));
+        }
       }
     }
   }
@@ -319,12 +393,30 @@ export default function STTPage() {
           if (!file && it.path) file = await pathToFile(it.path);
           if (!file) throw new Error("Không đọc được file");
           const r = await transcribe(file, { language: lang });
+          const segments = r?.segments || [];
           const patch = {
             status: "done",
-            segments: r?.segments || [],
+            segments,
             lang: r?.language || null,
             text: r?.text || "",
+            translated: null,
           };
+
+          // Optional translation step
+          if (trOn && segments.length) {
+            const engineMeta = TRANSLATE_ENGINES.find((e) => e.id === trEngine);
+            const apiKey = engineMeta?.needsKey ? await getKey(trEngine) : null;
+            if (engineMeta?.needsKey && !apiKey) {
+              throw new Error(`Thiếu API key cho ${engineMeta.label}. Vào Cài đặt → AI & API keys để thêm.`);
+            }
+            const texts = segments.map((s) => (s.text || "").trim());
+            const tr = await translateTexts({
+              texts, target: trTarget, source: r?.language || "auto",
+              engine: trEngine, apiKey,
+            });
+            patch.translated = tr?.translations || [];
+          }
+
           // export before marking state so errors surface
           await exportResult({ ...it, ...patch });
           setItems((prev) => prev.map((x) =>
@@ -434,12 +526,7 @@ export default function STTPage() {
               <select
                 value={lang}
                 onChange={(e) => setLangPersist(e.target.value)}
-                style={{
-                  width: "100%", height: 32,
-                  background: "var(--n-1)", color: "var(--n-10)",
-                  border: "1px solid var(--n-3)", borderRadius: 6,
-                  padding: "0 8px", fontSize: 13,
-                }}
+                style={selectStyle}
               >
                 {LANGUAGES.map((L) => (
                   <option key={L.code} value={L.code}>{L.label}</option>
@@ -485,6 +572,60 @@ export default function STTPage() {
                   );
                 })}
               </div>
+            </ConfigCard>
+
+            <ConfigCard title="Dịch phụ đề" icon={Languages}>
+              <label style={{ display: "flex", alignItems: "center", gap: 8,
+                               cursor: "pointer", marginBottom: trOn ? 10 : 0 }}>
+                <input
+                  type="checkbox"
+                  checked={trOn}
+                  onChange={(e) => setTrOnPersist(e.target.checked)}
+                  style={{ accentColor: "var(--accent)" }}
+                />
+                <span style={{ fontSize: 12.5, color: "var(--n-10)" }}>
+                  Tự động dịch sau khi STT
+                </span>
+              </label>
+              {trOn && (
+                <>
+                  <div style={{ fontSize: 11, color: "var(--n-7)", marginBottom: 4,
+                                 marginTop: 6 }}>
+                    Dịch sang
+                  </div>
+                  <select
+                    value={trTarget}
+                    onChange={(e) => setTrTargetPersist(e.target.value)}
+                    style={selectStyle}
+                  >
+                    {LANGUAGES.filter((L) => L.code !== "auto").map((L) => (
+                      <option key={L.code} value={L.code}>{L.label}</option>
+                    ))}
+                  </select>
+
+                  <div style={{ fontSize: 11, color: "var(--n-7)", marginBottom: 4,
+                                 marginTop: 10 }}>
+                    Engine
+                  </div>
+                  <select
+                    value={trEngine}
+                    onChange={(e) => setTrEnginePersist(e.target.value)}
+                    style={selectStyle}
+                  >
+                    {TRANSLATE_ENGINES.map((E) => (
+                      <option key={E.id} value={E.id}>
+                        {E.label}{E.needsKey ? " (cần key)" : ""}
+                      </option>
+                    ))}
+                  </select>
+
+                  <p style={{ marginTop: 8, fontSize: 11, color: "var(--n-7)",
+                               lineHeight: 1.5 }}>
+                    Xuất thêm 2 bộ file: <code>.{trTarget}.srt</code> (bản dịch) và{" "}
+                    <code>.bilingual.srt</code> (gốc + dịch chồng).
+                  </p>
+                </>
+              )}
             </ConfigCard>
 
             <ConfigCard title="Thư mục lưu" icon={Folder}>

@@ -1,6 +1,7 @@
-import { app, BrowserWindow, Menu, shell, ipcMain, dialog, Notification } from "electron";
+import { app, BrowserWindow, Menu, shell, ipcMain, dialog, Notification, safeStorage } from "electron";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import fsSync from "node:fs";
 import windowStateKeeper from "electron-window-state";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -269,6 +270,72 @@ ipcMain.handle("badge:set", async (_event, count) => {
     try { mainWindow.setOverlayIcon(null, n > 0 ? `${n} đang chạy` : ""); } catch {}
   }
   return true;
+});
+
+// ── Secure API key vault ───────────────────────────────
+// Lưu các API key (OpenAI / Claude / DeepL / Gemini / Google Cloud) được
+// mã hoá bởi safeStorage (OS Keychain / DPAPI / libsecret). Fallback plain
+// JSON nếu safeStorage chưa sẵn sàng (Linux không có keyring) — kèm cảnh báo.
+const _keyVaultPath = () => path.join(app.getPath("userData"), "keyvault.enc");
+
+function _readVault() {
+  try {
+    if (!fsSync.existsSync(_keyVaultPath())) return {};
+    const buf = fsSync.readFileSync(_keyVaultPath());
+    if (safeStorage.isEncryptionAvailable()) {
+      return JSON.parse(safeStorage.decryptString(buf));
+    }
+    // Fallback: file utf8 JSON plain (chỉ Linux headless)
+    return JSON.parse(buf.toString("utf8"));
+  } catch (e) {
+    console.warn("[keyvault] read failed:", e.message);
+    return {};
+  }
+}
+
+function _writeVault(data) {
+  try {
+    const str = JSON.stringify(data);
+    const buf = safeStorage.isEncryptionAvailable()
+      ? safeStorage.encryptString(str)
+      : Buffer.from(str, "utf8");
+    fsSync.writeFileSync(_keyVaultPath(), buf, { mode: 0o600 });
+    return true;
+  } catch (e) {
+    console.error("[keyvault] write failed:", e);
+    return false;
+  }
+}
+
+ipcMain.handle("keys:list", async () => {
+  // Trả về các id có key (không trả value) + trạng thái mã hoá
+  const vault = _readVault();
+  const out = {};
+  for (const k of Object.keys(vault)) out[k] = true;
+  return {
+    ids: out,
+    encrypted: safeStorage.isEncryptionAvailable(),
+  };
+});
+
+ipcMain.handle("keys:get", async (_event, id) => {
+  if (!id || typeof id !== "string") return null;
+  const vault = _readVault();
+  return vault[id] || null;
+});
+
+ipcMain.handle("keys:set", async (_event, { id, value }) => {
+  if (!id || typeof id !== "string") throw new Error("Invalid id");
+  const vault = _readVault();
+  if (value) vault[id] = value;
+  else delete vault[id];
+  return _writeVault(vault);
+});
+
+ipcMain.handle("keys:delete", async (_event, id) => {
+  const vault = _readVault();
+  delete vault[id];
+  return _writeVault(vault);
 });
 
 // Menu (minimal, system-native feel)

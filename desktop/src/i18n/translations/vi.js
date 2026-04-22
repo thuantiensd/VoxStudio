@@ -438,6 +438,7 @@ export default {
       notifications: "Thông báo",
       privacy: "Bảo mật",
       server: "Máy chủ",
+      integrations: "AI & API keys",
       about: "Giới thiệu",
     },
     account: {

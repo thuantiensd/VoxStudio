@@ -1,8 +1,9 @@
 import { useState, useEffect } from "react";
 import {
   User, CreditCard, BarChart3, Bell, Lock, Server, Info, Loader2,
-  Palette, Sun, Moon, Monitor,
+  Palette, Sun, Moon, Monitor, KeyRound,
 } from "lucide-react";
+import IntegrationsTab from "./settings/IntegrationsTab";
 import { useT, useI18n } from "../i18n/I18nContext";
 import { useAuth } from "../auth/AuthContext";
 import { useTheme } from "../theme/ThemeContext";
@@ -24,6 +25,7 @@ const TABS = [
   { id: "notifications", icon: Bell, tKey: "settings.tabs.notifications" },
   { id: "privacy", icon: Lock, tKey: "settings.tabs.privacy" },
   { id: "server", icon: Server, tKey: "settings.tabs.server" },
+  { id: "integrations", icon: KeyRound, tKey: "settings.tabs.integrations" },
   { id: "about", icon: Info, tKey: "settings.tabs.about" },
 ];
 
@@ -107,6 +109,7 @@ export default function SettingsPage() {
             {active === "notifications" && <NotificationsTab />}
             {active === "privacy" && <PrivacyTab />}
             {active === "server" && <ServerTab />}
+            {active === "integrations" && <IntegrationsTab />}
             {active === "about" && <AboutTab />}
           </div>
         </div>

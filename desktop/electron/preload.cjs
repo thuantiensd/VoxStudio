@@ -40,6 +40,14 @@ contextBridge.exposeInMainWorld("voxstudio", {
   notify: (opts) => ipcRenderer.invoke("notify:show", opts),
   setBadge: (count) => ipcRenderer.invoke("badge:set", count),
 
+  // Secure API key vault (safeStorage / OS Keychain)
+  keys: {
+    list:   () => ipcRenderer.invoke("keys:list"),
+    get:    (id) => ipcRenderer.invoke("keys:get", id),
+    set:    (id, value) => ipcRenderer.invoke("keys:set", { id, value }),
+    delete: (id) => ipcRenderer.invoke("keys:delete", id),
+  },
+
   // Platform đồng bộ (để React render titlebar theo OS ngay lần đầu)
   platform: process.platform,
 

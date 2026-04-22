@@ -438,6 +438,7 @@ export default {
       notifications: "Notifications",
       privacy: "Privacy",
       server: "Server",
+      integrations: "AI & API keys",
       about: "About",
     },
     account: {
