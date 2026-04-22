@@ -18,6 +18,7 @@ import { useToast } from "../components/ui/Toast";
 import { useT } from "../i18n/I18nContext";
 import {
   downloadFetchInfo, downloadToProject,
+  dubbingVideoURL, deleteDubbingProject, SERVER_URL,
 } from "../services/api";
 import { showError } from "../services/errors";
 
@@ -233,31 +234,83 @@ export default function DownloaderPage() {
     setSaveAsOpen(true);
   });
 
+  // "Tải về máy" = chạy FULL pipeline backend (yt-dlp download + merge
+  // audio + transcode AV1→H.264) thành 1 project tạm, rồi copy file
+  // original.mp4 sang folder user chọn, cuối cùng xoá project để không
+  // lẫn vào Studio.
   const doDownloadToFolder = async ({ folder, filename, overwrite }) => {
     setSaveAsOpen(false);
     setDownloading(true);
-    setProgress(20);
-    setProgressLabel(t("downloader.downloading"));
+    setProgress(0);
+    setProgressLabel("Đang chuẩn bị…");
     setProgressDetail("");
+    const controller = new AbortController();
+    abortRef.current = controller;
+
+    let createdProjectId = null;
     try {
+      // 1. Chạy pipeline download → project (có transcode)
+      await new Promise((resolve, reject) => {
+        let settled = false;
+        const settle = (fn) => (v) => { if (!settled) { settled = true; fn(v); } };
+        const safeResolve = settle(resolve);
+        const safeReject = settle(reject);
+        downloadToProject({
+          url: url.trim(),
+          useWatermark: !preferNoWM,
+          engine,
+          signal: controller.signal,
+          onProgress: (d) => {
+            if (d.label) setProgressLabel(d.label);
+            if (d.detail) setProgressDetail(d.detail);
+            if (typeof d.progress === "number" && d.progress >= 0) {
+              // 0-92% = download+transcode, 92-100% = save to folder
+              setProgress(Math.min(92, d.progress * 0.92));
+            }
+          },
+          onDone: (d) => {
+            if (d?.project_id) {
+              createdProjectId = d.project_id;
+              safeResolve(d);
+            }
+          },
+          onError: safeReject,
+        }).catch(safeReject);
+      });
+
+      if (!createdProjectId) throw new Error("Pipeline không trả project_id.");
+
+      // 2. Copy file original.mp4 từ backend sang folder user
+      setProgressLabel("Đang lưu file…");
+      setProgress(94);
       const path = await window.voxstudio.saveRemoteFileToFolder({
-        url: info.video_url,
+        url: dubbingVideoURL(createdProjectId),
         folder, filename, overwrite,
       });
       setProgress(100);
+
+      // 3. Xoá project tạm (không block UX nếu fail)
+      deleteDubbingProject(createdProjectId).catch(() => {});
+
       pushHistory({
         url: url.trim(),
         path,
-        title: info.title,
-        thumbnail: info.thumbnail,
-        platform: info.platform,
-        duration: info.duration,
+        title: info?.title,
+        thumbnail: info?.thumbnail,
+        platform: info?.platform,
+        duration: info?.duration,
         at: Date.now(),
         kind: "folder",
       });
       toast.success(`Đã lưu: ${path}`, { duration: 6000 });
     } catch (e) {
-      showError(toast, e, { context: "save to folder" }, t);
+      if (e?.name !== "AbortError") {
+        showError(toast, e, { context: "save to folder" }, t);
+      }
+      // Dọn project tạm nếu lỗi giữa chừng
+      if (createdProjectId) {
+        deleteDubbingProject(createdProjectId).catch(() => {});
+      }
     }
     reset();
   };
