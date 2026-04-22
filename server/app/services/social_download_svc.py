@@ -457,19 +457,18 @@ def _download_via_ytdlp(url: str, pdir: Path, final_path: Path):
                 common_opts["ffmpeg_location"] = ffbin
             _attach_chrome_cookies(common_opts)
 
-            # Try 1: format "best" = progressive stream đã có audio
-            try:
-                opts1 = dict(common_opts,
-                             format="best[ext=mp4][vcodec!=none][acodec!=none]/best[vcodec!=none][acodec!=none]")
-                with yt_dlp.YoutubeDL(opts1) as ydl:
-                    ydl.download([url])
-            except Exception as e1:
-                logger.warning("yt-dlp best-combined fail, retry with merge: %s", e1)
-                # Try 2: separate streams + merge
-                opts2 = dict(common_opts,
-                             format="bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best")
-                with yt_dlp.YoutubeDL(opts2) as ydl:
-                    ydl.download([url])
+            # Strategy: yt-dlp default "bv*+ba/b" đã handle 99% cases — progressive
+            # cho TikTok/Douyin/IG, DASH merge cho YouTube/FB. Chỉ cần tự chỉ định
+            # explicit để chắc chắn pick audio:
+            #   bestvideo+bestaudio (DASH merge)
+            #   /best[vcodec!=none][acodec!=none] (progressive combined)
+            # KHÔNG có bare "/best" cuối vì sẽ pick video-only stream cho FB DASH.
+            opts_final = dict(common_opts,
+                format="bestvideo*+bestaudio/best[vcodec!=none][acodec!=none]")
+            with yt_dlp.YoutubeDL(opts_final) as ydl:
+                info = ydl.extract_info(url, download=True)
+                logger.info("yt-dlp picked format: %s (vcodec=%s acodec=%s)",
+                            info.get("format_id"), info.get("vcodec"), info.get("acodec"))
 
             # yt-dlp đã save theo outtmpl — file có thể là .mp4 hoặc extension khác.
             # Tìm file và rename về original.mp4 nếu cần.
@@ -492,6 +491,18 @@ def _download_via_ytdlp(url: str, pdir: Path, final_path: Path):
                     break
             if not final_path.exists():
                 raise RuntimeError("yt-dlp không tạo ra file output.")
+            # Verify — file có audio stream không?
+            try:
+                probe = ffmpeg.probe(str(final_path))
+                has_audio = any(s.get("codec_type") == "audio"
+                                for s in probe.get("streams", []))
+                if not has_audio:
+                    logger.warning(
+                        "Tải xong nhưng file KHÔNG có audio stream — "
+                        "yt-dlp có thể đã chọn sai format. File: %s", final_path
+                    )
+            except Exception as e:
+                logger.warning("post-download probe fail: %s", e)
             q.put({"step": "processing", "progress": 92,
                    "label": "Hoàn tất tải, xử lý audio…"})
         except Exception as e:
