@@ -20,8 +20,8 @@ export default function SignupPage() {
     try {
       await signup({ name, email, password });
       navigate("/");
-    } catch {
-      setError(t("auth.login.errors.invalid"));
+    } catch (e) {
+      setError(e?.message || t("auth.login.errors.invalid"));
     }
   }
 

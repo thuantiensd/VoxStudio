@@ -1,11 +1,11 @@
 import { createContext, useContext, useEffect, useState, useCallback } from "react";
+import { SERVER_URL } from "../services/api";
 
 /**
- * Auth context — minimal local-first design.
+ * Auth context — gọi backend thật, lưu JWT + user trong localStorage.
  *
- * For alpha we store user + token in localStorage and call backend endpoints
- * (to be wired to Clerk/Supabase later). Shape is stable so UI code does not
- * need to change when we swap the provider.
+ * App cho phép dùng khi CHƯA ĐĂNG NHẬP — isAuthenticated=false → các feature
+ * cao cấp (API keys, quota lớn…) sẽ tự disable và hiện CTA "Đăng nhập".
  */
 
 const STORAGE_KEY = "voxstudio:auth";
@@ -27,6 +27,23 @@ function writeStored(value) {
   } catch {}
 }
 
+async function callAuth(path, body) {
+  const res = await fetch(`${SERVER_URL}/api/v1/auth${path}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "ngrok-skip-browser-warning": "true",
+    },
+    body: JSON.stringify(body),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const msg = data?.detail || `Lỗi ${res.status}`;
+    throw new Error(typeof msg === "string" ? msg : JSON.stringify(msg));
+  }
+  return data;
+}
+
 export function AuthProvider({ children }) {
   const [auth, setAuth] = useState(() => readStored());
   const [loading, setLoading] = useState(false);
@@ -35,25 +52,36 @@ export function AuthProvider({ children }) {
     writeStored(auth);
   }, [auth]);
 
+  // Re-validate token on mount — server restart/JWT_SECRET đổi → clear stale
+  useEffect(() => {
+    if (!auth?.token) return;
+    (async () => {
+      try {
+        const res = await fetch(`${SERVER_URL}/api/v1/auth/me`, {
+          headers: {
+            Authorization: `Bearer ${auth.token}`,
+            "ngrok-skip-browser-warning": "true",
+          },
+        });
+        if (res.status === 401) {
+          setAuth(null);  // token invalid/expired → logout silently
+        } else if (res.ok) {
+          const data = await res.json();
+          if (data?.user) setAuth((a) => ({ ...a, user: data.user }));
+        }
+      } catch {
+        // Network error — giữ nguyên session, thử lại sau
+      }
+    })();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const login = useCallback(async ({ email, password }) => {
     setLoading(true);
     try {
-      // TODO: replace with real API call (Clerk / Supabase / backend)
-      // For now, accept any non-empty combo for alpha dev.
-      await new Promise((r) => setTimeout(r, 400));
-      if (!email || !password || password.length < 4) {
-        throw new Error("invalid");
-      }
-      const user = {
-        id: "local-" + btoa(email).slice(0, 8),
-        email,
-        name: email.split("@")[0],
-        plan: "free",
-        avatar: null,
-      };
-      const token = "stub-" + Math.random().toString(36).slice(2);
-      setAuth({ user, token });
-      return user;
+      const data = await callAuth("/login", { email, password });
+      setAuth({ user: data.user, token: data.token });
+      return data.user;
     } finally {
       setLoading(false);
     }
@@ -62,26 +90,25 @@ export function AuthProvider({ children }) {
   const signup = useCallback(async ({ name, email, password }) => {
     setLoading(true);
     try {
-      await new Promise((r) => setTimeout(r, 400));
-      if (!email || !password || password.length < 8 || !name) {
-        throw new Error("invalid");
-      }
-      const user = {
-        id: "local-" + btoa(email).slice(0, 8),
-        email,
-        name,
-        plan: "free",
-        avatar: null,
-      };
-      const token = "stub-" + Math.random().toString(36).slice(2);
-      setAuth({ user, token });
-      return user;
+      const data = await callAuth("/register", { email, password, name });
+      setAuth({ user: data.user, token: data.token });
+      return data.user;
     } finally {
       setLoading(false);
     }
   }, []);
 
-  const logout = useCallback(() => setAuth(null), []);
+  const logout = useCallback(() => {
+    // Stateless JWT — chỉ cần xoá local
+    fetch(`${SERVER_URL}/api/v1/auth/logout`, {
+      method: "POST",
+      headers: {
+        Authorization: auth?.token ? `Bearer ${auth.token}` : "",
+        "ngrok-skip-browser-warning": "true",
+      },
+    }).catch(() => {});
+    setAuth(null);
+  }, [auth?.token]);
 
   const updateUser = useCallback(
     (patch) => setAuth((prev) => (prev ? { ...prev, user: { ...prev.user, ...patch } } : prev)),

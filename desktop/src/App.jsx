@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import AppShell from "./components/shell/AppShell";
 import TTSPage from "./pages/TTSPage";
 import VoiceClonePage from "./pages/VoiceClonePage";
@@ -10,22 +10,13 @@ import DownloaderPage from "./pages/DownloaderPage";
 
 import LoginPage from "./auth/LoginPage";
 import SignupPage from "./auth/SignupPage";
-import { AuthProvider, useAuth } from "./auth/AuthContext";
+import { AuthProvider } from "./auth/AuthContext";
 import { I18nProvider } from "./i18n/I18nContext";
 import { ThemeProvider } from "./theme/ThemeContext";
 import { BatchProvider } from "./batch/BatchContext";
 import { ToastProvider } from "./components/ui/Toast";
 import ErrorBoundary from "./components/ui/ErrorBoundary";
 import GlobalErrorHook from "./components/ui/GlobalErrorHook";
-
-function ProtectedRoute({ children }) {
-  const { isAuthenticated } = useAuth();
-  const location = useLocation();
-  if (!isAuthenticated) {
-    return <Navigate to="/login" replace state={{ from: location }} />;
-  }
-  return children;
-}
 
 function Shell() {
   return (
@@ -57,14 +48,9 @@ export default function App() {
           <Routes>
             <Route path="/login" element={<LoginPage />} />
             <Route path="/signup" element={<SignupPage />} />
-            <Route
-              path="/*"
-              element={
-                <ProtectedRoute>
-                  <Shell />
-                </ProtectedRoute>
-              }
-            />
+            {/* Guest-friendly — app mở được cho cả user chưa login.
+                Các feature yêu cầu account sẽ gate riêng (isAuthenticated check). */}
+            <Route path="/*" element={<Shell />} />
           </Routes>
         </BrowserRouter>
       </BatchProvider>

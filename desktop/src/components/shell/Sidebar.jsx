@@ -1,13 +1,15 @@
 import { useLocation, useNavigate } from "react-router-dom";
 import { motion } from "motion/react";
+import { useEffect, useRef, useState } from "react";
 import {
   Clapperboard, Mic2, AudioWaveform, Library,
   ClockFading, Settings as Cog, Sparkles, CloudDownload,
-  Sun, Moon, Monitor,
+  Sun, Moon, Monitor, LogIn, LogOut, User as UserIcon,
 } from "lucide-react";
 import { useBatch } from "../../batch/BatchContext";
 import { useT } from "../../i18n/I18nContext";
 import { useTheme } from "../../theme/ThemeContext";
+import { useAuth } from "../../auth/AuthContext";
 
 /**
  * Sidebar — 220px fixed. Section headers uppercase nhỏ. Item 32px.
@@ -41,29 +43,8 @@ export default function Sidebar() {
         borderRight: "1px solid var(--n-3)",
       }}
     >
-      {/* Brand */}
-      <div className="flex items-center gap-2 px-3.5 py-3.5"
-           style={{ borderBottom: "1px solid var(--n-3)" }}>
-        <div
-          className="rounded-md flex items-center justify-center"
-          style={{
-            width: 22, height: 22,
-            background: "linear-gradient(135deg, var(--accent), #8b5cf6)",
-          }}
-        >
-          <Sparkles size={12} color="#fff" />
-        </div>
-        <div className="flex flex-col leading-tight">
-          <span className="text-[13px] font-semibold"
-                style={{ color: "var(--n-10)" }}>
-            VoxStudio
-          </span>
-          <span className="text-[10px]"
-                style={{ color: "var(--n-8)" }}>
-            AI Dubbing
-          </span>
-        </div>
-      </div>
+      {/* Brand + user menu */}
+      <BrandUserBlock />
 
       {/* Nav sections */}
       <nav className="flex-1 overflow-y-auto px-2 pt-3 pb-2">
@@ -218,3 +199,133 @@ function NavItem({ item, active, onClick, badge }) {
   );
 }
 
+/**
+ * BrandUserBlock — top of sidebar. Click để mở popover:
+ *  - Guest: hiện "Đăng nhập" + "Đăng ký"
+ *  - Logged in: hiện avatar, name, email, "Đăng xuất"
+ */
+function BrandUserBlock() {
+  const { user, isAuthenticated, logout } = useAuth() || {};
+  const nav = useNavigate();
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e) => {
+      if (rootRef.current && !rootRef.current.contains(e.target)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [open]);
+
+  const initial = (user?.name || user?.email || "?")[0].toUpperCase();
+
+  return (
+    <div ref={rootRef} style={{ position: "relative",
+                                  borderBottom: "1px solid var(--n-3)" }}>
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className="w-full flex items-center gap-2 px-3.5 py-3.5 transition-colors"
+        style={{ background: "transparent", border: "none", cursor: "pointer",
+                  textAlign: "left" }}
+        onMouseEnter={(e) => { e.currentTarget.style.background = "var(--n-2)"; }}
+        onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
+      >
+        <div
+          className="rounded-md flex items-center justify-center flex-shrink-0"
+          style={{
+            width: 22, height: 22,
+            background: isAuthenticated
+              ? "linear-gradient(135deg, var(--accent), #8b5cf6)"
+              : "linear-gradient(135deg, var(--n-3), var(--n-4))",
+            fontSize: 10, fontWeight: 700, color: "#fff",
+          }}
+        >
+          {isAuthenticated
+            ? (user?.avatar
+                ? <img src={user.avatar} alt="" style={{ width: "100%", height: "100%", borderRadius: 6 }} />
+                : initial)
+            : <Sparkles size={12} color="#fff" />}
+        </div>
+        <div className="flex flex-col leading-tight min-w-0 flex-1">
+          <span className="text-[13px] font-semibold truncate"
+                style={{ color: "var(--n-10)" }}>
+            {isAuthenticated ? (user?.name || user?.email) : "VoxStudio"}
+          </span>
+          <span className="text-[10px] truncate"
+                style={{ color: "var(--n-8)" }}>
+            {isAuthenticated ? user?.email : "Khách · đăng nhập để mở khoá"}
+          </span>
+        </div>
+      </button>
+
+      {open && (
+        <div
+          style={{
+            position: "absolute", top: "100%", left: 8, right: 8,
+            marginTop: 4,
+            background: "var(--n-1)",
+            border: "1px solid var(--n-3)",
+            borderRadius: 8,
+            boxShadow: "var(--shadow-pop)",
+            padding: 6,
+            zIndex: 60,
+          }}
+        >
+          {isAuthenticated ? (
+            <>
+              <div style={{ padding: "8px 10px", fontSize: 11, color: "var(--n-8)" }}>
+                Đã đăng nhập · {user?.plan || "free"}
+              </div>
+              <MenuItem icon={UserIcon} label="Cài đặt tài khoản"
+                        onClick={() => { nav("/settings"); setOpen(false); }} />
+              <MenuItem icon={LogOut} label="Đăng xuất" danger
+                        onClick={() => { logout(); setOpen(false); }} />
+            </>
+          ) : (
+            <>
+              <div style={{ padding: "8px 10px", fontSize: 11, color: "var(--n-8)",
+                             lineHeight: 1.5 }}>
+                Một số tính năng cao cấp cần đăng nhập (sync, cloud AI, quota lớn).
+              </div>
+              <MenuItem icon={LogIn} label="Đăng nhập" primary
+                        onClick={() => { nav("/login"); setOpen(false); }} />
+              <MenuItem icon={UserIcon} label="Đăng ký"
+                        onClick={() => { nav("/signup"); setOpen(false); }} />
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MenuItem({ icon: Icon, label, onClick, primary, danger }) {
+  return (
+    <button
+      onClick={onClick}
+      className="w-full flex items-center gap-2 px-2.5 rounded transition-colors"
+      style={{
+        height: 30, border: "none", cursor: "pointer",
+        background: primary ? "var(--accent-soft)" : "transparent",
+        color: primary ? "var(--accent)"
+              : danger ? "var(--err)"
+              : "var(--n-9)",
+        fontSize: 13, fontWeight: primary ? 500 : 400,
+        textAlign: "left",
+      }}
+      onMouseEnter={(e) => {
+        if (primary) return;
+        e.currentTarget.style.background = "var(--n-2)";
+      }}
+      onMouseLeave={(e) => {
+        if (primary) return;
+        e.currentTarget.style.background = "transparent";
+      }}
+    >
+      <Icon size={13} />
+      <span style={{ flex: 1 }}>{label}</span>
+    </button>
+  );
+}

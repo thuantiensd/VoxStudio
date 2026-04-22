@@ -19,8 +19,9 @@ export default function LoginPage() {
     try {
       await login({ email, password });
       navigate("/");
-    } catch {
-      setError(t("auth.login.errors.invalid"));
+    } catch (e) {
+      // Backend returns Vietnamese detail — use it directly
+      setError(e?.message || t("auth.login.errors.invalid"));
     }
   }
 

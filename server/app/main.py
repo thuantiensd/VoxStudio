@@ -9,6 +9,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.v1.router import api_router
 from app.config import DEVICE, DTYPE
 from app.core.gpu_manager import gpu
+from app.db.session import init_db
+
+# Load .env (JWT_SECRET + GOOGLE_OAUTH_CLIENT_ID/SECRET)
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except Exception:
+    pass
 
 logging.basicConfig(
     level=logging.INFO,
@@ -22,6 +30,7 @@ async def lifespan(app: FastAPI):
     """Load models on startup, cleanup on shutdown."""
     logger.info("Starting VoxStudio Server...")
     logger.info("Device: %s | Dtype: %s", DEVICE, DTYPE)
+    await init_db()
     gpu.load_all()
     yield
     logger.info("Shutting down.")
