@@ -27,10 +27,11 @@ from app.services.translate_svc import LANG_MAP, translate_batch as google_free_
 logger = logging.getLogger(__name__)
 
 # Default model mỗi engine — có thể override qua body request nếu cần.
+# Gemini 1.5 đã bị Google retire (04/2025). Dùng 2.5-flash (fast + free tier).
 DEFAULT_MODELS = {
     "openai": "gpt-4o-mini",
     "claude": "claude-3-5-haiku-20241022",
-    "gemini": "gemini-1.5-flash",
+    "gemini": "gemini-2.5-flash",
 }
 
 TIMEOUT = 60.0
