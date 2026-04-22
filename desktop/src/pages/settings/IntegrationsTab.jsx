@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
 import {
   Key, Eye, EyeOff, Check, X, ShieldCheck, ShieldAlert,
-  ExternalLink, Loader2, Trash2, Save,
+  ExternalLink, Loader2, Trash2, Save, AlertTriangle,
 } from "lucide-react";
 import { listKeys, getKey, setKey, isSecureBackend } from "../../services/keyvault";
 import { translateTexts } from "../../services/api";
 import { useToast } from "../../components/ui/Toast";
+import Modal from "../../components/ui/Modal";
 
 /* ─────────────────────────────────────────────────────────
    Settings → AI & API keys
@@ -121,6 +122,7 @@ function ProviderRow({ provider, hasKey, onChanged, toast }) {
   const [loading, setLoading] = useState(false);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState(null); // 'ok' | 'fail'
+  const [confirmOpen, setConfirmOpen] = useState(false);
 
   async function startEdit() {
     const cur = await getKey(provider.id);
@@ -143,8 +145,8 @@ function ProviderRow({ provider, hasKey, onChanged, toast }) {
     }
   }
 
-  async function remove() {
-    if (!confirm(`Xoá API key cho ${provider.name}?`)) return;
+  async function doRemove() {
+    setConfirmOpen(false);
     setLoading(true);
     try {
       await setKey(provider.id, "");
@@ -273,7 +275,7 @@ function ProviderRow({ provider, hasKey, onChanged, toast }) {
               Test key
             </button>
             {hasKey && (
-              <button onClick={remove}
+              <button onClick={() => setConfirmOpen(true)}
                       style={{ ...btnSecondary, color: "var(--err)",
                                 borderColor: "rgba(239,68,68,0.35)" }}>
                 <Trash2 size={12} /> Xoá
@@ -287,6 +289,50 @@ function ProviderRow({ provider, hasKey, onChanged, toast }) {
           </div>
         </div>
       )}
+
+      <Modal
+        open={confirmOpen}
+        onClose={() => setConfirmOpen(false)}
+        width={400}
+        actions={
+          <>
+            <button onClick={() => setConfirmOpen(false)} style={btnGhost}>
+              Huỷ
+            </button>
+            <button
+              onClick={doRemove}
+              style={{ ...btnBase,
+                background: "var(--err)", color: "#fff", borderColor: "var(--err)",
+                height: 32, padding: "0 14px", fontWeight: 500,
+              }}
+            >
+              <Trash2 size={13} /> Xoá key
+            </button>
+          </>
+        }
+      >
+        <div style={{ display: "flex", gap: 14, alignItems: "flex-start",
+                       padding: "4px 2px" }}>
+          <div style={{
+            width: 40, height: 40, borderRadius: "50%",
+            background: "rgba(239,68,68,0.12)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            flexShrink: 0,
+          }}>
+            <AlertTriangle size={18} style={{ color: "var(--err)" }} />
+          </div>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 15, fontWeight: 600, color: "var(--n-10)",
+                           marginBottom: 6 }}>
+              Xoá API key cho {provider.name}?
+            </div>
+            <div style={{ fontSize: 12.5, color: "var(--n-8)", lineHeight: 1.55 }}>
+              Key sẽ bị xoá khỏi máy bạn. Các tính năng dùng {provider.name} sẽ
+              không hoạt động cho tới khi bạn thêm lại key mới.
+            </div>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }
