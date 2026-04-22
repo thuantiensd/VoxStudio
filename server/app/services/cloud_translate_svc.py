@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from concurrent.futures import ThreadPoolExecutor
 
 import httpx
@@ -25,6 +26,74 @@ import httpx
 from app.services.translate_svc import LANG_MAP, translate_batch as google_free_batch
 
 logger = logging.getLogger(__name__)
+
+# Retry cho transient errors (503 overload, 429 rate limit, 502/504 gateway)
+RETRY_STATUSES = {429, 500, 502, 503, 504}
+RETRY_MAX_ATTEMPTS = 3
+RETRY_BASE_DELAY = 1.5  # giây — 1.5, 3, 6
+
+PROVIDER_DISPLAY = {
+    "google_cloud": "Google Cloud",
+    "deepl":        "DeepL",
+    "gemini":       "Gemini",
+    "openai":       "OpenAI",
+    "claude":       "Claude",
+}
+
+
+def _friendly_error(engine: str, status: int, body: str) -> str:
+    """Chuyển HTTP error từ provider thành message user-friendly (không leak raw)."""
+    name = PROVIDER_DISPLAY.get(engine, engine)
+    if status == 401 or status == 403:
+        return f"API key cho {name} không hợp lệ hoặc đã hết hạn. Hãy kiểm tra lại trong Cài đặt."
+    if status == 429:
+        return f"Bạn đã vượt giới hạn của {name}. Vui lòng chờ vài phút rồi thử lại, hoặc đổi sang engine khác."
+    if status == 402:
+        return f"Tài khoản {name} đã hết quota hoặc credit. Vui lòng kiểm tra bên {name}."
+    if status == 404:
+        return f"Mô hình {name} đã thay đổi. Vui lòng cập nhật ứng dụng."
+    if status in (500, 502, 503, 504):
+        return f"Dịch vụ {name} tạm quá tải. Vui lòng thử lại sau ít phút, hoặc đổi sang engine khác (ví dụ Google miễn phí)."
+    # 400 và các mã khác
+    return f"{name} từ chối yêu cầu. Vui lòng thử lại hoặc đổi sang engine khác."
+
+
+def _post_with_retry(engine: str, url: str, *, params=None, json_body=None, data=None,
+                      headers=None) -> httpx.Response:
+    """POST với retry exponential backoff cho transient errors."""
+    last_resp = None
+    with httpx.Client(timeout=TIMEOUT) as c:
+        for attempt in range(RETRY_MAX_ATTEMPTS):
+            try:
+                if json_body is not None:
+                    r = c.post(url, params=params, json=json_body, headers=headers)
+                else:
+                    r = c.post(url, params=params, data=data, headers=headers)
+            except httpx.RequestError as e:
+                # Network-level — retry nếu còn attempt
+                if attempt < RETRY_MAX_ATTEMPTS - 1:
+                    time.sleep(RETRY_BASE_DELAY * (2 ** attempt))
+                    continue
+                raise ValueError(
+                    f"Không kết nối được dịch vụ {PROVIDER_DISPLAY.get(engine, engine)}. "
+                    f"Kiểm tra kết nối mạng và thử lại."
+                )
+            last_resp = r
+            if r.status_code < 400:
+                return r
+            if r.status_code in RETRY_STATUSES and attempt < RETRY_MAX_ATTEMPTS - 1:
+                delay = RETRY_BASE_DELAY * (2 ** attempt)
+                logger.warning("[%s] %d — retry %d/%d sau %.1fs",
+                               engine, r.status_code, attempt + 1, RETRY_MAX_ATTEMPTS, delay)
+                time.sleep(delay)
+                continue
+            # Non-retryable hoặc hết attempts
+            break
+    # Fail — tạo message user-friendly, raw body chỉ log
+    status = last_resp.status_code if last_resp is not None else 0
+    raw = last_resp.text[:500] if last_resp is not None else ""
+    logger.error("[%s] final failure %d: %s", engine, status, raw)
+    raise ValueError(_friendly_error(engine, status, raw))
 
 # Default model mỗi engine — có thể override qua body request nếu cần.
 # Gemini 1.5 đã bị Google retire (04/2025). Dùng 2.5-flash (fast + free tier).
@@ -67,10 +136,7 @@ def _google_cloud(texts: list[str], target: str, source: str, api_key: str) -> l
     data = {"target": _lang_code(target), "format": "text", "q": texts}
     if source and source.lower() != "auto":
         data["source"] = _lang_code(source)
-    with httpx.Client(timeout=TIMEOUT) as c:
-        r = c.post(url, params=params, data=data)
-    if r.status_code != 200:
-        raise ValueError(f"Google Cloud error {r.status_code}: {r.text[:200]}")
+    r = _post_with_retry("google_cloud", url, params=params, data=data)
     body = r.json()
     return [t.get("translatedText", "") for t in body["data"]["translations"]]
 
@@ -88,10 +154,8 @@ def _deepl(texts: list[str], target: str, source: str, api_key: str) -> list[str
         data.append(("source_lang", _lang_code(source).upper().replace("ZH-CN", "ZH")))
     for t in texts:
         data.append(("text", t))
-    with httpx.Client(timeout=TIMEOUT) as c:
-        r = c.post(f"{base}/v2/translate", data=data, headers=headers)
-    if r.status_code != 200:
-        raise ValueError(f"DeepL error {r.status_code}: {r.text[:200]}")
+    r = _post_with_retry("deepl", f"{base}/v2/translate",
+                          data=data, headers=headers)
     return [item.get("text", "") for item in r.json().get("translations", [])]
 
 
@@ -113,13 +177,15 @@ def _gemini(texts: list[str], target: str, source: str, api_key: str,
         "contents": [{"parts": [{"text": prompt}]}],
         "generationConfig": {"temperature": 0.2},
     }
-    with httpx.Client(timeout=TIMEOUT) as c:
-        r = c.post(url, params={"key": api_key}, json=payload,
-                    headers={"Content-Type": "application/json"})
-    if r.status_code != 200:
-        raise ValueError(f"Gemini error {r.status_code}: {r.text[:300]}")
+    r = _post_with_retry("gemini", url, params={"key": api_key},
+                          json_body=payload,
+                          headers={"Content-Type": "application/json"})
     body = r.json()
-    raw = body["candidates"][0]["content"]["parts"][0]["text"]
+    try:
+        raw = body["candidates"][0]["content"]["parts"][0]["text"]
+    except (KeyError, IndexError):
+        logger.error("Gemini response malformed: %s", body)
+        raise ValueError("Gemini trả về dữ liệu không đúng định dạng. Vui lòng thử lại.")
     return _parse_numbered(raw, len(texts))
 
 
@@ -145,12 +211,12 @@ def _openai(texts: list[str], target: str, source: str, api_key: str,
         ],
     }
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
-    with httpx.Client(timeout=TIMEOUT) as c:
-        r = c.post("https://api.openai.com/v1/chat/completions",
-                    json=payload, headers=headers)
-    if r.status_code != 200:
-        raise ValueError(f"OpenAI error {r.status_code}: {r.text[:300]}")
-    raw = r.json()["choices"][0]["message"]["content"]
+    r = _post_with_retry("openai", "https://api.openai.com/v1/chat/completions",
+                          json_body=payload, headers=headers)
+    try:
+        raw = r.json()["choices"][0]["message"]["content"]
+    except (KeyError, IndexError):
+        raise ValueError("OpenAI trả về dữ liệu không đúng định dạng. Vui lòng thử lại.")
     return _parse_numbered(raw, len(texts))
 
 
@@ -179,12 +245,12 @@ def _claude(texts: list[str], target: str, source: str, api_key: str,
         "anthropic-version": "2023-06-01",
         "Content-Type": "application/json",
     }
-    with httpx.Client(timeout=TIMEOUT) as c:
-        r = c.post("https://api.anthropic.com/v1/messages",
-                    json=payload, headers=headers)
-    if r.status_code != 200:
-        raise ValueError(f"Claude error {r.status_code}: {r.text[:300]}")
-    raw = r.json()["content"][0]["text"]
+    r = _post_with_retry("claude", "https://api.anthropic.com/v1/messages",
+                          json_body=payload, headers=headers)
+    try:
+        raw = r.json()["content"][0]["text"]
+    except (KeyError, IndexError):
+        raise ValueError("Claude trả về dữ liệu không đúng định dạng. Vui lòng thử lại.")
     return _parse_numbered(raw, len(texts))
 
 
@@ -259,13 +325,19 @@ def translate_texts(
                 translated = fn(sub, target, source, api_key, model=model)
             else:
                 translated = fn(sub, target, source, api_key)
-        except httpx.RequestError as e:
-            raise ValueError(f"Lỗi mạng khi gọi {engine}: {e}")
+        except httpx.RequestError:
+            raise ValueError(
+                f"Không kết nối được dịch vụ {PROVIDER_DISPLAY.get(engine, engine)}. "
+                f"Kiểm tra kết nối mạng và thử lại."
+            )
         except ValueError:
             raise
-        except Exception as e:
+        except Exception:
             logger.exception("Engine %s failed", engine)
-            raise ValueError(f"Lỗi {engine}: {e}")
+            raise ValueError(
+                f"Dịch vụ {PROVIDER_DISPLAY.get(engine, engine)} đang gặp sự cố. "
+                f"Vui lòng thử lại hoặc đổi sang engine khác."
+            )
 
     out = [""] * len(texts)
     for pos, v in zip(non_empty_idx, translated):
