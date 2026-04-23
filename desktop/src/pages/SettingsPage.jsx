@@ -7,7 +7,7 @@ import IntegrationsTab from "./settings/IntegrationsTab";
 import { useT, useI18n } from "../i18n/I18nContext";
 import { useAuth } from "../auth/AuthContext";
 import { useTheme } from "../theme/ThemeContext";
-import { checkHealth } from "../services/api";
+import { checkHealth, listPlans, fetchMe } from "../services/api";
 
 /**
  * Settings — Claude-style layout:
@@ -374,127 +374,331 @@ function AppearanceTab() {
 }
 
 // ── Billing ───────────────────────────────
-function BillingTab() {
-  const t = useT();
-  const { user } = useAuth();
+function formatVND(n) {
+  return (n || 0).toLocaleString("vi-VN") + "đ";
+}
 
-  const plans = [
-    { key: "free", name: t("auth.plan.free"), price: "0₫", period: "/tháng",
-      features: ["10 phút/tháng", "1 voice clone", "Chất lượng cơ bản"] },
-    { key: "pro", name: t("auth.plan.pro"), price: "199.000₫", period: "/tháng",
-      features: ["120 phút/tháng", "5 voice clones", "Chất lượng cao nhất", "Emotion preservation"] },
-    { key: "business", name: t("auth.plan.business"), price: "499.000₫", period: "/tháng",
-      features: ["600 phút/tháng", "Unlimited clones", "API access", "Dedicated support"] },
+function FeatureItem({ ok, label }) {
+  return (
+    <div className="flex items-start gap-1.5 text-[12.5px] mb-1"
+         style={{ color: ok ? "var(--text-primary)" : "var(--text-secondary)",
+                   opacity: ok ? 1 : 0.5 }}>
+      <span style={{ color: ok ? "#22c55e" : "var(--n-6)",
+                      fontWeight: 700, marginTop: 1 }}>
+        {ok ? "✓" : "✗"}
+      </span>
+      <span>{label}</span>
+    </div>
+  );
+}
+
+function PlanCard({ plan, isCurrent, highlighted, onUpgrade }) {
+  const { features = {}, limits = {} } = plan;
+  const unlimited = (v) => v === -1 ? "Không giới hạn" : v;
+  const lines = [
+    { key: "dubbing", label: "Lồng tiếng",
+      val: `${unlimited(limits.dubbing_min_month)} phút/tháng` },
+    { key: "stt", label: "Trích xuất phụ đề (STT)",
+      val: `${unlimited(limits.stt_min_month)} phút/tháng` },
+    { key: "tts", label: "Tạo giọng nói (TTS)",
+      val: limits.tts_chars_month === -1
+        ? "Không giới hạn"
+        : `${(limits.tts_chars_month || 0).toLocaleString()} ký tự/tháng` },
+    { key: "voice_clone", label: "Clone giọng",
+      val: `${unlimited(limits.voice_clone_max)} giọng` },
+    { key: "concurrent", label: "Tác vụ song song",
+      val: `${unlimited(limits.concurrent_jobs)} tác vụ` },
+  ];
+
+  const featureToggles = [
+    { k: "batch",          l: "Xử lý nhiều file cùng lúc" },
+    { k: "priority_queue", l: "Ưu tiên hàng đợi GPU" },
+    { k: "export_4k",      l: "Xuất chất lượng 4K" },
+    { k: "watermark_free", l: "Không watermark" },
+    { k: "api",            l: "API cho developer" },
   ];
 
   return (
-    <>
-      <Section title={t("settings.billing.currentPlan")}>
-        <Card>
-          <div className="flex items-center justify-between">
-            <div>
-              <div className="text-lg font-semibold"
-                   style={{ color: "var(--text-primary)" }}>
-                {t(`auth.plan.${user?.plan || "free"}`)}
-              </div>
-              <p className="text-sm mt-0.5" style={{ color: "var(--text-secondary)" }}>
-                {t("settings.billing.renewInfo")}
-              </p>
-            </div>
-            {user?.plan === "free" ? (
-              <PrimaryButton>{t("settings.billing.upgrade")}</PrimaryButton>
-            ) : (
-              <GhostButton>{t("settings.billing.managePlan")}</GhostButton>
-            )}
-          </div>
-        </Card>
-      </Section>
+    <div
+      style={{
+        position: "relative",
+        padding: 20,
+        borderRadius: 12,
+        background: highlighted
+          ? "linear-gradient(135deg, var(--accent-soft), rgba(139,92,246,0.08))"
+          : "var(--n-1)",
+        border: `1px solid ${highlighted ? "var(--accent)" : "var(--n-3)"}`,
+        display: "flex", flexDirection: "column",
+      }}
+    >
+      {highlighted && (
+        <div style={{
+          position: "absolute", top: -10, right: 16,
+          background: "var(--accent)", color: "#fff",
+          padding: "3px 10px", borderRadius: 6,
+          fontSize: 10, fontWeight: 700, letterSpacing: "0.05em",
+          textTransform: "uppercase",
+        }}>
+          Phổ biến
+        </div>
+      )}
+      <div style={{ fontSize: 16, fontWeight: 700, color: "var(--n-10)" }}>
+        {plan.name}
+      </div>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 4,
+                     marginTop: 8, marginBottom: 4 }}>
+        <span style={{ fontSize: 28, fontWeight: 700, color: "var(--n-10)",
+                        letterSpacing: "-0.02em" }}>
+          {plan.price_vnd === 0 ? "Miễn phí" : formatVND(plan.price_vnd)}
+        </span>
+        {plan.price_vnd > 0 && (
+          <span style={{ fontSize: 13, color: "var(--n-7)" }}>/tháng</span>
+        )}
+      </div>
+      {plan.ltd && plan.ltd.price_vnd > 0 && plan.ltd.slots_available > 0 && (
+        <div style={{
+          marginTop: 6, marginBottom: 10,
+          padding: "6px 10px", borderRadius: 6,
+          background: "rgba(251,191,36,0.10)",
+          border: "1px solid rgba(251,191,36,0.3)",
+          fontSize: 11, lineHeight: 1.4,
+        }}>
+          <b style={{ color: "#f59e0b" }}>🎁 Ưu đãi sớm:</b>{" "}
+          <span style={{ color: "var(--n-9)" }}>
+            Mua trọn đời <b>{formatVND(plan.ltd.price_vnd)}</b> (còn {plan.ltd.slots_available} suất)
+          </span>
+        </div>
+      )}
 
-      <Section title={t("settings.billing.plans")}>
-        <div className="grid gap-3">
-          {plans.map((p) => (
-            <Card key={p.key}>
-              <div className="flex items-center justify-between">
-                <div>
-                  <div className="font-semibold" style={{ color: "var(--text-primary)" }}>
-                    {p.name}
-                  </div>
-                  <div className="text-sm mt-0.5"
-                       style={{ color: "var(--text-secondary)" }}>
-                    <span className="font-medium"
-                          style={{ color: "var(--text-primary)" }}>{p.price}</span>
-                    {p.period}
-                    {" · "}{p.features.join(", ")}
-                  </div>
-                </div>
-                {user?.plan === p.key ? (
-                  <span className="text-xs px-2 py-1 rounded"
-                        style={{ background: "rgba(91,108,255,0.15)", color: "var(--accent)" }}>
-                    {t("settings.billing.current")}
-                  </span>
-                ) : (
-                  <PrimaryButton>{t("settings.billing.choose")}</PrimaryButton>
-                )}
-              </div>
-            </Card>
+      <div style={{ marginTop: 12,
+                     paddingTop: 12,
+                     borderTop: "1px solid var(--n-3)",
+                     flex: 1 }}>
+        {lines.map((l) => (
+          <div key={l.key}
+               style={{ fontSize: 12.5, marginBottom: 4,
+                         color: "var(--text-primary)" }}>
+            <span style={{ color: "var(--n-8)" }}>{l.label}: </span>
+            <b>{l.val}</b>
+          </div>
+        ))}
+        <div style={{ marginTop: 10 }}>
+          {featureToggles.map((f) => (
+            <FeatureItem key={f.k} ok={!!features[f.k]} label={f.l} />
           ))}
         </div>
-      </Section>
+      </div>
 
-      <Section title={t("settings.billing.paymentMethod")}>
-        <Card>
-          <div className="flex items-center justify-between">
-            <p className="text-sm" style={{ color: "var(--text-secondary)" }}>
-              {t("settings.billing.noMethod")}
-            </p>
-            <GhostButton>{t("settings.billing.addMethod")}</GhostButton>
-          </div>
-        </Card>
-      </Section>
+      <div style={{ marginTop: 14 }}>
+        {isCurrent ? (
+          <button disabled style={{
+            width: "100%", padding: "10px", borderRadius: 8,
+            background: "var(--n-2)", color: "var(--n-8)",
+            border: "1px solid var(--n-3)", fontSize: 13, fontWeight: 600,
+            cursor: "default",
+          }}>
+            ✓ Gói hiện tại
+          </button>
+        ) : plan.id === "free" ? (
+          <button disabled style={{
+            width: "100%", padding: "10px", borderRadius: 8,
+            background: "transparent", color: "var(--n-7)",
+            border: "1px solid var(--n-3)", fontSize: 13,
+            cursor: "default",
+          }}>
+            —
+          </button>
+        ) : (
+          <button
+            onClick={() => onUpgrade(plan)}
+            style={{
+              width: "100%", padding: "10px", borderRadius: 8,
+              background: highlighted
+                ? "linear-gradient(135deg, var(--accent), #8b5cf6)"
+                : "var(--accent)",
+              color: "#fff", border: "none",
+              fontSize: 13, fontWeight: 600, cursor: "pointer",
+              boxShadow: highlighted
+                ? "0 4px 14px rgba(108,92,231,0.35)" : "none",
+            }}
+          >
+            Nâng cấp lên {plan.name} →
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
 
-      <Section title={t("settings.billing.invoices")}>
-        <Card>
-          <p className="text-sm" style={{ color: "var(--text-secondary)" }}>
-            {t("settings.billing.noInvoices")}
-          </p>
-        </Card>
-      </Section>
+function BillingTab() {
+  const { user } = useAuth();
+  const toast = useToast();
+  const [plans, setPlans] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    listPlans().then((res) => {
+      setPlans(res?.plans || []);
+    }).catch(() => {
+      // Fallback: không lấy được từ server → hiển thị trạng thái tạm
+    }).finally(() => setLoading(false));
+  }, []);
+
+  const onUpgrade = (plan) => {
+    toast?.info?.(
+      `Gói ${plan.name} sẽ ra mắt sớm. Theo dõi email để nhận thông báo + ưu đãi sớm.`,
+      { title: "Sắp mở thanh toán" }
+    );
+  };
+
+  if (loading) {
+    return (
+      <div className="flex items-center gap-2 text-sm"
+           style={{ color: "var(--n-8)" }}>
+        <Loader2 size={14} className="animate-spin" /> Đang tải bảng giá…
+      </div>
+    );
+  }
+  if (!plans.length) {
+    return (
+      <div className="text-sm" style={{ color: "var(--n-7)" }}>
+        Chưa lấy được bảng giá. Vui lòng thử lại sau.
+      </div>
+    );
+  }
+
+  const highlightedId = "pro"; // Pro là hero plan
+  const currentPlanId = user?.plan || "free";
+
+  return (
+    <>
+      <div style={{ marginBottom: 16 }}>
+        <h2 style={{ fontSize: 16, fontWeight: 600, color: "var(--n-10)",
+                      marginBottom: 4 }}>
+          Chọn gói phù hợp
+        </h2>
+        <p style={{ fontSize: 12.5, color: "var(--n-8)" }}>
+          Mọi gói đều cho phép bạn dùng <b>API key cá nhân</b> (OpenAI, Gemini,
+          Claude…) — không bị markup, bạn trả trực tiếp cho nhà cung cấp.
+        </p>
+      </div>
+
+      <div style={{
+        display: "grid",
+        gridTemplateColumns: "repeat(3, 1fr)",
+        gap: 14,
+        marginBottom: 20,
+      }}>
+        {plans.map((p) => (
+          <PlanCard
+            key={p.id}
+            plan={p}
+            isCurrent={p.id === currentPlanId}
+            highlighted={p.id === highlightedId}
+            onUpgrade={onUpgrade}
+          />
+        ))}
+      </div>
+
+      <div style={{
+        padding: 12, borderRadius: 8,
+        background: "var(--n-1)",
+        border: "1px solid var(--n-3)",
+        fontSize: 12, color: "var(--n-8)",
+        lineHeight: 1.55,
+      }}>
+        <b style={{ color: "var(--n-10)" }}>💡 Ưu đãi trọn đời (Early Believer)</b>{" "}
+        Chỉ 100 suất đầu — thanh toán 1 lần, dùng mãi mãi.
+        Khi hết 100 suất, giá sẽ trở về gói hàng tháng bình thường.
+      </div>
     </>
   );
 }
 
 // ── Usage ───────────────────────────────
 function UsageTab() {
-  const t = useT();
+  const [me, setMe] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetchMe().then(setMe).catch(() => {}).finally(() => setLoading(false));
+  }, []);
+
+  if (loading) {
+    return (
+      <div className="flex items-center gap-2 text-sm"
+           style={{ color: "var(--n-8)" }}>
+        <Loader2 size={14} className="animate-spin" /> Đang tải dữ liệu sử dụng…
+      </div>
+    );
+  }
+
+  const usage = me?.usage_month || {};
+  const limits = me?.plan?.limits || {};
+  const planName = me?.plan?.name || "Miễn phí";
+
   return (
     <>
-      <Section title={t("settings.usage.thisMonth")}>
-        <Card>
-          <UsageRow label={t("settings.usage.dubbingMinutes")} used={0} limit={10} />
-          <div className="h-3" />
-          <UsageRow label={t("settings.usage.voiceClones")} used={0} limit={1} />
-          <div className="h-3" />
-          <UsageRow label={t("settings.usage.apiCalls")} used={0} limit={1000} />
-        </Card>
-      </Section>
+      <div style={{ marginBottom: 14 }}>
+        <h2 style={{ fontSize: 15, fontWeight: 600, color: "var(--n-10)" }}>
+          Tháng {new Date().getMonth() + 1}/{new Date().getFullYear()} · Gói {planName}
+        </h2>
+        <p style={{ fontSize: 12, color: "var(--n-8)", marginTop: 2 }}>
+          Hạn mức reset vào ngày 1 mỗi tháng.
+        </p>
+      </div>
+      <Card>
+        <UsageRow label="Phút lồng tiếng"
+                   used={Math.round(usage.dubbing_min || 0)}
+                   limit={limits.dubbing_min_month} />
+        <div className="h-3" />
+        <UsageRow label="Phút phụ đề (STT)"
+                   used={Math.round(usage.stt_min || 0)}
+                   limit={limits.stt_min_month} />
+        <div className="h-3" />
+        <UsageRow label="Ký tự TTS"
+                   used={usage.tts_chars || 0}
+                   limit={limits.tts_chars_month} />
+        <div className="h-3" />
+        <UsageRow label="Token dịch (dùng key của bạn)"
+                   used={usage.translate_tokens || 0}
+                   limit={-1} />
+      </Card>
     </>
   );
 }
 
 function UsageRow({ label, used, limit }) {
-  const pct = Math.min(100, Math.round((used / Math.max(1, limit)) * 100));
+  // limit = -1 → unlimited
+  const unlimited = limit === -1;
+  const pct = unlimited ? 0 : Math.min(100, Math.round((used / Math.max(1, limit)) * 100));
+  const over = !unlimited && used >= limit;
+  const warning = !unlimited && pct >= 80;
   return (
     <div>
       <div className="flex items-center justify-between mb-1.5 text-sm">
         <span style={{ color: "var(--text-primary)" }}>{label}</span>
-        <span style={{ color: "var(--text-secondary)" }}>
-          {used} / {limit}
+        <span style={{ color: over ? "var(--err)"
+                                    : warning ? "var(--warn)"
+                                    : "var(--text-secondary)" }}>
+          {unlimited
+            ? `${used.toLocaleString()} · Không giới hạn`
+            : `${used.toLocaleString()} / ${limit.toLocaleString()}`}
         </span>
       </div>
       <div className="h-1.5 rounded-full overflow-hidden"
            style={{ background: "rgba(255,255,255,0.06)" }}>
         <div className="h-full rounded-full transition-all"
-             style={{ width: `${pct}%`, background: "var(--accent)" }} />
+             style={{
+               width: `${unlimited ? 100 : pct}%`,
+               background: unlimited
+                 ? "linear-gradient(90deg, var(--accent), #8b5cf6)"
+                 : over
+                 ? "var(--err)"
+                 : warning
+                 ? "var(--warn)"
+                 : "var(--accent)",
+             }} />
       </div>
     </div>
   );

@@ -137,6 +137,17 @@ export async function deleteVoice(voiceId) {
   return res.json();
 }
 
+// ── Plans & /me expanded ────────────────────────────
+export async function listPlans() {
+  const res = await request('/plans');
+  return res.json();
+}
+
+export async function fetchMe() {
+  const res = await request('/auth/me');
+  return res.json();
+}
+
 // ── Translate (multi-provider) ──────────────────────
 export async function translateTexts({ texts, target, source = 'auto', engine = 'google_free', apiKey, model } = {}) {
   const res = await request('/translate', {

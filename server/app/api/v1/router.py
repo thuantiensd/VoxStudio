@@ -10,6 +10,7 @@ from app.api.v1.download import router as download_router
 from app.api.v1.auth import router as auth_router
 from app.api.v1.translate import router as translate_router
 from app.api.v1.jobs import router as jobs_router
+from app.api.v1.plans import router as plans_router
 
 api_router = APIRouter(prefix="/api/v1")
 api_router.include_router(auth_router)
@@ -20,3 +21,4 @@ api_router.include_router(dubbing_router)
 api_router.include_router(download_router)
 api_router.include_router(translate_router)
 api_router.include_router(jobs_router)
+api_router.include_router(plans_router)
