@@ -4,6 +4,7 @@ import {
   Palette, Sun, Moon, Monitor, KeyRound,
 } from "lucide-react";
 import IntegrationsTab from "./settings/IntegrationsTab";
+import { useToast } from "../components/ui/Toast";
 import { useT, useI18n } from "../i18n/I18nContext";
 import { useAuth } from "../auth/AuthContext";
 import { useTheme } from "../theme/ThemeContext";
