@@ -229,7 +229,7 @@ export default function DownloaderPage() {
             kind: "project",
           });
           toast.success(`Đã tải: ${d.title || d.filename}`);
-          nav(`/studio/${d.project_id}`);
+          nav(`/studio/dubbing/${d.project_id}`);
         }
         reset();
       },
@@ -465,7 +465,7 @@ export default function DownloaderPage() {
           items={history}
           onClear={clearHistory}
           onReplay={(u) => setUrl(u)}
-          onOpenProject={(id) => nav(`/studio/${id}`)}
+          onOpenProject={(id) => nav(`/studio/dubbing/${id}`)}
           onOpenFolder={(path) => window.voxstudio?.revealFileInFolder?.(path)}
           t={t}
         />

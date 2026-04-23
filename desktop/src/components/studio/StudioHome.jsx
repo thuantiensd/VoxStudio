@@ -164,7 +164,7 @@ export default function StudioHome() {
     clearSelection();
     // Truyền cả batch xuống trang Dubbing — user chỉnh setting ở project đầu,
     // nút Bắt đầu sẽ apply cho toàn bộ.
-    navigate(`/studio/${createdIds[0]}`, { state: { batchIds: createdIds } });
+    navigate(`/studio/dubbing/${createdIds[0]}`, { state: { batchIds: createdIds } });
   };
 
   return (
