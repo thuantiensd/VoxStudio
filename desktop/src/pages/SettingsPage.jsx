@@ -128,7 +128,13 @@ export default function SettingsPage() {
           </h1>
         </div>
         <div className="flex-1 overflow-y-auto">
-          <div className="max-w-2xl mx-auto p-8">
+          {/* Billing + Usage cần rộng hơn để 3 card không bị bóp */}
+          <div
+            className="mx-auto p-8"
+            style={{
+              maxWidth: (active === "billing" || active === "usage") ? 1100 : 672,
+            }}
+          >
             {active === "account" && <AccountTab />}
             {active === "appearance" && <AppearanceTab />}
             {active === "billing" && <BillingTab />}
@@ -395,23 +401,20 @@ function FeatureItem({ ok, label }) {
 
 function PlanCard({ plan, isCurrent, highlighted, onUpgrade }) {
   const { features = {}, limits = {} } = plan;
-  const unlimited = (v) => v === -1 ? "Không giới hạn" : v;
-  const lines = [
-    { key: "dubbing", label: "Lồng tiếng",
-      val: `${unlimited(limits.dubbing_min_month)} phút/tháng` },
-    { key: "stt", label: "Trích xuất phụ đề (STT)",
-      val: `${unlimited(limits.stt_min_month)} phút/tháng` },
-    { key: "tts", label: "Tạo giọng nói (TTS)",
-      val: limits.tts_chars_month === -1
-        ? "Không giới hạn"
-        : `${(limits.tts_chars_month || 0).toLocaleString()} ký tự/tháng` },
-    { key: "voice_clone", label: "Clone giọng",
-      val: `${unlimited(limits.voice_clone_max)} giọng` },
-    { key: "concurrent", label: "Tác vụ song song",
-      val: `${unlimited(limits.concurrent_jobs)} tác vụ` },
+  const unlimited = (v) => v === -1 ? "∞" : v;
+  const fmtMin = (v) => v === -1 ? "∞" : `${v} phút`;
+  const fmtChars = (v) => v === -1 ? "∞" : `${(v / 1000).toLocaleString()}k`;
+
+  const quickStats = [
+    { label: "Lồng tiếng",   val: fmtMin(limits.dubbing_min_month),  suffix: "/tháng" },
+    { label: "Phụ đề STT",   val: fmtMin(limits.stt_min_month),      suffix: "/tháng" },
+    { label: "TTS",          val: fmtChars(limits.tts_chars_month),  suffix: " ký tự/tháng" },
+    { label: "Clone giọng",  val: unlimited(limits.voice_clone_max), suffix: " giọng" },
   ];
 
-  const featureToggles = [
+  const perks = [
+    { k: "concurrent", always: true,
+      l: `${unlimited(limits.concurrent_jobs)} tác vụ song song` },
     { k: "batch",          l: "Xử lý nhiều file cùng lúc" },
     { k: "priority_queue", l: "Ưu tiên hàng đợi GPU" },
     { k: "export_4k",      l: "Xuất chất lượng 4K" },
@@ -419,111 +422,136 @@ function PlanCard({ plan, isCurrent, highlighted, onUpgrade }) {
     { k: "api",            l: "API cho developer" },
   ];
 
+  const priceDisplay = plan.price_vnd === 0
+    ? { big: "0đ", small: "miễn phí" }
+    : { big: `${(plan.price_vnd / 1000).toFixed(0)}k`, small: "/tháng" };
+
   return (
     <div
       style={{
         position: "relative",
-        padding: 20,
+        padding: 18,
         borderRadius: 12,
         background: highlighted
-          ? "linear-gradient(135deg, var(--accent-soft), rgba(139,92,246,0.08))"
+          ? "linear-gradient(160deg, var(--accent-soft), rgba(139,92,246,0.05))"
           : "var(--n-1)",
         border: `1px solid ${highlighted ? "var(--accent)" : "var(--n-3)"}`,
         display: "flex", flexDirection: "column",
+        minHeight: 460,
       }}
     >
       {highlighted && (
         <div style={{
-          position: "absolute", top: -10, right: 16,
+          position: "absolute", top: -9, left: 16,
           background: "var(--accent)", color: "#fff",
-          padding: "3px 10px", borderRadius: 6,
-          fontSize: 10, fontWeight: 700, letterSpacing: "0.05em",
-          textTransform: "uppercase",
+          padding: "2px 10px", borderRadius: 6,
+          fontSize: 10, fontWeight: 700, letterSpacing: "0.08em",
         }}>
-          Phổ biến
+          PHỔ BIẾN
         </div>
       )}
-      <div style={{ fontSize: 16, fontWeight: 700, color: "var(--n-10)" }}>
+
+      {/* Header */}
+      <div style={{ fontSize: 14, fontWeight: 600, color: "var(--n-9)",
+                     textTransform: "uppercase", letterSpacing: "0.05em" }}>
         {plan.name}
       </div>
       <div style={{ display: "flex", alignItems: "baseline", gap: 4,
-                     marginTop: 8, marginBottom: 4 }}>
-        <span style={{ fontSize: 28, fontWeight: 700, color: "var(--n-10)",
-                        letterSpacing: "-0.02em" }}>
-          {plan.price_vnd === 0 ? "Miễn phí" : formatVND(plan.price_vnd)}
+                     marginTop: 6 }}>
+        <span style={{ fontSize: 26, fontWeight: 700, color: "var(--n-10)",
+                        letterSpacing: "-0.02em", lineHeight: 1 }}>
+          {priceDisplay.big}
         </span>
-        {plan.price_vnd > 0 && (
-          <span style={{ fontSize: 13, color: "var(--n-7)" }}>/tháng</span>
-        )}
+        <span style={{ fontSize: 12, color: "var(--n-7)" }}>
+          {priceDisplay.small}
+        </span>
       </div>
+
+      {/* LTD banner */}
       {plan.ltd && plan.ltd.price_vnd > 0 && plan.ltd.slots_available > 0 && (
         <div style={{
-          marginTop: 6, marginBottom: 10,
-          padding: "6px 10px", borderRadius: 6,
+          marginTop: 10,
+          padding: "6px 8px", borderRadius: 6,
           background: "rgba(251,191,36,0.10)",
-          border: "1px solid rgba(251,191,36,0.3)",
-          fontSize: 11, lineHeight: 1.4,
+          border: "1px solid rgba(251,191,36,0.25)",
+          fontSize: 10.5, lineHeight: 1.4,
         }}>
-          <b style={{ color: "#f59e0b" }}>🎁 Ưu đãi sớm:</b>{" "}
-          <span style={{ color: "var(--n-9)" }}>
-            Mua trọn đời <b>{formatVND(plan.ltd.price_vnd)}</b> (còn {plan.ltd.slots_available} suất)
-          </span>
+          <div style={{ color: "#f59e0b", fontWeight: 700 }}>🎁 Trọn đời</div>
+          <div style={{ color: "var(--n-9)", marginTop: 1 }}>
+            <b>{formatVND(plan.ltd.price_vnd)}</b> · còn {plan.ltd.slots_available} suất
+          </div>
         </div>
       )}
 
-      <div style={{ marginTop: 12,
-                     paddingTop: 12,
-                     borderTop: "1px solid var(--n-3)",
-                     flex: 1 }}>
-        {lines.map((l) => (
-          <div key={l.key}
-               style={{ fontSize: 12.5, marginBottom: 4,
-                         color: "var(--text-primary)" }}>
-            <span style={{ color: "var(--n-8)" }}>{l.label}: </span>
-            <b>{l.val}</b>
+      {/* Quick stats grid */}
+      <div style={{
+        marginTop: 12,
+        paddingTop: 12,
+        borderTop: "1px solid var(--n-3)",
+      }}>
+        {quickStats.map((s) => (
+          <div key={s.label}
+               style={{ display: "flex", justifyContent: "space-between",
+                         alignItems: "baseline",
+                         fontSize: 12, marginBottom: 5 }}>
+            <span style={{ color: "var(--n-7)" }}>{s.label}</span>
+            <span style={{ color: "var(--n-10)", fontWeight: 600,
+                            textAlign: "right" }}>
+              {s.val}<span style={{ color: "var(--n-7)", fontWeight: 400 }}>{s.suffix}</span>
+            </span>
           </div>
         ))}
-        <div style={{ marginTop: 10 }}>
-          {featureToggles.map((f) => (
-            <FeatureItem key={f.k} ok={!!features[f.k]} label={f.l} />
-          ))}
-        </div>
       </div>
 
-      <div style={{ marginTop: 14 }}>
+      {/* Feature list */}
+      <div style={{
+        marginTop: 10,
+        paddingTop: 10,
+        borderTop: "1px solid var(--n-3)",
+        flex: 1,
+      }}>
+        {perks.map((p) => {
+          const on = p.always || !!features[p.k];
+          return <FeatureItem key={p.k || p.l} ok={on} label={p.l} />;
+        })}
+      </div>
+
+      {/* Action button */}
+      <div style={{ marginTop: 12 }}>
         {isCurrent ? (
           <button disabled style={{
-            width: "100%", padding: "10px", borderRadius: 8,
+            width: "100%", padding: "9px", borderRadius: 8,
             background: "var(--n-2)", color: "var(--n-8)",
-            border: "1px solid var(--n-3)", fontSize: 13, fontWeight: 600,
+            border: "1px solid var(--n-3)", fontSize: 12.5, fontWeight: 600,
             cursor: "default",
           }}>
-            ✓ Gói hiện tại
+            ✓ Đang dùng
           </button>
         ) : plan.id === "free" ? (
           <button disabled style={{
-            width: "100%", padding: "10px", borderRadius: 8,
+            width: "100%", padding: "9px", borderRadius: 8,
             background: "transparent", color: "var(--n-7)",
-            border: "1px solid var(--n-3)", fontSize: 13,
+            border: "1px solid var(--n-3)", fontSize: 12.5,
             cursor: "default",
           }}>
-            —
+            Gói cơ bản
           </button>
         ) : (
           <button
             onClick={() => onUpgrade(plan)}
             style={{
-              width: "100%", padding: "10px", borderRadius: 8,
+              width: "100%", padding: "9px", borderRadius: 8,
               background: highlighted
                 ? "linear-gradient(135deg, var(--accent), #8b5cf6)"
-                : "var(--accent)",
-              color: "#fff", border: "none",
-              fontSize: 13, fontWeight: 600, cursor: "pointer",
+                : "var(--n-1)",
+              color: highlighted ? "#fff" : "var(--accent)",
+              border: highlighted ? "none" : "1px solid var(--accent)",
+              fontSize: 12.5, fontWeight: 600, cursor: "pointer",
               boxShadow: highlighted
-                ? "0 4px 14px rgba(108,92,231,0.35)" : "none",
+                ? "0 4px 14px rgba(108,92,231,0.3)" : "none",
             }}
           >
-            Nâng cấp lên {plan.name} →
+            Chọn {plan.name}
           </button>
         )}
       </div>
@@ -587,7 +615,7 @@ function BillingTab() {
       <div style={{
         display: "grid",
         gridTemplateColumns: "repeat(3, 1fr)",
-        gap: 14,
+        gap: 12,
         marginBottom: 20,
       }}>
         {plans.map((p) => (
