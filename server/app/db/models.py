@@ -153,3 +153,20 @@ class Job(Base):
 # Composite index cho picker query
 Index("idx_jobs_picker",
       Job.status, Job.priority.desc(), Job.created_at.asc())
+
+
+# ── Voice clones (per-user) ───────────────────────────────────
+class Voice(Base):
+    __tablename__ = "voices"
+
+    id:         Mapped[str] = mapped_column(String(16), primary_key=True)
+    user_id:    Mapped[int] = mapped_column(
+                  ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    name:       Mapped[str] = mapped_column(String(120))
+    ref_text:   Mapped[str | None] = mapped_column(Text, nullable=True)
+    tags_json:  Mapped[str | None] = mapped_column(Text, nullable=True)
+    has_prompt: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_public:  Mapped[bool] = mapped_column(Boolean, default=False)
+    # reserved cho feature "share giọng public" sau này
+    created_at: Mapped[datetime] = mapped_column(
+                  DateTime, default=datetime.utcnow, index=True)

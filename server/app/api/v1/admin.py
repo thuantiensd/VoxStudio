@@ -487,6 +487,57 @@ async def admin_list_jobs(
     }
 
 
+@router.get("/voices")
+async def admin_list_voices(
+    user_id: int | None = Query(None),
+    page: int = Query(1, ge=1),
+    per_page: int = Query(50, ge=1, le=200),
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_session),
+):
+    """List voices toàn hệ thống. Filter theo user nếu cần."""
+    from app.db.models import Voice
+    q = select(Voice)
+    if user_id is not None:
+        q = q.where(Voice.user_id == user_id)
+    total = (await db.execute(select(func.count()).select_from(q.subquery()))).scalar() or 0
+    q = q.order_by(Voice.created_at.desc()).limit(per_page).offset((page - 1) * per_page)
+    rows = (await db.execute(q)).scalars().all()
+    return {
+        "total": total, "page": page, "per_page": per_page,
+        "voices": [
+            {
+                "id": v.id, "user_id": v.user_id, "name": v.name,
+                "ref_text": v.ref_text,
+                "has_prompt": v.has_prompt,
+                "tags": json.loads(v.tags_json) if v.tags_json else [],
+                "created_at": v.created_at.isoformat() if v.created_at else None,
+            } for v in rows
+        ],
+    }
+
+
+@router.delete("/voices/{voice_id}")
+async def admin_delete_voice(
+    voice_id: str,
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_session),
+):
+    """Admin xoá bất kỳ voice nào (không cần là owner)."""
+    from app.services import voice_svc as _vs
+    try:
+        ok = await _vs.remove(db, voice_id, admin.id, is_admin=True)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    if not ok:
+        raise HTTPException(404, "Voice không tồn tại")
+    await audit_svc.log(
+        db, user_id=admin.id, action="admin_delete_voice",
+        target_type="voice", target_id=voice_id,
+    )
+    return {"ok": True}
+
+
 @router.post("/jobs/{job_id}/cancel")
 async def admin_cancel_job(
     job_id: str,

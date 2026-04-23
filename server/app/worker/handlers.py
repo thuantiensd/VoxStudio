@@ -149,10 +149,24 @@ register_handler("stt", stt_handler)
 # ── TTS handler ────────────────────────────────────────────
 
 async def tts_handler(payload: dict, *, job_id: str, progress_cb) -> dict:
-    """Payload: tất cả param của tts_svc.generate(...)"""
+    """Payload: tất cả param của tts_svc.generate(...) + owner_user_id"""
     text = payload.get("text") or ""
     if not text.strip():
         raise ValueError("Nội dung trống.")
+
+    # Check voice ownership nếu có voice_id
+    voice_id = payload.get("voice_id")
+    owner_id = payload.get("_owner_user_id")
+    if voice_id and owner_id:
+        from app.db.session import AsyncSessionLocal
+        from app.db.models import User
+        from app.services import voice_svc as _vs
+        async with AsyncSessionLocal() as db:
+            user = await db.get(User, owner_id)
+            is_admin = bool(user and user.role == "admin")
+            v = await _vs.check_ownership(db, voice_id, owner_id, is_admin=is_admin)
+            if v is None:
+                raise ValueError("Bạn không có quyền sử dụng giọng này.")
 
     await progress_cb(step="generating", progress=10)
     import asyncio as _asyncio

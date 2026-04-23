@@ -163,6 +163,59 @@ async def _promote_admins(db: AsyncSession):
     await db.commit()
 
 
+# ── Backfill voices (existing filesystem → DB, gán admin user) ──
+
+async def _backfill_voices(db: AsyncSession):
+    """Idempotent: scan VOICES_DIR/*.json, tạo Voice row nếu chưa có.
+    Owner = admin đầu tiên (hoặc user_id đầu tiên trong DB nếu không admin).
+    Sau fix isolation, dev có thể re-assign qua admin UI."""
+    from app.db.models import Voice
+    from app.config import VOICES_DIR
+    from sqlalchemy import select
+
+    if not VOICES_DIR.exists():
+        return
+
+    # Tìm owner cho voice cũ chưa có user: ưu tiên admin đầu tiên
+    owner = await db.scalar(
+        select(User).where(User.role == "admin").order_by(User.id.asc()).limit(1)
+    )
+    if not owner:
+        owner = await db.scalar(select(User).order_by(User.id.asc()).limit(1))
+    if not owner:
+        # Chưa có user nào → để migration chạy sau khi có register đầu tiên
+        return
+
+    existing_ids = {
+        r[0] for r in (await db.execute(select(Voice.id))).all()
+    }
+
+    added = 0
+    for jf in VOICES_DIR.glob("*.json"):
+        try:
+            import json as _json
+            meta = _json.loads(jf.read_text(encoding="utf-8"))
+            vid = meta.get("id") or jf.stem
+            if vid in existing_ids:
+                continue
+            v = Voice(
+                id=vid[:16],
+                user_id=owner.id,
+                name=meta.get("name", "Untitled"),
+                ref_text=meta.get("ref_text"),
+                tags_json=_json.dumps(meta.get("tags") or [], ensure_ascii=False),
+                has_prompt=bool(meta.get("has_prompt")),
+            )
+            db.add(v)
+            added += 1
+        except Exception as e:
+            logger.warning("Backfill voice %s failed: %s", jf, e)
+            continue
+    if added:
+        await db.commit()
+        logger.info("Backfilled %d voices to user id=%d", added, owner.id)
+
+
 # ── Public entrypoint ─────────────────────────────────────────
 
 async def run_migrations():
@@ -171,3 +224,4 @@ async def run_migrations():
         await _ensure_user_columns(db)
         await _seed_plans(db)
         await _promote_admins(db)
+        await _backfill_voices(db)

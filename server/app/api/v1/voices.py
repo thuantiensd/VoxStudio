@@ -1,14 +1,21 @@
-"""Voice management API endpoints."""
+"""Voice management API — per-user isolation."""
 
+import json
 import shutil
 import tempfile
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.schemas import VoiceInfo, VoiceListResponse
-from app.services import voice_svc, tts_svc
+from app.auth.deps import get_current_user
+from app.auth.rate_limit import require_quota
+from app.config import TTS_DEFAULT_GUIDANCE, TTS_DEFAULT_STEPS
 from app.core.gpu_manager import gpu
 from app.core.storage import save_audio
+from app.db.models import User
+from app.db.session import get_session
+from app.models.schemas import VoiceInfo, VoiceListResponse
+from app.services import plan_svc, voice_svc
 
 router = APIRouter(prefix="/voices", tags=["Voices"])
 
@@ -30,10 +37,10 @@ async def preview_voice(
     preprocess_prompt: bool = Form(None, description="Preprocess prompt"),
     postprocess_output: bool = Form(None, description="Postprocess output"),
     audio_chunk_duration: float = Form(None, description="Audio chunk duration"),
+    ctx: dict = Depends(require_quota("tts")),
 ):
-    """Preview TTS with a reference audio — creates temp voice in memory, does NOT save."""
+    """Preview TTS với reference audio (không lưu voice). Require auth + quota."""
     from omnivoice import OmniVoiceGenerationConfig
-    from app.config import TTS_DEFAULT_GUIDANCE, TTS_DEFAULT_STEPS
 
     suffix = "." + (audio.filename.split(".")[-1] if audio.filename else "wav")
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
@@ -43,19 +50,20 @@ async def preview_voice(
     try:
         voice_prompt = gpu.create_voice_prompt(ref_audio=tmp_path, ref_text=ref_text)
 
-        # Build generation config
         cfg = {
             "num_step": num_step or TTS_DEFAULT_STEPS,
             "guidance_scale": guidance_scale if guidance_scale is not None else TTS_DEFAULT_GUIDANCE,
         }
-        if t_shift is not None: cfg["t_shift"] = t_shift
-        if layer_penalty_factor is not None: cfg["layer_penalty_factor"] = layer_penalty_factor
-        if position_temperature is not None: cfg["position_temperature"] = position_temperature
-        if class_temperature is not None: cfg["class_temperature"] = class_temperature
-        if denoise is not None: cfg["denoise"] = denoise
-        if preprocess_prompt is not None: cfg["preprocess_prompt"] = preprocess_prompt
-        if postprocess_output is not None: cfg["postprocess_output"] = postprocess_output
-        if audio_chunk_duration is not None: cfg["audio_chunk_duration"] = audio_chunk_duration
+        for k, v in [
+            ("t_shift", t_shift), ("layer_penalty_factor", layer_penalty_factor),
+            ("position_temperature", position_temperature),
+            ("class_temperature", class_temperature),
+            ("denoise", denoise), ("preprocess_prompt", preprocess_prompt),
+            ("postprocess_output", postprocess_output),
+            ("audio_chunk_duration", audio_chunk_duration),
+        ]:
+            if v is not None:
+                cfg[k] = v
 
         gen_config = OmniVoiceGenerationConfig(**cfg)
         kwargs = {"generation_config": gen_config}
@@ -79,9 +87,22 @@ async def clone_voice(
     name: str = Form(..., description="Voice name"),
     ref_text: str = Form(None, description="Audio transcript (auto-detected if empty)"),
     tags: str = Form("", description="Comma-separated tags"),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_session),
 ):
-    """Clone a voice from reference audio."""
-    # Save uploaded file to temp
+    """Clone voice — gắn với user đang đăng nhập + check plan limit voice_clone_max."""
+    # Check quota voice_clone_max
+    plan = await plan_svc.get_plan(db, user.plan or "free")
+    max_voices = plan_svc.get_limit(plan, "voice_clone_max", 1)
+    if max_voices != -1:
+        current = await voice_svc.get_all(db, user.id)
+        if len(current) >= max_voices:
+            raise HTTPException(
+                429,
+                f"Bạn đã đạt giới hạn {max_voices} giọng clone trong gói "
+                f"{plan.name if plan else 'hiện tại'}. Xoá giọng cũ hoặc nâng cấp gói.",
+            )
+
     suffix = "." + (audio.filename.split(".")[-1] if audio.filename else "wav")
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
         shutil.copyfileobj(audio.file, tmp)
@@ -89,7 +110,9 @@ async def clone_voice(
 
     try:
         tag_list = [t.strip() for t in tags.split(",") if t.strip()] if tags else []
-        meta = voice_svc.clone(
+        meta = await voice_svc.clone(
+            db,
+            user_id=user.id,
             audio_path=tmp_path,
             name=name,
             ref_text=ref_text or None,
@@ -101,25 +124,43 @@ async def clone_voice(
 
 
 @router.get("", response_model=VoiceListResponse)
-async def list_voices():
-    """List all saved voices."""
-    voices = voice_svc.get_all()
+async def list_voices(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_session),
+):
+    """List giọng của user hiện tại (admin thấy hết)."""
+    voices = await voice_svc.get_all(db, user.id, is_admin=(user.role == "admin"))
     return {"voices": voices, "total": len(voices)}
 
 
 @router.get("/{voice_id}", response_model=VoiceInfo)
-async def get_voice(voice_id: str):
-    """Get voice details."""
+async def get_voice(
+    voice_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_session),
+):
+    """Lấy detail 1 voice — check owner."""
     try:
-        return voice_svc.get_one(voice_id)
+        return await voice_svc.get_one(
+            db, voice_id, user.id, is_admin=(user.role == "admin")
+        )
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
 
 @router.delete("/{voice_id}")
-async def delete_voice(voice_id: str):
-    """Delete a saved voice."""
-    deleted = voice_svc.remove(voice_id)
+async def delete_voice(
+    voice_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_session),
+):
+    """Xoá voice — chỉ owner hoặc admin."""
+    try:
+        deleted = await voice_svc.remove(
+            db, voice_id, user.id, is_admin=(user.role == "admin")
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=403, detail=str(e))
     if not deleted:
-        raise HTTPException(status_code=404, detail="Voice not found")
+        raise HTTPException(status_code=404, detail="Giọng không tồn tại")
     return {"status": "deleted", "id": voice_id}

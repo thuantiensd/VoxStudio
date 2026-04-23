@@ -26,6 +26,7 @@ async def generate(
     user: User = ctx["user"]
     db: AsyncSession = ctx["db"]
     payload = {
+        "_owner_user_id": user.id,  # để handler check voice ownership
         "text": req.text,
         "voice_id": req.voice_id,
         "language": req.language,

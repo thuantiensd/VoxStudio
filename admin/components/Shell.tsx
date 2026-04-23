@@ -4,7 +4,7 @@ import { useRouter, usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import {
   LayoutDashboard, Users, ShieldAlert, Flag, Package,
-  Activity, LogOut, Heart,
+  Activity, LogOut, Heart, Mic2,
 } from "lucide-react";
 import { fetchMe, setToken } from "@/lib/api";
 
@@ -12,6 +12,7 @@ const NAV = [
   { href: "/",         label: "Dashboard",       icon: LayoutDashboard },
   { href: "/users",    label: "Người dùng",      icon: Users },
   { href: "/jobs",     label: "Tác vụ",          icon: Activity },
+  { href: "/voices",   label: "Giọng clone",     icon: Mic2 },
   { href: "/audit",    label: "Audit log",       icon: ShieldAlert },
   { href: "/flags",    label: "Feature flags",   icon: Flag },
   { href: "/plans",    label: "Gói dịch vụ",     icon: Package },
