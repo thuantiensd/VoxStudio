@@ -433,6 +433,7 @@ export default {
     tabs: {
       account: "Account",
       appearance: "Appearance",
+      plans: "Plans",
       billing: "Billing",
       usage: "Usage",
       notifications: "Notifications",

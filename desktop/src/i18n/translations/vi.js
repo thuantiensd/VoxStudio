@@ -433,6 +433,7 @@ export default {
     tabs: {
       account: "Tài khoản",
       appearance: "Giao diện",
+      plans: "Gói dịch vụ",
       billing: "Thanh toán",
       usage: "Sử dụng",
       notifications: "Thông báo",

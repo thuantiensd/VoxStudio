@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import {
   User, CreditCard, BarChart3, Bell, Lock, Server, Info, Loader2,
-  Palette, Sun, Moon, Monitor, KeyRound,
+  Palette, Sun, Moon, Monitor, KeyRound, Package,
 } from "lucide-react";
 import IntegrationsTab from "./settings/IntegrationsTab";
 import { useToast } from "../components/ui/Toast";
@@ -21,6 +21,7 @@ import { checkHealth, listPlans, fetchMe } from "../services/api";
 const TABS = [
   { id: "account", icon: User, tKey: "settings.tabs.account" },
   { id: "appearance", icon: Palette, tKey: "settings.tabs.appearance" },
+  { id: "plans", icon: Package, tKey: "settings.tabs.plans" },
   { id: "billing", icon: CreditCard, tKey: "settings.tabs.billing" },
   { id: "usage", icon: BarChart3, tKey: "settings.tabs.usage" },
   { id: "notifications", icon: Bell, tKey: "settings.tabs.notifications" },
@@ -132,11 +133,12 @@ export default function SettingsPage() {
           <div
             className="mx-auto p-8"
             style={{
-              maxWidth: (active === "billing" || active === "usage") ? 1100 : 672,
+              maxWidth: (active === "plans" || active === "usage") ? 1100 : 672,
             }}
           >
             {active === "account" && <AccountTab />}
             {active === "appearance" && <AppearanceTab />}
+            {active === "plans" && <PlansTab />}
             {active === "billing" && <BillingTab />}
             {active === "usage" && <UsageTab />}
             {active === "notifications" && <NotificationsTab />}
@@ -559,7 +561,12 @@ function PlanCard({ plan, isCurrent, highlighted, onUpgrade }) {
   );
 }
 
-function BillingTab() {
+/* ─────────────────────────────────────────────────────────
+   PlansTab — trang so sánh các gói dịch vụ, chọn nâng cấp.
+   Thuần marketing: 3 card + LTD banner + CTA "Chọn".
+   Click CTA → chuyển sang tab Thanh toán để checkout thật.
+   ───────────────────────────────────────────────────────── */
+function PlansTab() {
   const { user } = useAuth();
   const toast = useToast();
   const [plans, setPlans] = useState([]);
@@ -568,14 +575,13 @@ function BillingTab() {
   useEffect(() => {
     listPlans().then((res) => {
       setPlans(res?.plans || []);
-    }).catch(() => {
-      // Fallback: không lấy được từ server → hiển thị trạng thái tạm
-    }).finally(() => setLoading(false));
+    }).catch(() => {}).finally(() => setLoading(false));
   }, []);
 
   const onUpgrade = (plan) => {
+    // Chưa tích hợp payment gateway → toast thông báo
     toast?.info?.(
-      `Gói ${plan.name} sẽ ra mắt sớm. Theo dõi email để nhận thông báo + ưu đãi sớm.`,
+      `Thanh toán gói ${plan.name} sẽ ra mắt sớm. Theo dõi email để nhận ưu đãi sớm.`,
       { title: "Sắp mở thanh toán" }
     );
   };
@@ -596,7 +602,7 @@ function BillingTab() {
     );
   }
 
-  const highlightedId = "pro"; // Pro là hero plan
+  const highlightedId = "pro";
   const currentPlanId = user?.plan || "free";
 
   return (
@@ -607,7 +613,7 @@ function BillingTab() {
           Chọn gói phù hợp
         </h2>
         <p style={{ fontSize: 12.5, color: "var(--n-8)" }}>
-          Mọi gói đều cho phép bạn dùng <b>API key cá nhân</b> (OpenAI, Gemini,
+          Mọi gói đều cho phép dùng <b>API key cá nhân</b> (OpenAI, Gemini,
           Claude…) — không bị markup, bạn trả trực tiếp cho nhà cung cấp.
         </p>
       </div>
@@ -637,9 +643,152 @@ function BillingTab() {
         lineHeight: 1.55,
       }}>
         <b style={{ color: "var(--n-10)" }}>💡 Ưu đãi trọn đời (Early Believer)</b>{" "}
-        Chỉ 100 suất đầu — thanh toán 1 lần, dùng mãi mãi.
-        Khi hết 100 suất, giá sẽ trở về gói hàng tháng bình thường.
+        Chỉ 100 suất đầu cho mỗi gói — thanh toán 1 lần, dùng mãi mãi.
+        Khi hết suất, chỉ còn gói hàng tháng bình thường.
       </div>
+    </>
+  );
+}
+
+
+/* ─────────────────────────────────────────────────────────
+   BillingTab — quản lý thanh toán:
+     • Gói hiện tại + ngày hết hạn
+     • Phương thức thanh toán
+     • Hoá đơn / lịch sử giao dịch
+     • Huỷ / đổi gói
+   ───────────────────────────────────────────────────────── */
+function BillingTab() {
+  const { user } = useAuth();
+  const [me, setMe] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetchMe().then(setMe).catch(() => {}).finally(() => setLoading(false));
+  }, []);
+
+  if (loading) {
+    return (
+      <div className="flex items-center gap-2 text-sm"
+           style={{ color: "var(--n-8)" }}>
+        <Loader2 size={14} className="animate-spin" /> Đang tải…
+      </div>
+    );
+  }
+
+  const plan = me?.plan;
+  const planName = plan?.name || "Miễn phí";
+  const isFree = (user?.plan || "free") === "free";
+  const goPlans = () => {
+    try { window.location.hash = "#plans"; } catch {}
+  };
+
+  return (
+    <>
+      {/* Current plan card */}
+      <div style={{
+        padding: 20, borderRadius: 12,
+        background: isFree
+          ? "var(--n-1)"
+          : "linear-gradient(135deg, var(--accent-soft), rgba(139,92,246,0.05))",
+        border: `1px solid ${isFree ? "var(--n-3)" : "var(--accent)"}`,
+        marginBottom: 20,
+      }}>
+        <div style={{ display: "flex", justifyContent: "space-between",
+                       alignItems: "flex-start", gap: 16 }}>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 11, fontWeight: 600,
+                           color: "var(--n-7)",
+                           textTransform: "uppercase",
+                           letterSpacing: "0.08em",
+                           marginBottom: 4 }}>
+              Gói hiện tại
+            </div>
+            <div style={{ fontSize: 22, fontWeight: 700, color: "var(--n-10)",
+                           letterSpacing: "-0.02em" }}>
+              {planName}
+            </div>
+            {!isFree && plan?.price_vnd > 0 && (
+              <div style={{ fontSize: 13, color: "var(--n-8)", marginTop: 4 }}>
+                {formatVND(plan.price_vnd)}/tháng
+              </div>
+            )}
+            <div style={{ fontSize: 12, color: "var(--n-7)", marginTop: 8 }}>
+              {isFree
+                ? "Bạn đang dùng gói miễn phí. Nâng cấp để mở khoá toàn bộ tính năng."
+                : "Gói đang hoạt động. Xem chi tiết sử dụng ở tab Sử dụng."}
+            </div>
+          </div>
+          <button
+            onClick={goPlans}
+            style={{
+              padding: "9px 16px", borderRadius: 8,
+              background: isFree
+                ? "linear-gradient(135deg, var(--accent), #8b5cf6)"
+                : "var(--n-1)",
+              color: isFree ? "#fff" : "var(--accent)",
+              border: isFree ? "none" : "1px solid var(--accent)",
+              fontSize: 12.5, fontWeight: 600, cursor: "pointer",
+              whiteSpace: "nowrap",
+              boxShadow: isFree ? "0 4px 14px rgba(108,92,231,0.3)" : "none",
+            }}
+          >
+            {isFree ? "Nâng cấp ngay →" : "Đổi gói"}
+          </button>
+        </div>
+      </div>
+
+      {/* Payment method */}
+      <Section title="Phương thức thanh toán">
+        <Card>
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm" style={{ color: "var(--text-primary)" }}>
+                Chưa có phương thức thanh toán
+              </p>
+              <p className="text-xs mt-1" style={{ color: "var(--text-secondary)" }}>
+                Sẽ tự động yêu cầu khi bạn nâng cấp gói.
+              </p>
+            </div>
+            <GhostButton disabled style={{ opacity: 0.5, cursor: "not-allowed" }}>
+              Sắp ra mắt
+            </GhostButton>
+          </div>
+        </Card>
+      </Section>
+
+      {/* Invoices */}
+      <Section title="Lịch sử giao dịch">
+        <Card>
+          <div style={{ padding: "20px 0", textAlign: "center" }}>
+            <div style={{ fontSize: 13, color: "var(--n-7)" }}>
+              Chưa có giao dịch nào
+            </div>
+            <div style={{ fontSize: 11, color: "var(--n-7)", marginTop: 4 }}>
+              Hoá đơn sẽ hiện ở đây sau khi bạn thanh toán.
+            </div>
+          </div>
+        </Card>
+      </Section>
+
+      {/* Cancel subscription — chỉ hiện nếu đang có gói trả phí */}
+      {!isFree && (
+        <Section title="Quản lý gói">
+          <Card>
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm" style={{ color: "var(--text-primary)" }}>
+                  Huỷ gói {planName}
+                </p>
+                <p className="text-xs mt-1" style={{ color: "var(--text-secondary)" }}>
+                  Bạn sẽ chuyển về gói Miễn phí khi hết chu kỳ hiện tại.
+                </p>
+              </div>
+              <GhostButton danger>Huỷ gói</GhostButton>
+            </div>
+          </Card>
+        </Section>
+      )}
     </>
   );
 }
