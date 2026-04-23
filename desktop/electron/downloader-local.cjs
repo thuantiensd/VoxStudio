@@ -49,6 +49,37 @@ function resolveYtDlp() {
   return { cmd: plat === "win32" ? "yt-dlp.exe" : "yt-dlp", args: [] };
 }
 
+/**
+ * Resolve ffmpeg binary path — cần cho yt-dlp merge video+audio.
+ * Nếu không tìm thấy → yt-dlp sẽ không merge được, để lại 2 file rời.
+ * Trả null nếu không có.
+ */
+function resolveFfmpeg() {
+  const plat = process.platform;
+  const name = plat === "win32" ? "ffmpeg.exe" : "ffmpeg";
+  const candidates = [
+    // Bundled
+    process.resourcesPath
+      ? path.join(process.resourcesPath, "bin", name)
+      : null,
+    path.join(__dirname, "..", "bin", name),
+    // System
+    "/opt/homebrew/bin/ffmpeg",     // Apple Silicon Homebrew
+    "/usr/local/bin/ffmpeg",         // Intel Homebrew
+    "/usr/bin/ffmpeg",               // system
+    path.join(os.homedir(), "yes", "bin", "ffmpeg"),
+    path.join(os.homedir(), "miniconda3", "bin", "ffmpeg"),
+    path.join(os.homedir(), "anaconda3", "bin", "ffmpeg"),
+  ].filter(Boolean);
+  for (const p of candidates) {
+    try {
+      fs.accessSync(p, fs.constants.X_OK);
+      return p;
+    } catch {}
+  }
+  return null;
+}
+
 /** yt-dlp format selector — ưu tiên H.264 sẵn để không cần transcode. */
 function buildFormatSelector(maxHeight = 1080, prefer264 = true) {
   const h = Math.max(240, Math.min(2160, parseInt(maxHeight) || 1080));
@@ -110,6 +141,9 @@ function download(opts) {
     outTemplate = path.join(folder, "%(title).180s.%(ext)s");
   }
 
+  // ffmpeg cần thiết để yt-dlp merge video+audio thành 1 file
+  const ffmpegPath = resolveFfmpeg();
+
   const args = [
     ...preArgs,
     "--no-playlist",
@@ -123,6 +157,11 @@ function download(opts) {
     "--concurrent-fragments", "8",
     "--retries", "3",
   ];
+
+  // Pass ffmpeg path explicit (app bundle PATH cleanroom không có ffmpeg)
+  if (ffmpegPath) {
+    args.push("--ffmpeg-location", ffmpegPath);
+  }
 
   if (transcode) {
     // Post-process: ffmpeg convert sang H.264 sau download (heavy trên máy yếu)
@@ -142,6 +181,16 @@ function download(opts) {
   let finalPath = null;
   let lastStep = "starting";
   const emit = (evt) => { try { onProgress(evt); } catch {} };
+
+  if (!ffmpegPath) {
+    return {
+      promise: Promise.reject(new Error(
+        "Máy bạn chưa cài ffmpeg — cần để ghép video + audio. " +
+        "Mở Terminal và chạy: brew install ffmpeg"
+      )),
+      cancel: () => {},
+    };
+  }
 
   emit({ step: "starting", label: "Khởi động…", progress: 0 });
 
@@ -274,4 +323,4 @@ function fetchInfo(url) {
   });
 }
 
-module.exports = { download, fetchInfo, resolveYtDlp };
+module.exports = { download, fetchInfo, resolveYtDlp, resolveFfmpeg };

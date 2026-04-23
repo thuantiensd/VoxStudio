@@ -463,6 +463,7 @@ ipcMain.handle("download:local:cancel", async (_e, id) => {
 
 ipcMain.handle("download:local:status", () => ({
   ytdlp: _dl.resolveYtDlp().cmd,
+  ffmpeg: _dl.resolveFfmpeg(),
   activeCount: _activeDownloads.size,
 }));
 
