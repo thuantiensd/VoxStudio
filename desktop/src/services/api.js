@@ -353,7 +353,7 @@ export function autoDub(projectId, { engine = 'google', onProgress, onDone, onEr
   return fetch(url, {
     method: 'POST',
     signal,
-    headers: { 'ngrok-skip-browser-warning': 'true' },
+    headers: buildHeaders(),  // kèm Authorization Bearer + ngrok-skip
   }).then(async (res) => {
     if (!res.ok) {
       const body = await res.json().catch(() => ({ detail: res.statusText }));
@@ -379,7 +379,7 @@ export function autoDub(projectId, { engine = 'google', onProgress, onDone, onEr
               const data = JSON.parse(line.slice(6));
               if (data.step) lastStep = data.step;
               if (data.step === 'error' && onError) {
-                onError(new AppError(data.label || 'Pipeline error', {
+                onError(new AppError(data.label || data.error || 'Pipeline error', {
                   kind: 'pipeline', data: { step: lastStep },
                 }));
               } else if (data.step === 'canceled') {

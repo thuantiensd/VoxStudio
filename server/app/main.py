@@ -10,6 +10,7 @@ from app.api.v1.router import api_router
 from app.config import DEVICE, DTYPE
 from app.core.gpu_manager import gpu
 from app.db.session import init_db
+from app.db.migrations import run_migrations
 
 # Load .env (JWT_SECRET + GOOGLE_OAUTH_CLIENT_ID/SECRET)
 try:
@@ -31,9 +32,14 @@ async def lifespan(app: FastAPI):
     logger.info("Starting VoxStudio Server...")
     logger.info("Device: %s | Dtype: %s", DEVICE, DTYPE)
     await init_db()
+    await run_migrations()  # alter users cols + seed plans + promote admins from ENV
+    # Job queue worker — 1 thread chung cho mọi GPU-bound task
+    from app.worker.gpu_worker import start_worker, stop_worker
+    start_worker()
     gpu.load_all()
     yield
     logger.info("Shutting down.")
+    stop_worker()
 
 
 app = FastAPI(

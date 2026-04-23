@@ -28,6 +28,17 @@ async def get_current_user(
     return user
 
 
+async def require_admin(
+    user: User = Depends(get_current_user),
+) -> User:
+    """Dep: chỉ admin mới pass. Raise 403 nếu không."""
+    if user.is_banned:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Tài khoản đã bị khoá")
+    if user.role != "admin":
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Chỉ admin mới có quyền truy cập")
+    return user
+
+
 async def get_current_user_optional(
     request: Request,
     db: AsyncSession = Depends(get_session),

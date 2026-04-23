@@ -3,15 +3,20 @@
 import json
 import logging
 
-from fastapi import APIRouter, Body, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.dubbing_schemas import (
     ExportOptions, MergeRequest, SegmentUpdate, SplitRequest, SubtitleStyle,
 )
 import os
 
-from app.services import dubbing_svc, edge_tts_svc, gemini_translate_svc, ingest_svc
+from app.auth.deps import get_current_user
+from app.auth.rate_limit import require_quota
+from app.db.models import User
+from app.db.session import get_session
+from app.services import dubbing_svc, edge_tts_svc, gemini_translate_svc, ingest_svc, job_svc
 
 logger = logging.getLogger(__name__)
 
@@ -338,42 +343,75 @@ async def set_gemini_key(body: dict):
 # ── Auto-Dub Pipeline ─────────────────────────────
 
 @router.post("/projects/{project_id}/auto-dub")
-async def auto_dub(project_id: str, engine: str = "google"):
-    """Run full pipeline: Demucs → Whisper → Translate → TTS → Export.
+async def auto_dub(
+    project_id: str,
+    engine: str = "google",
+    ctx: dict = Depends(require_quota("dubbing")),
+):
+    """Enqueue dubbing job vào GPU queue rồi stream SSE progress luôn
+    trong cùng HTTP response — backward compat với FE cũ đang đọc SSE.
 
-    Chạy sync generator auto_dub trong thread riêng, bridge qua asyncio.Queue
-    để event_generator await → mỗi item được flush ra SSE ngay, không bị
-    block bởi time.sleep hoặc blocking step bên trong.
+    Client POST → enqueue + subscribe worker → SSE format như cũ, có thêm
+    event 'queued' với queue_position + eta_seconds ở đầu.
     """
     import asyncio
-    import threading
+    from app.db.session import AsyncSessionLocal
+    from app.worker import gpu_worker
+
+    user: User = ctx["user"]
+    db: AsyncSession = ctx["db"]
+
+    # Enqueue ngay — lấy job.id rồi subscribe worker publisher
+    job = await job_svc.enqueue(
+        db,
+        user_id=user.id,
+        kind="dubbing",
+        payload={"project_id": project_id, "engine": engine},
+    )
+    job_id = job.id
+    position = await job_svc.get_queue_position(db, job_id)
+    eta = await job_svc.estimate_wait_seconds(db, job_id)
 
     async def event_generator():
-        loop = asyncio.get_running_loop()
-        queue: asyncio.Queue = asyncio.Queue()
-        SENTINEL = object()
+        # 1. Initial queue position
+        yield f"data: {json.dumps({'step': 'queued', 'job_id': job_id, 'queue_position': position, 'eta_seconds': eta, 'progress': 0})}\n\n"
 
-        def producer():
+        # 2. Subscribe to worker events
+        q = gpu_worker.subscribe(job_id)
+
+        async def emit_position_updates():
+            """Trong lúc vẫn pending, đẩy queue_position update mỗi 3s."""
             try:
-                for update in dubbing_svc.auto_dub(project_id, engine=engine):
-                    loop.call_soon_threadsafe(queue.put_nowait, update)
-            except ValueError as e:
-                loop.call_soon_threadsafe(queue.put_nowait,
-                    {"step": "error", "label": str(e), "progress": -1})
-            except Exception as e:
-                loop.call_soon_threadsafe(queue.put_nowait,
-                    {"step": "error", "label": str(e), "progress": -1})
-            finally:
-                loop.call_soon_threadsafe(queue.put_nowait, SENTINEL)
+                while True:
+                    await asyncio.sleep(3.0)
+                    async with AsyncSessionLocal() as db2:
+                        j = await db2.get(Job, job_id)
+                        if not j or j.status != "pending":
+                            return
+                        pos = await job_svc.get_queue_position(db2, job_id)
+                        e = await job_svc.estimate_wait_seconds(db2, job_id)
+                    await q.put({
+                        "step": "queued", "job_id": job_id,
+                        "queue_position": pos, "eta_seconds": e,
+                        "progress": 0,
+                    })
+            except asyncio.CancelledError:
+                return
 
-        threading.Thread(target=producer, daemon=True).start()
+        pos_task = asyncio.create_task(emit_position_updates())
 
-        while True:
-            item = await queue.get()
-            if item is SENTINEL:
-                break
-            yield f"data: {json.dumps(item)}\n\n"
+        try:
+            while True:
+                event = await q.get()
+                yield f"data: {json.dumps(event)}\n\n"
+                step = event.get("step")
+                if step in ("done", "error", "canceled"):
+                    break
+        finally:
+            pos_task.cancel()
+            gpu_worker.unsubscribe(job_id, q)
 
+    from app.db.models import Job  # local import để tránh circular
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 
