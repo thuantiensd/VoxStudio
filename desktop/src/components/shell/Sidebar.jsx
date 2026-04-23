@@ -5,7 +5,7 @@ import {
   Clapperboard, Mic2, AudioWaveform, Library,
   ClockFading, Settings as Cog, CloudDownload,
   FileText,
-  Sun, Moon, Monitor, LogIn, LogOut, User as UserIcon,
+  Sun, Moon, Monitor, LogOut, User as UserIcon,
 } from "lucide-react";
 import { useBatch } from "../../batch/BatchContext";
 import { useT } from "../../i18n/I18nContext";
@@ -202,12 +202,11 @@ function NavItem({ item, active, onClick, badge }) {
 }
 
 /**
- * BrandUserBlock — top of sidebar. Click để mở popover:
- *  - Guest: hiện "Đăng nhập" + "Đăng ký"
- *  - Logged in: hiện avatar, name, email, "Đăng xuất"
+ * BrandUserBlock — top of sidebar. Click mở popover tài khoản (luôn đã đăng nhập
+ * vì route đã được ProtectedRoute bọc).
  */
 function BrandUserBlock() {
-  const { user, isAuthenticated, logout } = useAuth() || {};
+  const { user, logout } = useAuth() || {};
   const nav = useNavigate();
   const [open, setOpen] = useState(false);
   const rootRef = useRef(null);
@@ -222,6 +221,7 @@ function BrandUserBlock() {
   }, [open]);
 
   const initial = (user?.name || user?.email || "?")[0].toUpperCase();
+  const hasAvatar = !!user?.avatar;
 
   return (
     <div ref={rootRef} style={{ position: "relative",
@@ -238,27 +238,24 @@ function BrandUserBlock() {
           className="rounded-md flex items-center justify-center flex-shrink-0 overflow-hidden"
           style={{
             width: 22, height: 22,
-            background: isAuthenticated && !user?.avatar
-              ? "linear-gradient(135deg, var(--accent), #8b5cf6)"
-              : "transparent",
+            background: hasAvatar
+              ? "transparent"
+              : "linear-gradient(135deg, var(--accent), #8b5cf6)",
             fontSize: 10, fontWeight: 700, color: "#fff",
           }}
         >
-          {isAuthenticated
-            ? (user?.avatar
-                ? <img src={user.avatar} alt="" style={{ width: "100%", height: "100%", borderRadius: 6 }} />
-                : initial)
-            : <img src="/favicon.svg" alt=""
-                   style={{ width: "100%", height: "100%" }} />}
+          {hasAvatar
+            ? <img src={user.avatar} alt="" style={{ width: "100%", height: "100%", borderRadius: 6 }} />
+            : initial}
         </div>
         <div className="flex flex-col leading-tight min-w-0 flex-1">
           <span className="text-[13px] font-semibold truncate"
                 style={{ color: "var(--n-10)" }}>
-            {isAuthenticated ? (user?.name || user?.email) : "VoxStudio"}
+            {user?.name || user?.email}
           </span>
           <span className="text-[10px] truncate"
                 style={{ color: "var(--n-8)" }}>
-            {isAuthenticated ? user?.email : "Khách · đăng nhập để mở khoá"}
+            {user?.email}
           </span>
         </div>
       </button>
@@ -276,28 +273,13 @@ function BrandUserBlock() {
             zIndex: 60,
           }}
         >
-          {isAuthenticated ? (
-            <>
-              <div style={{ padding: "8px 10px", fontSize: 11, color: "var(--n-8)" }}>
-                Đã đăng nhập · {user?.plan || "free"}
-              </div>
-              <MenuItem icon={UserIcon} label="Cài đặt tài khoản"
-                        onClick={() => { nav("/settings"); setOpen(false); }} />
-              <MenuItem icon={LogOut} label="Đăng xuất" danger
-                        onClick={() => { logout(); setOpen(false); }} />
-            </>
-          ) : (
-            <>
-              <div style={{ padding: "8px 10px", fontSize: 11, color: "var(--n-8)",
-                             lineHeight: 1.5 }}>
-                Một số tính năng cao cấp cần đăng nhập (sync, cloud AI, quota lớn).
-              </div>
-              <MenuItem icon={LogIn} label="Đăng nhập" primary
-                        onClick={() => { nav("/login"); setOpen(false); }} />
-              <MenuItem icon={UserIcon} label="Đăng ký"
-                        onClick={() => { nav("/signup"); setOpen(false); }} />
-            </>
-          )}
+          <div style={{ padding: "8px 10px", fontSize: 11, color: "var(--n-8)" }}>
+            Gói {user?.plan || "Free"}
+          </div>
+          <MenuItem icon={UserIcon} label="Cài đặt tài khoản"
+                    onClick={() => { nav("/settings"); setOpen(false); }} />
+          <MenuItem icon={LogOut} label="Đăng xuất" danger
+                    onClick={() => { logout(); setOpen(false); }} />
         </div>
       )}
     </div>

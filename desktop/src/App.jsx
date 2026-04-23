@@ -11,7 +11,7 @@ import STTPage from "./pages/STTPage";
 
 import LoginPage from "./auth/LoginPage";
 import SignupPage from "./auth/SignupPage";
-import { AuthProvider } from "./auth/AuthContext";
+import { AuthProvider, useAuth } from "./auth/AuthContext";
 import { I18nProvider } from "./i18n/I18nContext";
 import { ThemeProvider } from "./theme/ThemeContext";
 import { BatchProvider } from "./batch/BatchContext";
@@ -37,6 +37,25 @@ function Shell() {
   );
 }
 
+/**
+ * ProtectedRoute — bắt buộc đăng nhập. Chưa auth thì redirect về /login.
+ */
+function ProtectedRoute({ children }) {
+  const { isAuthenticated } = useAuth();
+  if (!isAuthenticated) return <Navigate to="/login" replace />;
+  return children;
+}
+
+/**
+ * PublicOnlyRoute — ngược lại: đã login rồi thì không cho quay lại /login,
+ * /signup (redirect về home).
+ */
+function PublicOnlyRoute({ children }) {
+  const { isAuthenticated } = useAuth();
+  if (isAuthenticated) return <Navigate to="/" replace />;
+  return children;
+}
+
 export default function App() {
   return (
     <ErrorBoundary>
@@ -48,11 +67,10 @@ export default function App() {
       <BatchProvider>
         <BrowserRouter>
           <Routes>
-            <Route path="/login" element={<LoginPage />} />
-            <Route path="/signup" element={<SignupPage />} />
-            {/* Guest-friendly — app mở được cho cả user chưa login.
-                Các feature yêu cầu account sẽ gate riêng (isAuthenticated check). */}
-            <Route path="/*" element={<Shell />} />
+            <Route path="/login"  element={<PublicOnlyRoute><LoginPage  /></PublicOnlyRoute>} />
+            <Route path="/signup" element={<PublicOnlyRoute><SignupPage /></PublicOnlyRoute>} />
+            {/* Bắt buộc đăng nhập để vào app */}
+            <Route path="/*" element={<ProtectedRoute><Shell /></ProtectedRoute>} />
           </Routes>
         </BrowserRouter>
       </BatchProvider>

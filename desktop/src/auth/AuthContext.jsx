@@ -2,10 +2,11 @@ import { createContext, useContext, useEffect, useState, useCallback } from "rea
 import { SERVER_URL } from "../services/api";
 
 /**
- * Auth context — gọi backend thật, lưu JWT + user trong localStorage.
+ * Auth context — gọi API, lưu JWT + user trong localStorage.
  *
- * App cho phép dùng khi CHƯA ĐĂNG NHẬP — isAuthenticated=false → các feature
- * cao cấp (API keys, quota lớn…) sẽ tự disable và hiện CTA "Đăng nhập".
+ * App BẮT BUỘC đăng nhập. ProtectedRoute ở App.jsx redirect về /login khi
+ * isAuthenticated=false. Context chỉ để các page lấy user.name / user.email
+ * và trigger logout.
  */
 
 const STORAGE_KEY = "voxstudio:auth";
