@@ -45,8 +45,8 @@ export default function Sidebar() {
         borderRight: "1px solid var(--n-3)",
       }}
     >
-      {/* Brand + user menu */}
-      <BrandUserBlock />
+      {/* Brand header — static, không click */}
+      <BrandHeader />
 
       {/* Nav sections */}
       <nav className="flex-1 overflow-y-auto px-2 pt-3 pb-2">
@@ -73,20 +73,8 @@ export default function Sidebar() {
         ))}
       </nav>
 
-      {/* Footer — settings + theme toggle + info popover */}
-      <div className="px-2 py-2"
-           style={{ borderTop: "1px solid var(--n-3)" }}>
-        <div className="flex items-center gap-1">
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <NavItem
-              item={{ path: "/settings", icon: Cog, label: t("shell.titleSettings"), hotkey: "," }}
-              active={isActive(loc.pathname, "/settings")}
-              onClick={() => nav("/settings")}
-            />
-          </div>
-          <ThemeToggle />
-        </div>
-      </div>
+      {/* Footer — user block (click → popover với Cài đặt + Đăng xuất) + theme toggle */}
+      <UserFooter />
     </aside>
   );
 }
@@ -202,10 +190,33 @@ function NavItem({ item, active, onClick, badge }) {
 }
 
 /**
- * BrandUserBlock — top of sidebar. Click mở popover tài khoản (luôn đã đăng nhập
- * vì route đã được ProtectedRoute bọc).
+ * BrandHeader — top of sidebar. Chỉ là branding tĩnh (logo V-Pearl + tên app).
  */
-function BrandUserBlock() {
+function BrandHeader() {
+  return (
+    <div
+      className="flex items-center gap-2 px-3.5 py-3.5"
+      style={{ borderBottom: "1px solid var(--n-3)" }}
+    >
+      <img
+        src="/favicon.svg"
+        alt=""
+        style={{ width: 22, height: 22, flexShrink: 0 }}
+      />
+      <span className="text-[14px] font-semibold truncate"
+            style={{ color: "var(--n-10)", letterSpacing: "-0.01em" }}>
+        VoxStudio
+      </span>
+    </div>
+  );
+}
+
+/**
+ * UserFooter — bottom of sidebar. User avatar + name + email. Click → popover
+ * (mở UPWARD vì nằm bottom) chứa Cài đặt tài khoản + Đăng xuất. Theme toggle
+ * đứng cạnh bên phải.
+ */
+function UserFooter() {
   const { user, logout } = useAuth() || {};
   const nav = useNavigate();
   const [open, setOpen] = useState(false);
@@ -224,47 +235,61 @@ function BrandUserBlock() {
   const hasAvatar = !!user?.avatar;
 
   return (
-    <div ref={rootRef} style={{ position: "relative",
-                                  borderBottom: "1px solid var(--n-3)" }}>
-      <button
-        onClick={() => setOpen((o) => !o)}
-        className="w-full flex items-center gap-2 px-3.5 py-3.5 transition-colors"
-        style={{ background: "transparent", border: "none", cursor: "pointer",
-                  textAlign: "left" }}
-        onMouseEnter={(e) => { e.currentTarget.style.background = "var(--n-2)"; }}
-        onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
-      >
-        <div
-          className="rounded-md flex items-center justify-center flex-shrink-0 overflow-hidden"
+    <div
+      ref={rootRef}
+      className="px-2 py-2"
+      style={{ borderTop: "1px solid var(--n-3)", position: "relative" }}
+    >
+      <div className="flex items-center gap-1">
+        <button
+          onClick={() => setOpen((o) => !o)}
+          className="flex items-center gap-2 rounded-md transition-colors"
           style={{
-            width: 22, height: 22,
-            background: hasAvatar
-              ? "transparent"
-              : "linear-gradient(135deg, var(--accent), #8b5cf6)",
-            fontSize: 10, fontWeight: 700, color: "#fff",
+            flex: 1, minWidth: 0,
+            padding: "6px 8px",
+            background: open ? "var(--n-2)" : "transparent",
+            border: "none", cursor: "pointer", textAlign: "left",
+          }}
+          onMouseEnter={(e) => {
+            if (!open) e.currentTarget.style.background = "var(--n-2)";
+          }}
+          onMouseLeave={(e) => {
+            if (!open) e.currentTarget.style.background = "transparent";
           }}
         >
-          {hasAvatar
-            ? <img src={user.avatar} alt="" style={{ width: "100%", height: "100%", borderRadius: 6 }} />
-            : initial}
-        </div>
-        <div className="flex flex-col leading-tight min-w-0 flex-1">
-          <span className="text-[13px] font-semibold truncate"
-                style={{ color: "var(--n-10)" }}>
-            {user?.name || user?.email}
-          </span>
-          <span className="text-[10px] truncate"
-                style={{ color: "var(--n-8)" }}>
-            {user?.email}
-          </span>
-        </div>
-      </button>
+          <div
+            className="rounded-md flex items-center justify-center flex-shrink-0 overflow-hidden"
+            style={{
+              width: 24, height: 24,
+              background: hasAvatar
+                ? "transparent"
+                : "linear-gradient(135deg, var(--accent), #8b5cf6)",
+              fontSize: 11, fontWeight: 700, color: "#fff",
+            }}
+          >
+            {hasAvatar
+              ? <img src={user.avatar} alt="" style={{ width: "100%", height: "100%", borderRadius: 6 }} />
+              : initial}
+          </div>
+          <div className="flex flex-col leading-tight min-w-0 flex-1">
+            <span className="text-[12.5px] font-semibold truncate"
+                  style={{ color: "var(--n-10)" }}>
+              {user?.name || user?.email}
+            </span>
+            <span className="text-[10px] truncate"
+                  style={{ color: "var(--n-7)" }}>
+              {user?.email}
+            </span>
+          </div>
+        </button>
+        <ThemeToggle />
+      </div>
 
       {open && (
         <div
           style={{
-            position: "absolute", top: "100%", left: 8, right: 8,
-            marginTop: 4,
+            position: "absolute", bottom: "calc(100% + 4px)",
+            left: 8, right: 8,
             background: "var(--n-1)",
             border: "1px solid var(--n-3)",
             borderRadius: 8,
@@ -276,8 +301,11 @@ function BrandUserBlock() {
           <div style={{ padding: "8px 10px", fontSize: 11, color: "var(--n-8)" }}>
             Gói {user?.plan || "Free"}
           </div>
-          <MenuItem icon={UserIcon} label="Cài đặt tài khoản"
+          <MenuItem icon={Cog} label="Cài đặt"
                     onClick={() => { nav("/settings"); setOpen(false); }} />
+          <MenuItem icon={UserIcon} label="Tài khoản"
+                    onClick={() => { nav("/settings#account"); setOpen(false); }} />
+          <div style={{ height: 1, background: "var(--n-3)", margin: "4px 4px" }} />
           <MenuItem icon={LogOut} label="Đăng xuất" danger
                     onClick={() => { logout(); setOpen(false); }} />
         </div>
