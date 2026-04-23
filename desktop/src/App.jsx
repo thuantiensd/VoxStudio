@@ -18,6 +18,7 @@ import { BatchProvider } from "./batch/BatchContext";
 import { ToastProvider } from "./components/ui/Toast";
 import ErrorBoundary from "./components/ui/ErrorBoundary";
 import GlobalErrorHook from "./components/ui/GlobalErrorHook";
+import QuotaMonitor from "./components/QuotaMonitor";
 
 function Shell() {
   return (
@@ -64,6 +65,7 @@ export default function App() {
       <ToastProvider>
       <GlobalErrorHook />
       <AuthProvider>
+      <QuotaMonitor />
       <BatchProvider>
         <BrowserRouter>
           <Routes>
