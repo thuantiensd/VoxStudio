@@ -68,6 +68,13 @@
       "build/icons/**/*",
       "package.json"
     ],
+    "extraResources": [
+      {
+        "from": "bin/",
+        "to": "bin/",
+        "filter": ["**/*"]
+      }
+    ],
     "mac": {
       "category": "public.app-category.video",
       "icon": "build/icons/icon.icns",

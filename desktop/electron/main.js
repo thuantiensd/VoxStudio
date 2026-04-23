@@ -411,6 +411,61 @@ ipcMain.handle("updater:quitAndInstall", () => {
   if (_updaterApi) _updaterApi.quitAndInstall(false, true);
 });
 
+// ── Local yt-dlp downloader ─────────────────────────────
+// Tải video trên máy user (0 load server).
+const _dl = require_("./downloader-local.cjs");
+const _activeDownloads = new Map(); // id → { cancel }
+
+ipcMain.handle("download:local:fetchInfo", async (_e, url) => {
+  return _dl.fetchInfo(url);
+});
+
+ipcMain.handle("download:local:start", async (event, opts = {}) => {
+  const id = `dl_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  const { promise, cancel } = _dl.download({
+    ...opts,
+    onProgress: (p) => {
+      try {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send("download:local:progress", { id, ...p });
+        }
+      } catch {}
+    },
+  });
+  _activeDownloads.set(id, { cancel });
+  // Không await — trả id ngay, kết quả gửi qua progress event
+  promise
+    .then((result) => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send("download:local:progress",
+          { id, step: "done", progress: 100, path: result?.path });
+      }
+    })
+    .catch((e) => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send("download:local:progress",
+          { id, step: "error", error: e?.message || String(e) });
+      }
+    })
+    .finally(() => _activeDownloads.delete(id));
+  return { id };
+});
+
+ipcMain.handle("download:local:cancel", async (_e, id) => {
+  const entry = _activeDownloads.get(id);
+  if (entry) {
+    entry.cancel();
+    _activeDownloads.delete(id);
+    return true;
+  }
+  return false;
+});
+
+ipcMain.handle("download:local:status", () => ({
+  ytdlp: _dl.resolveYtDlp().cmd,
+  activeCount: _activeDownloads.size,
+}));
+
 // Menu (minimal, system-native feel)
 const template = [
   ...(process.platform === "darwin"

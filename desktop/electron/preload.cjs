@@ -40,6 +40,19 @@ contextBridge.exposeInMainWorld("voxstudio", {
   notify: (opts) => ipcRenderer.invoke("notify:show", opts),
   setBadge: (count) => ipcRenderer.invoke("badge:set", count),
 
+  // Local downloader (yt-dlp chạy trên máy user, không qua server)
+  downloader: {
+    fetchInfo: (url) => ipcRenderer.invoke("download:local:fetchInfo", url),
+    start: (opts) => ipcRenderer.invoke("download:local:start", opts),
+    cancel: (id) => ipcRenderer.invoke("download:local:cancel", id),
+    status: () => ipcRenderer.invoke("download:local:status"),
+    onProgress: (cb) => {
+      const listener = (_e, payload) => cb(payload);
+      ipcRenderer.on("download:local:progress", listener);
+      return () => ipcRenderer.removeListener("download:local:progress", listener);
+    },
+  },
+
   // Auto-update
   updater: {
     check: () => ipcRenderer.invoke("updater:check"),

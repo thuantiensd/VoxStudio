@@ -79,6 +79,18 @@ export default function DownloaderPage() {
     try { userStorage.setItem(RES_KEY, String(v)); } catch {}
   };
 
+  // Transcode H.264 toggle — mặc định OFF (nhẹ máy), ON khi user cần
+  // tương thích QuickTime/iMovie cũ
+  const TRANSCODE_KEY = "voxstudio:download:transcodeH264";
+  const [transcodeH264, setTranscodeH264] = useState(() => {
+    try { return userStorage.getItem(TRANSCODE_KEY) === "1"; }
+    catch { return false; }
+  });
+  const setTranscodePersist = (v) => {
+    setTranscodeH264(v);
+    try { userStorage.setItem(TRANSCODE_KEY, v ? "1" : "0"); } catch {}
+  };
+
   const [downloading, setDownloading] = useState(false);
   const [progress, _setProgress] = useState(0);
   const [progressLabel, setProgressLabel] = useState("");
@@ -261,86 +273,88 @@ export default function DownloaderPage() {
     setSaveAsOpen(true);
   });
 
-  // "Tải về máy" = chạy FULL pipeline backend (yt-dlp download + merge
-  // audio + transcode AV1→H.264) thành 1 project tạm, rồi copy file
-  // original.mp4 sang folder user chọn, cuối cùng xoá project để không
-  // lẫn vào Studio.
+  // "Tải về máy" — chạy yt-dlp LOCAL trên máy user (không qua server).
+  // Lợi: 0 bandwidth server, 0 IP ban risk, unlimited cho mọi user.
+  // Mặc định KHÔNG transcode (giữ codec gốc) → nhẹ máy, nhanh.
+  // Toggle "Tương thích cao" bật transcode H.264 cho QuickTime old Mac.
+  const localDlIdRef = useRef(null);
   const doDownloadToFolder = async ({ folder, filename, overwrite }) => {
     setSaveAsOpen(false);
+
+    // Fallback server nếu không chạy trong Electron (rare — web preview)
+    if (!window.voxstudio?.downloader?.start) {
+      toast.warn("Tải về máy yêu cầu chạy trong app desktop.");
+      return;
+    }
+
     setDownloading(true);
     setProgress(0);
-    setProgressLabel("Đang chuẩn bị…");
+    setProgressLabel("Khởi động…");
     setProgressDetail("");
-    const controller = new AbortController();
-    abortRef.current = controller;
 
-    let createdProjectId = null;
-    try {
-      // 1. Chạy pipeline download → project (có transcode)
-      await new Promise((resolve, reject) => {
-        let settled = false;
-        const settle = (fn) => (v) => { if (!settled) { settled = true; fn(v); } };
-        const safeResolve = settle(resolve);
-        const safeReject = settle(reject);
-        downloadToProject({
+    // Subscribe progress events
+    const offProgress = window.voxstudio.downloader.onProgress((p) => {
+      if (p.id !== localDlIdRef.current) return;
+      if (p.step === "starting")
+        setProgressLabel("Khởi động yt-dlp…");
+      else if (p.step === "downloading") {
+        setProgressLabel("Đang tải…");
+        setProgressDetail(
+          [p.speed, p.eta && `ETA ${p.eta}`].filter(Boolean).join(" · ")
+        );
+        if (typeof p.progress === "number") setProgress(p.progress);
+      } else if (p.step === "merging") {
+        setProgressLabel("Ghép video + audio…");
+        setProgress(95);
+      } else if (p.step === "transcoding") {
+        setProgressLabel("Chuyển mã H.264…");
+        setProgressDetail("Xử lý local, CPU cao tạm thời");
+        setProgress(97);
+      } else if (p.step === "done") {
+        setProgress(100);
+        setProgressLabel("Hoàn tất");
+        pushHistory({
           url: url.trim(),
-          useWatermark: !preferNoWM,
-          engine,
-          maxHeight,
-          signal: controller.signal,
-          onProgress: (d) => {
-            if (d.label) setProgressLabel(d.label);
-            if (d.detail) setProgressDetail(d.detail);
-            if (typeof d.progress === "number" && d.progress >= 0) {
-              // 0-92% = download+transcode, 92-100% = save to folder
-              setProgress(Math.min(92, d.progress * 0.92));
-            }
-          },
-          onDone: (d) => {
-            if (d?.project_id) {
-              createdProjectId = d.project_id;
-              safeResolve(d);
-            }
-          },
-          onError: safeReject,
-        }).catch(safeReject);
-      });
+          path: p.path,
+          title: info?.title,
+          thumbnail: info?.thumbnail,
+          platform: info?.platform,
+          duration: info?.duration,
+          at: Date.now(),
+          kind: "folder",
+        });
+        toast.success(`Đã lưu: ${p.path}`, { duration: 6000 });
+        offProgress?.();
+        reset();
+      } else if (p.step === "error") {
+        toast.error(p.error || "Không tải được video", { title: "Lỗi tải" });
+        offProgress?.();
+        reset();
+      }
+    });
 
-      if (!createdProjectId) throw new Error("Pipeline không trả project_id.");
-
-      // 2. Copy file original.mp4 từ backend sang folder user
-      setProgressLabel("Đang lưu file…");
-      setProgress(94);
-      const path = await window.voxstudio.saveRemoteFileToFolder({
-        url: dubbingVideoURL(createdProjectId),
-        folder, filename, overwrite,
-      });
-      setProgress(100);
-
-      // 3. Xoá project tạm (không block UX nếu fail)
-      deleteDubbingProject(createdProjectId).catch(() => {});
-
-      pushHistory({
+    try {
+      const { id } = await window.voxstudio.downloader.start({
         url: url.trim(),
-        path,
-        title: info?.title,
-        thumbnail: info?.thumbnail,
-        platform: info?.platform,
-        duration: info?.duration,
-        at: Date.now(),
-        kind: "folder",
+        folder,
+        filename,            // custom name từ SaveAsModal (optional)
+        maxHeight,
+        prefer264: true,     // ưu tiên H.264 sẵn (không transcode)
+        transcode: transcodeH264,  // user toggle
       });
-      toast.success(`Đã lưu: ${path}`, { duration: 6000 });
+      localDlIdRef.current = id;
+      abortRef.current = {
+        abort: () => {
+          window.voxstudio.downloader.cancel(id).catch(() => {});
+          offProgress?.();
+        },
+      };
     } catch (e) {
-      if (e?.name !== "AbortError") {
-        showError(toast, e, { context: "save to folder" }, t);
-      }
-      // Dọn project tạm nếu lỗi giữa chừng
-      if (createdProjectId) {
-        deleteDubbingProject(createdProjectId).catch(() => {});
-      }
+      offProgress?.();
+      toast.error(e?.message || "Không khởi động được yt-dlp",
+                   { title: "Lỗi" });
+      reset();
     }
-    reset();
   };
 
   return (
@@ -363,6 +377,8 @@ export default function DownloaderPage() {
           onEngine={setEnginePersist}
           maxHeight={maxHeight}
           onMaxHeight={setMaxHeightPersist}
+          transcodeH264={transcodeH264}
+          onTranscode={setTranscodePersist}
           t={t}
         />
 
@@ -529,7 +545,8 @@ export default function DownloaderPage() {
 // ── Hero URL input ───────────────────────────────────────────
 function HeroInput({ url, onUrl, onPaste, onAnalyze, fetching, disabled,
                      inputRef, engine, onEngine,
-                     maxHeight, onMaxHeight, t }) {
+                     maxHeight, onMaxHeight,
+                     transcodeH264, onTranscode, t }) {
   const valid = /^https?:\/\/\S+$/i.test(url.trim());
   const engineOptions = [
     { value: "auto",    label: t("downloader.engineAuto"),    hint: t("downloader.engineAutoHint") },
@@ -580,7 +597,7 @@ function HeroInput({ url, onUrl, onPaste, onAnalyze, fetching, disabled,
       )}
 
       {/* Resolution row */}
-      <div className="flex items-center gap-2 mb-3">
+      <div className="flex items-center gap-2 mb-3 flex-wrap">
         <span style={{ fontSize: 10, fontWeight: 600, textTransform: "uppercase",
                         letterSpacing: "0.06em", color: "var(--n-6)" }}>
           {t("downloader.resolution")}
@@ -590,6 +607,21 @@ function HeroInput({ url, onUrl, onPaste, onAnalyze, fetching, disabled,
           onChange={onMaxHeight}
           options={resOptions}
         />
+        <div style={{ flex: 1 }} />
+        {/* H.264 transcode toggle — default OFF (nhẹ máy) */}
+        <label
+          className="flex items-center gap-1.5 cursor-pointer"
+          title="Chuyển mã H.264 nếu video gốc dùng AV1/HEVC — cần cho QuickTime/iMovie cũ. Tốn CPU máy bạn 30-90s."
+          style={{ fontSize: 11, color: "var(--n-8)" }}
+        >
+          <input
+            type="checkbox"
+            checked={!!transcodeH264}
+            onChange={(e) => onTranscode?.(e.target.checked)}
+            style={{ accentColor: "var(--accent)" }}
+          />
+          Tương thích cao (H.264)
+        </label>
       </div>
       <div
         className="flex items-center gap-2"
