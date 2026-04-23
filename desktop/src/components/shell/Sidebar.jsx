@@ -11,6 +11,7 @@ import { useBatch } from "../../batch/BatchContext";
 import { useT } from "../../i18n/I18nContext";
 import { useTheme } from "../../theme/ThemeContext";
 import { useAuth } from "../../auth/AuthContext";
+import logoUrl from "../../assets/logo.svg";
 
 /**
  * Sidebar — toggle giữa 220px (full) và 60px (icon-only).
@@ -258,7 +259,7 @@ function BrandHeader({ collapsed, onToggle }) {
         onMouseEnter={(e) => e.currentTarget.style.background = "var(--n-2)"}
         onMouseLeave={(e) => e.currentTarget.style.background = "transparent"}
       >
-        <img src="/favicon.svg" alt="" style={{ width: 24, height: 24 }} />
+        <img src={logoUrl} alt="" style={{ width: 24, height: 24 }} />
       </button>
     );
   }
@@ -268,7 +269,7 @@ function BrandHeader({ collapsed, onToggle }) {
       style={{ borderBottom: "1px solid var(--n-3)", height: 54 }}
     >
       <img
-        src="/favicon.svg"
+        src={logoUrl}
         alt=""
         style={{ width: 22, height: 22, flexShrink: 0 }}
       />

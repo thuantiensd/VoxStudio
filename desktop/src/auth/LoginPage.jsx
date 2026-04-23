@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Loader2 } from "lucide-react";
+import logoUrl from "../assets/logo.svg";
 import { useAuth } from "./AuthContext";
 import { useT } from "../i18n/I18nContext";
 
@@ -32,7 +33,7 @@ export default function LoginPage() {
         {/* Brand header */}
         <div className="mb-8 text-center">
           <img
-            src="/favicon.svg"
+            src={logoUrl}
             alt="VoxStudio"
             width={56}
             height={56}
