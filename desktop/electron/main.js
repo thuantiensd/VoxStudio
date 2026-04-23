@@ -5,13 +5,22 @@ import fsSync from "node:fs";
 import { createRequire } from "node:module";
 import windowStateKeeper from "electron-window-state";
 
-// Sentry init — require CJS vì @sentry/electron/main export CJS
+// Sentry + updater init — require CJS modules
 const require_ = createRequire(import.meta.url);
 try {
   const { initSentry } = require_("./sentry-init.cjs");
   initSentry();
 } catch (e) {
   console.warn("[sentry] skipped:", e.message);
+}
+let _updaterApi = null;
+function _loadUpdater(mainWindow) {
+  try {
+    const { initUpdater } = require_("./updater.cjs");
+    _updaterApi = initUpdater(mainWindow);
+  } catch (e) {
+    console.warn("[updater] skipped:", e.message);
+  }
 }
 
 const __filename = fileURLToPath(import.meta.url);
@@ -95,6 +104,8 @@ app.whenReady().then(() => {
     } catch {}
   }
   createWindow();
+  // Init auto-updater sau khi mainWindow tạo xong để webContents.send hoạt động
+  _loadUpdater(mainWindow);
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
@@ -390,6 +401,14 @@ ipcMain.handle("keys:clearUser", async (_event, userId) => {
   const vault = _readVaultAll();
   delete vault[bucket];
   return _writeVaultAll(vault);
+});
+
+// Auto-update IPC
+ipcMain.handle("updater:check", () => {
+  if (_updaterApi) _updaterApi.checkForUpdates().catch(() => {});
+});
+ipcMain.handle("updater:quitAndInstall", () => {
+  if (_updaterApi) _updaterApi.quitAndInstall(false, true);
 });
 
 // Menu (minimal, system-native feel)

@@ -19,6 +19,7 @@ import { ToastProvider } from "./components/ui/Toast";
 import ErrorBoundary from "./components/ui/ErrorBoundary";
 import GlobalErrorHook from "./components/ui/GlobalErrorHook";
 import QuotaMonitor from "./components/QuotaMonitor";
+import UpdateBanner from "./components/UpdateBanner";
 
 function Shell() {
   return (
@@ -66,6 +67,7 @@ export default function App() {
       <GlobalErrorHook />
       <AuthProvider>
       <QuotaMonitor />
+      <UpdateBanner />
       <BatchProvider>
         <BrowserRouter>
           <Routes>

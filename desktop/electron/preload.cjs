@@ -40,6 +40,19 @@ contextBridge.exposeInMainWorld("voxstudio", {
   notify: (opts) => ipcRenderer.invoke("notify:show", opts),
   setBadge: (count) => ipcRenderer.invoke("badge:set", count),
 
+  // Auto-update
+  updater: {
+    check: () => ipcRenderer.invoke("updater:check"),
+    quitAndInstall: () => ipcRenderer.invoke("updater:quitAndInstall"),
+    onEvent: (channel, cb) => {
+      // channel: 'update:checking' | 'update:available' | 'update:not-available'
+      //          | 'update:progress' | 'update:downloaded' | 'update:error'
+      const listener = (_e, payload) => cb(payload);
+      ipcRenderer.on(channel, listener);
+      return () => ipcRenderer.removeListener(channel, listener);
+    },
+  },
+
   // Secure API key vault — partition theo userId (mỗi user riêng bucket).
   // Renderer PHẢI gửi userId. Nếu không, main process refuse.
   keys: {
