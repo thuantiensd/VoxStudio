@@ -11,7 +11,10 @@ import logging
 import threading
 from typing import Any
 
-from app.services import dubbing_svc
+import tempfile
+import os as _os
+
+from app.services import dubbing_svc, whisper_svc, tts_svc
 from app.worker.gpu_worker import register_handler
 
 logger = logging.getLogger(__name__)
@@ -94,3 +97,88 @@ async def dubbing_handler(payload: dict, *, job_id: str, progress_cb) -> dict:
 
 
 register_handler("dubbing", dubbing_handler)
+
+
+# ── STT handler ────────────────────────────────────────────
+
+async def stt_handler(payload: dict, *, job_id: str, progress_cb) -> dict:
+    """Payload: { audio_path, language? }
+    Audio file được endpoint copy vào tmp dir trước, payload chỉ có path
+    (tránh chuyển Base64 lớn qua JSON)."""
+    audio_path = payload.get("audio_path")
+    language = payload.get("language") or None
+    if not audio_path or not _os.path.exists(audio_path):
+        raise ValueError("Không tìm thấy file audio cần xử lý.")
+
+    await progress_cb(step="transcribing", progress=5)
+    # Whisper blocking call — chạy trong thread để không block event loop
+    import asyncio as _asyncio
+    result = await _asyncio.to_thread(
+        whisper_svc.transcribe, audio_path,
+        True, language,  # return_timestamps=True, language
+    )
+
+    # Ước tính phút audio để tính usage
+    minutes = 0.0
+    try:
+        segments = result.get("segments") or []
+        if segments:
+            minutes = float(segments[-1].get("end", 0) or 0) / 60.0
+    except Exception:
+        pass
+
+    # Cleanup tmp file
+    try:
+        _os.remove(audio_path)
+    except Exception:
+        pass
+
+    await progress_cb(step="done", progress=100)
+    # Trả đúng shape mà endpoint /stt/transcribe đang return
+    return {
+        "text": result.get("text", ""),
+        "segments": result.get("segments", []),
+        "language": result.get("language"),
+        "usage": {"minutes": minutes},
+    }
+
+
+register_handler("stt", stt_handler)
+
+
+# ── TTS handler ────────────────────────────────────────────
+
+async def tts_handler(payload: dict, *, job_id: str, progress_cb) -> dict:
+    """Payload: tất cả param của tts_svc.generate(...)"""
+    text = payload.get("text") or ""
+    if not text.strip():
+        raise ValueError("Nội dung trống.")
+
+    await progress_cb(step="generating", progress=10)
+    import asyncio as _asyncio
+    result = await _asyncio.to_thread(
+        tts_svc.generate,
+        text,
+        payload.get("voice_id"),
+        payload.get("language"),
+        payload.get("speed", 1.0),
+        payload.get("num_step"),
+        payload.get("guidance_scale"),
+        payload.get("t_shift"),
+        payload.get("layer_penalty_factor"),
+        payload.get("position_temperature"),
+        payload.get("class_temperature"),
+        payload.get("denoise"),
+        payload.get("preprocess_prompt"),
+        payload.get("postprocess_output"),
+        payload.get("audio_chunk_duration"),
+    )
+    await progress_cb(step="done", progress=100)
+    # Merge usage vào result (giữ shape cũ: audio_url, duration, sample_rate)
+    return {
+        **result,
+        "usage": {"characters": len(text)},
+    }
+
+
+register_handler("tts", tts_handler)

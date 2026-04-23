@@ -2,44 +2,56 @@
 
 import uuid
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.auth.rate_limit import require_quota
 from app.config import AUDIO_OUTPUT_DIR
 from app.core.storage import get_audio_path
+from app.db.models import User
 from app.models.schemas import TTSRequest, TTSResponse
-from app.services import tts_svc, edge_tts_svc
+from app.services import tts_svc, edge_tts_svc, job_svc
 
 router = APIRouter(prefix="/tts", tags=["TTS"])
 
 
 @router.post("/generate", response_model=TTSResponse)
-async def generate(req: TTSRequest):
-    """Generate speech from text."""
+async def generate(
+    req: TTSRequest,
+    ctx: dict = Depends(require_quota("tts")),
+):
+    """Generate speech from text — qua GPU job queue để chống OOM."""
+    user: User = ctx["user"]
+    db: AsyncSession = ctx["db"]
+    payload = {
+        "text": req.text,
+        "voice_id": req.voice_id,
+        "language": req.language,
+        "speed": req.speed,
+        "num_step": req.num_step,
+        "guidance_scale": req.guidance_scale,
+        "t_shift": req.t_shift,
+        "layer_penalty_factor": req.layer_penalty_factor,
+        "position_temperature": req.position_temperature,
+        "class_temperature": req.class_temperature,
+        "denoise": req.denoise,
+        "preprocess_prompt": req.preprocess_prompt,
+        "postprocess_output": req.postprocess_output,
+        "audio_chunk_duration": req.audio_chunk_duration,
+    }
     try:
-        result = tts_svc.generate(
-            text=req.text,
-            voice_id=req.voice_id,
-            language=req.language,
-            speed=req.speed,
-            num_step=req.num_step,
-            guidance_scale=req.guidance_scale,
-            t_shift=req.t_shift,
-            layer_penalty_factor=req.layer_penalty_factor,
-            position_temperature=req.position_temperature,
-            class_temperature=req.class_temperature,
-            denoise=req.denoise,
-            preprocess_prompt=req.preprocess_prompt,
-            postprocess_output=req.postprocess_output,
-            audio_chunk_duration=req.audio_chunk_duration,
-            duration=req.duration,
+        result = await job_svc.enqueue_and_wait(
+            db, user_id=user.id, kind="tts", payload=payload,
+            timeout=600.0,  # TTS nhanh hơn, 10 phút đủ
         )
+        # Strip usage info trước khi trả FE (FE không cần)
+        result.pop("usage", None)
         return result
     except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        # Chứa các message quota/timeout — user-friendly, không phải 500
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 class EdgeTTSRequest(BaseModel):

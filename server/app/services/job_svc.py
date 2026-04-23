@@ -28,6 +28,56 @@ PRIORITY_BY_PLAN = {
 }
 
 
+async def enqueue_and_wait(
+    db: AsyncSession,
+    *,
+    user_id: int,
+    kind: str,
+    payload: dict[str, Any] | None = None,
+    priority: int | None = None,
+    timeout: float = 1800.0,  # 30 phút
+) -> dict:
+    """Enqueue + đợi kết quả (blocking). Dùng cho endpoint sync như
+    /stt/transcribe, /tts/generate — frontend POST đợi response bình thường
+    nhưng backend serialize qua GPU queue chống OOM.
+
+    Raises ValueError nếu job fail hoặc timeout.
+    """
+    import asyncio as _asyncio
+    from app.worker import gpu_worker
+
+    job = await enqueue(db, user_id=user_id, kind=kind,
+                          payload=payload, priority=priority)
+    q = gpu_worker.subscribe(job.id)
+    try:
+        deadline = _asyncio.get_event_loop().time() + timeout
+        while True:
+            remaining = deadline - _asyncio.get_event_loop().time()
+            if remaining <= 0:
+                raise ValueError("Xử lý quá thời gian cho phép. Vui lòng thử lại.")
+            try:
+                event = await _asyncio.wait_for(q.get(), timeout=min(30, remaining))
+            except _asyncio.TimeoutError:
+                # Kiểm tra trạng thái job — nếu đã xong trong DB thì thoát
+                async with __import__("app.db.session", fromlist=["AsyncSessionLocal"]).AsyncSessionLocal() as db2:
+                    j = await db2.get(Job, job.id)
+                    if j and j.status in ("done", "error", "canceled"):
+                        if j.status == "done":
+                            import json as _json
+                            return _json.loads(j.result) if j.result else {}
+                        raise ValueError(j.error or f"Xử lý thất bại ({j.status})")
+                continue
+            step = event.get("step")
+            if step == "done":
+                return event.get("result") or {}
+            if step == "error":
+                raise ValueError(event.get("error") or "Xử lý thất bại.")
+            if step == "canceled":
+                raise ValueError("Tác vụ đã bị huỷ.")
+    finally:
+        gpu_worker.unsubscribe(job.id, q)
+
+
 async def enqueue(
     db: AsyncSession,
     *,
