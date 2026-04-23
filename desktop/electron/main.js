@@ -2,7 +2,17 @@ import { app, BrowserWindow, Menu, shell, ipcMain, dialog, Notification, safeSto
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import fsSync from "node:fs";
+import { createRequire } from "node:module";
 import windowStateKeeper from "electron-window-state";
+
+// Sentry init — require CJS vì @sentry/electron/main export CJS
+const require_ = createRequire(import.meta.url);
+try {
+  const { initSentry } = require_("./sentry-init.cjs");
+  initSentry();
+} catch (e) {
+  console.warn("[sentry] skipped:", e.message);
+}
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);

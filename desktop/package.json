@@ -25,6 +25,8 @@
   "dependencies": {
     "@fontsource/inter": "^5.2.8",
     "@fontsource/jetbrains-mono": "^5.2.8",
+    "@sentry/electron": "^7.11.0",
+    "@sentry/react": "^10.49.0",
     "@tailwindcss/vite": "^4.2.2",
     "cmdk": "^1.1.1",
     "lucide-react": "^1.8.0",

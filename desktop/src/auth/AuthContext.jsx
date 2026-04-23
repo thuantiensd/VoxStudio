@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useState, useCallback } from "rea
 import { SERVER_URL } from "../services/api";
 import { clearCurrentUser } from "../services/keyvault";
 import { clearUserLocalStorage } from "../services/userScope";
+import { setSentryUser } from "../sentry";
 
 /**
  * Auth context — gọi API, lưu JWT + user trong localStorage.
@@ -53,6 +54,8 @@ export function AuthProvider({ children }) {
 
   useEffect(() => {
     writeStored(auth);
+    // Tag Sentry user context khi auth thay đổi
+    setSentryUser(auth?.user?.id || null);
   }, [auth]);
 
   // Re-validate token on mount — server restart/JWT_SECRET đổi → clear stale

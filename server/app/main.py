@@ -12,12 +12,40 @@ from app.core.gpu_manager import gpu
 from app.db.session import init_db
 from app.db.migrations import run_migrations
 
-# Load .env (JWT_SECRET + GOOGLE_OAUTH_CLIENT_ID/SECRET)
+# Load .env (JWT_SECRET + GOOGLE_OAUTH_CLIENT_ID/SECRET + SENTRY_DSN)
 try:
     from dotenv import load_dotenv
     load_dotenv()
 except Exception:
     pass
+
+# Sentry init TRƯỚC khi tạo FastAPI — để middleware bắt được cả init errors.
+# DSN opt-in qua env — không có DSN thì skip.
+import os as _os
+_sentry_dsn = _os.environ.get("SENTRY_DSN", "").strip()
+if _sentry_dsn:
+    try:
+        import sentry_sdk
+        from sentry_sdk.integrations.fastapi import FastApiIntegration
+        from sentry_sdk.integrations.sqlalchemy import SqlalchemyIntegration
+        sentry_sdk.init(
+            dsn=_sentry_dsn,
+            environment=_os.environ.get("SENTRY_ENV", "production"),
+            release=_os.environ.get("SENTRY_RELEASE", "voxstudio-server@0.1.0"),
+            traces_sample_rate=0,       # không track perf để giảm event
+            sample_rate=1.0,             # capture 100% error
+            send_default_pii=False,
+            integrations=[
+                FastApiIntegration(),
+                SqlalchemyIntegration(),
+            ],
+            before_send=lambda event, hint: (
+                # Xoá body request khỏi event để tránh leak content/API key
+                event.pop("request", None) or event
+            ) if False else event,
+        )
+    except Exception as _e:
+        print(f"[sentry] init failed: {_e}")
 
 logging.basicConfig(
     level=logging.INFO,

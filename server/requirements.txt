@@ -26,6 +26,7 @@ bcrypt
 sqlalchemy
 aiosqlite
 greenlet  # SQLAlchemy async engine runtime
+sentry-sdk[fastapi]  # error tracking (DSN opt-in qua ENV SENTRY_DSN)
 email-validator
 python-dotenv
 google-auth
