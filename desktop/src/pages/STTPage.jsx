@@ -12,6 +12,7 @@ import { useToast } from "../components/ui/Toast";
 import { transcribe, translateTexts } from "../services/api";
 import { showError } from "../services/errors";
 import { getKey, listKeys } from "../services/keyvault";
+import { userStorage } from "../services/userScope";
 
 /* ─────────────────────────────────────────────────────────
    Speech-to-Text page
@@ -160,17 +161,17 @@ export default function STTPage() {
   const abortRef = useRef(false);
 
   const [lang, setLang] = useState(() => {
-    try { return localStorage.getItem(LS_LANG) || "auto"; }
+    try { return userStorage.getItem(LS_LANG) || "auto"; }
     catch { return "auto"; }
   });
   const setLangPersist = (v) => {
     setLang(v);
-    try { localStorage.setItem(LS_LANG, v); } catch {}
+    try { userStorage.setItem(LS_LANG, v); } catch {}
   };
 
   const [formats, setFormats] = useState(() => {
     try {
-      const raw = localStorage.getItem(LS_FMTS);
+      const raw = userStorage.getItem(LS_FMTS);
       if (raw) {
         const arr = JSON.parse(raw);
         if (Array.isArray(arr) && arr.length) return arr;
@@ -182,34 +183,34 @@ export default function STTPage() {
     setFormats((prev) => {
       const next = prev.includes(k) ? prev.filter((x) => x !== k) : [...prev, k];
       const final = next.length ? next : [k];
-      try { localStorage.setItem(LS_FMTS, JSON.stringify(final)); } catch {}
+      try { userStorage.setItem(LS_FMTS, JSON.stringify(final)); } catch {}
       return final;
     });
   };
 
   const [trOn, setTrOn] = useState(() => {
-    try { return localStorage.getItem(LS_TR_ON) === "1"; }
+    try { return userStorage.getItem(LS_TR_ON) === "1"; }
     catch { return false; }
   });
   const setTrOnPersist = (v) => {
     setTrOn(v);
-    try { localStorage.setItem(LS_TR_ON, v ? "1" : "0"); } catch {}
+    try { userStorage.setItem(LS_TR_ON, v ? "1" : "0"); } catch {}
   };
   const [trTarget, setTrTarget] = useState(() => {
-    try { return localStorage.getItem(LS_TR_TGT) || "vi"; }
+    try { return userStorage.getItem(LS_TR_TGT) || "vi"; }
     catch { return "vi"; }
   });
   const setTrTargetPersist = (v) => {
     setTrTarget(v);
-    try { localStorage.setItem(LS_TR_TGT, v); } catch {}
+    try { userStorage.setItem(LS_TR_TGT, v); } catch {}
   };
   const [trEngine, setTrEngine] = useState(() => {
-    try { return localStorage.getItem(LS_TR_ENG) || "google_free"; }
+    try { return userStorage.getItem(LS_TR_ENG) || "google_free"; }
     catch { return "google_free"; }
   });
   const setTrEnginePersist = (v) => {
     setTrEngine(v);
-    try { localStorage.setItem(LS_TR_ENG, v); } catch {}
+    try { userStorage.setItem(LS_TR_ENG, v); } catch {}
   };
 
   // Track key nào đã có trong vault (để warning live khi user chọn engine)
@@ -227,14 +228,14 @@ export default function STTPage() {
   const trMissingKey = trOn && trEngineMeta?.needsKey && !savedKeys[trEngine];
 
   const [outputFolder, setOutputFolder] = useState(() => {
-    try { return localStorage.getItem(LS_FOLDER) || ""; }
+    try { return userStorage.getItem(LS_FOLDER) || ""; }
     catch { return ""; }
   });
   const setOutputFolderPersist = (v) => {
     setOutputFolder(v);
     try {
-      if (v) localStorage.setItem(LS_FOLDER, v);
-      else localStorage.removeItem(LS_FOLDER);
+      if (v) userStorage.setItem(LS_FOLDER, v);
+      else userStorage.removeItem(LS_FOLDER);
     } catch {}
   };
 

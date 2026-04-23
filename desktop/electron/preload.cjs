@@ -40,12 +40,14 @@ contextBridge.exposeInMainWorld("voxstudio", {
   notify: (opts) => ipcRenderer.invoke("notify:show", opts),
   setBadge: (count) => ipcRenderer.invoke("badge:set", count),
 
-  // Secure API key vault (safeStorage / OS Keychain)
+  // Secure API key vault — partition theo userId (mỗi user riêng bucket).
+  // Renderer PHẢI gửi userId. Nếu không, main process refuse.
   keys: {
-    list:   () => ipcRenderer.invoke("keys:list"),
-    get:    (id) => ipcRenderer.invoke("keys:get", id),
-    set:    (id, value) => ipcRenderer.invoke("keys:set", { id, value }),
-    delete: (id) => ipcRenderer.invoke("keys:delete", id),
+    list:   (userId) => ipcRenderer.invoke("keys:list", userId),
+    get:    (userId, id) => ipcRenderer.invoke("keys:get", { userId, id }),
+    set:    (userId, id, value) => ipcRenderer.invoke("keys:set", { userId, id, value }),
+    delete: (userId, id) => ipcRenderer.invoke("keys:delete", { userId, id }),
+    clearUser: (userId) => ipcRenderer.invoke("keys:clearUser", userId),
   },
 
   // Platform đồng bộ (để React render titlebar theo OS ngay lần đầu)

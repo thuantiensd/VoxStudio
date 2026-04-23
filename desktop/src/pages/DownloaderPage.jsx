@@ -21,6 +21,7 @@ import {
   dubbingVideoURL, deleteDubbingProject, SERVER_URL,
 } from "../services/api";
 import { showError } from "../services/errors";
+import { userStorage } from "../services/userScope";
 
 const HISTORY_KEY = "voxstudio:download:history";
 const AGREED_KEY = "voxstudio:download:disclaimerAgreed";
@@ -59,23 +60,23 @@ export default function DownloaderPage() {
   const [info, setInfo] = useState(null);
   const [preferNoWM, setPreferNoWM] = useState(true);
   const [engine, setEngine] = useState(() => {
-    try { return localStorage.getItem(ENGINE_KEY) || "auto"; }
+    try { return userStorage.getItem(ENGINE_KEY) || "auto"; }
     catch { return "auto"; }
   });
   const setEnginePersist = (v) => {
     setEngine(v);
-    try { localStorage.setItem(ENGINE_KEY, v); } catch {}
+    try { userStorage.setItem(ENGINE_KEY, v); } catch {}
     setInfo(null);  // clear preview khi đổi engine
   };
   const [maxHeight, setMaxHeight] = useState(() => {
     try {
-      const v = parseInt(localStorage.getItem(RES_KEY) || "", 10);
+      const v = parseInt(userStorage.getItem(RES_KEY) || "", 10);
       return Number.isFinite(v) ? v : 1080;
     } catch { return 1080; }
   });
   const setMaxHeightPersist = (v) => {
     setMaxHeight(v);
-    try { localStorage.setItem(RES_KEY, String(v)); } catch {}
+    try { userStorage.setItem(RES_KEY, String(v)); } catch {}
   };
 
   const [downloading, setDownloading] = useState(false);
@@ -98,7 +99,7 @@ export default function DownloaderPage() {
   };
 
   const [history, setHistory] = useState(() => {
-    try { return JSON.parse(localStorage.getItem(HISTORY_KEY) || "[]"); }
+    try { return JSON.parse(userStorage.getItem(HISTORY_KEY) || "[]"); }
     catch { return []; }
   });
   const [disclaimerOpen, setDisclaimerOpen] = useState(false);
@@ -166,18 +167,18 @@ export default function DownloaderPage() {
     setHistory((h) => {
       const next = [entry, ...h.filter((x) => x.url !== entry.url)]
         .slice(0, MAX_HISTORY);
-      try { localStorage.setItem(HISTORY_KEY, JSON.stringify(next)); } catch {}
+      try { userStorage.setItem(HISTORY_KEY, JSON.stringify(next)); } catch {}
       return next;
     });
   };
 
   const clearHistory = () => {
     setHistory([]);
-    try { localStorage.removeItem(HISTORY_KEY); } catch {}
+    try { userStorage.removeItem(HISTORY_KEY); } catch {}
   };
 
   const withDisclaimer = (run) => {
-    const agreed = localStorage.getItem(AGREED_KEY) === "1";
+    const agreed = userStorage.getItem(AGREED_KEY) === "1";
     if (agreed) run();
     else {
       pendingActionRef.current = run;
@@ -476,7 +477,7 @@ export default function DownloaderPage() {
         open={saveAsOpen}
         onClose={() => setSaveAsOpen(false)}
         defaultName={cleanName(info?.title || "video")}
-        defaultFolder={localStorage.getItem("voxstudio:batch:outputFolder")}
+        defaultFolder={userStorage.getItem("voxstudio:batch:outputFolder")}
         ext=".mp4"
         onSave={doDownloadToFolder}
       />
@@ -496,7 +497,7 @@ export default function DownloaderPage() {
             <Button
               variant="primary" size="md"
               onClick={() => {
-                localStorage.setItem(AGREED_KEY, "1");
+                userStorage.setItem(AGREED_KEY, "1");
                 setDisclaimerOpen(false);
                 pendingActionRef.current?.();
                 pendingActionRef.current = null;

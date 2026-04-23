@@ -1,5 +1,7 @@
 import { createContext, useContext, useEffect, useState, useCallback } from "react";
 import { SERVER_URL } from "../services/api";
+import { clearCurrentUser } from "../services/keyvault";
+import { clearUserLocalStorage } from "../services/userScope";
 
 /**
  * Auth context — gọi API, lưu JWT + user trong localStorage.
@@ -99,7 +101,7 @@ export function AuthProvider({ children }) {
     }
   }, []);
 
-  const logout = useCallback(() => {
+  const logout = useCallback(async () => {
     // Stateless JWT — chỉ cần xoá local
     fetch(`${SERVER_URL}/api/v1/auth/logout`, {
       method: "POST",
@@ -108,6 +110,13 @@ export function AuthProvider({ children }) {
         "ngrok-skip-browser-warning": "true",
       },
     }).catch(() => {});
+    // Clear sạch data của user trước khi xoá auth (lúc này uid còn đọc được)
+    try {
+      await clearCurrentUser();
+      clearUserLocalStorage();
+    } catch (e) {
+      console.warn("[logout] cleanup error:", e);
+    }
     setAuth(null);
   }, [auth?.token]);
 

@@ -59,3 +59,21 @@ export const userStorage = {
     catch {}
   },
 };
+
+/**
+ * clearUserLocalStorage — xoá mọi key scope theo user hiện tại khi
+ * logout. Không đụng key device-level (theme, locale, sidebar collapsed).
+ */
+export function clearUserLocalStorage() {
+  const uid = currentUserId();
+  if (!uid) return;
+  const prefix = `${PREFIX}u/${uid}:`;
+  try {
+    const toDel = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && k.startsWith(prefix)) toDel.push(k);
+    }
+    toDel.forEach((k) => localStorage.removeItem(k));
+  } catch {}
+}

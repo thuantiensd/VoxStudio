@@ -4,6 +4,7 @@ import {
 } from "../services/api";
 import { showError } from "../services/errors";
 import { useToast } from "../components/ui/Toast";
+import { userStorage } from "../services/userScope";
 
 const STORAGE_KEY = "voxstudio:batch:outputFolder";
 const QUEUE_KEY = "voxstudio:batch:queue";
@@ -25,13 +26,13 @@ const BatchCtx = createContext(null);
 export function BatchProvider({ children }) {
   const toast = useToast();
   const [outputFolder, setOutputFolderState] = useState(() => {
-    try { return localStorage.getItem(STORAGE_KEY) || ""; } catch { return ""; }
+    try { return userStorage.getItem(STORAGE_KEY) || ""; } catch { return ""; }
   });
   // Queue từ localStorage — convert "running" đang dở thành "pending" để
   // worker tiếp tục khi app mở lại. Giới hạn MAX_HISTORY mục cũ nhất.
   const [queue, setQueue] = useState(() => {
     try {
-      const raw = localStorage.getItem(QUEUE_KEY);
+      const raw = userStorage.getItem(QUEUE_KEY);
       if (!raw) return [];
       const arr = JSON.parse(raw);
       return (Array.isArray(arr) ? arr : []).map((it) => {
@@ -50,7 +51,7 @@ export function BatchProvider({ children }) {
   useEffect(() => {
     try {
       const toSave = queue.slice(-MAX_HISTORY);
-      localStorage.setItem(QUEUE_KEY, JSON.stringify(toSave));
+      userStorage.setItem(QUEUE_KEY, JSON.stringify(toSave));
     } catch {}
   }, [queue]);
 
@@ -64,7 +65,7 @@ export function BatchProvider({ children }) {
 
   const setOutputFolder = (path) => {
     setOutputFolderState(path);
-    try { localStorage.setItem(STORAGE_KEY, path || ""); } catch {}
+    try { userStorage.setItem(STORAGE_KEY, path || ""); } catch {}
   };
 
   const enqueue = (items) => {

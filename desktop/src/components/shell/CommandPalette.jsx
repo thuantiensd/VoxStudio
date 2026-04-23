@@ -44,7 +44,14 @@ export default function CommandPalette({ open, onClose }) {
     { id: "act:upload",   icon: Upload,        label: t("palette.uploadVideo"),      group: ACT, run: go("/studio") },
     { id: "act:output",   icon: FolderOpen,    label: t("palette.openOutputFolder"), group: ACT,
       run: () => {
-        const folder = localStorage.getItem("voxstudio:batch:outputFolder");
+        // Dùng userStorage để scope theo user (batch folder là workflow riêng)
+        const folder = (() => {
+          try {
+            const uid = JSON.parse(localStorage.getItem("voxstudio:auth") || "{}")?.user?.id;
+            if (uid) return localStorage.getItem(`voxstudio:u/${uid}:batch:outputFolder`);
+            return localStorage.getItem("voxstudio:batch:outputFolder");
+          } catch { return null; }
+        })();
         if (folder) window.voxstudio?.revealFileInFolder?.(folder);
         onClose();
       } },

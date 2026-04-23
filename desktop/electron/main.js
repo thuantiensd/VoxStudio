@@ -286,20 +286,22 @@ ipcMain.handle("badge:set", async (_event, count) => {
   return true;
 });
 
-// ── Secure API key vault ───────────────────────────────
-// Lưu các API key (OpenAI / Claude / DeepL / Gemini / Google Cloud) được
-// mã hoá bởi safeStorage (OS Keychain / DPAPI / libsecret). Fallback plain
-// JSON nếu safeStorage chưa sẵn sàng (Linux không có keyring) — kèm cảnh báo.
+// ── Secure API key vault (partitioned theo user) ───────
+// Structure: { [userId]: { [keyId]: value } }
+// Mã hoá toàn file bằng safeStorage (OS Keychain / DPAPI / libsecret).
+// Fallback plain JSON nếu safeStorage không sẵn sàng.
+//
+// Renderer luôn gửi userId kèm mỗi call → vault đảm bảo user A không
+// truy cập được key của user B trên cùng máy.
 const _keyVaultPath = () => path.join(app.getPath("userData"), "keyvault.enc");
 
-function _readVault() {
+function _readVaultAll() {
   try {
     if (!fsSync.existsSync(_keyVaultPath())) return {};
     const buf = fsSync.readFileSync(_keyVaultPath());
     if (safeStorage.isEncryptionAvailable()) {
       return JSON.parse(safeStorage.decryptString(buf));
     }
-    // Fallback: file utf8 JSON plain (chỉ Linux headless)
     return JSON.parse(buf.toString("utf8"));
   } catch (e) {
     console.warn("[keyvault] read failed:", e.message);
@@ -307,7 +309,7 @@ function _readVault() {
   }
 }
 
-function _writeVault(data) {
+function _writeVaultAll(data) {
   try {
     const str = JSON.stringify(data);
     const buf = safeStorage.isEncryptionAvailable()
@@ -321,35 +323,63 @@ function _writeVault(data) {
   }
 }
 
-ipcMain.handle("keys:list", async () => {
-  // Trả về các id có key (không trả value) + trạng thái mã hoá
-  const vault = _readVault();
+function _userBucket(userId) {
+  if (!userId || typeof userId !== "string") return null;
+  return String(userId);
+}
+
+ipcMain.handle("keys:list", async (_event, userId) => {
+  const vault = _readVaultAll();
+  const bucket = _userBucket(userId);
+  const userKeys = (bucket && vault[bucket]) || {};
   const out = {};
-  for (const k of Object.keys(vault)) out[k] = true;
+  for (const k of Object.keys(userKeys)) out[k] = true;
   return {
     ids: out,
     encrypted: safeStorage.isEncryptionAvailable(),
   };
 });
 
-ipcMain.handle("keys:get", async (_event, id) => {
+ipcMain.handle("keys:get", async (_event, { userId, id } = {}) => {
   if (!id || typeof id !== "string") return null;
-  const vault = _readVault();
-  return vault[id] || null;
+  const bucket = _userBucket(userId);
+  if (!bucket) return null;
+  const vault = _readVaultAll();
+  return vault[bucket]?.[id] || null;
 });
 
-ipcMain.handle("keys:set", async (_event, { id, value }) => {
+ipcMain.handle("keys:set", async (_event, { userId, id, value } = {}) => {
   if (!id || typeof id !== "string") throw new Error("Invalid id");
-  const vault = _readVault();
-  if (value) vault[id] = value;
-  else delete vault[id];
-  return _writeVault(vault);
+  const bucket = _userBucket(userId);
+  if (!bucket) throw new Error("Chưa đăng nhập — không thể lưu key");
+  const vault = _readVaultAll();
+  if (!vault[bucket]) vault[bucket] = {};
+  if (value) vault[bucket][id] = value;
+  else delete vault[bucket][id];
+  // Cleanup empty bucket
+  if (Object.keys(vault[bucket]).length === 0) delete vault[bucket];
+  return _writeVaultAll(vault);
 });
 
-ipcMain.handle("keys:delete", async (_event, id) => {
-  const vault = _readVault();
-  delete vault[id];
-  return _writeVault(vault);
+ipcMain.handle("keys:delete", async (_event, { userId, id } = {}) => {
+  const bucket = _userBucket(userId);
+  if (!bucket) return false;
+  const vault = _readVaultAll();
+  if (vault[bucket]) {
+    delete vault[bucket][id];
+    if (Object.keys(vault[bucket]).length === 0) delete vault[bucket];
+  }
+  return _writeVaultAll(vault);
+});
+
+// Xoá toàn bộ data của 1 user khi họ logout (clear sạch như user chọn
+// trước đó). User khác không bị ảnh hưởng.
+ipcMain.handle("keys:clearUser", async (_event, userId) => {
+  const bucket = _userBucket(userId);
+  if (!bucket) return false;
+  const vault = _readVaultAll();
+  delete vault[bucket];
+  return _writeVaultAll(vault);
 });
 
 // Menu (minimal, system-native feel)
