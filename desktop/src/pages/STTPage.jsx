@@ -154,7 +154,7 @@ export default function STTPage() {
   const isElectron = !!window.voxstudio?.isElectron;
   const fileInputRef = useRef(null);
 
-  const openIntegrations = () => nav("/settings#integrations");
+  const openIntegrations = () => nav("/settings", { state: { tab: "integrations" } });
 
   const [items, setItems] = useState([]); // {id, name, path?, file?, size, status, progress?, error?, segments?, lang?}
   const [running, setRunning] = useState(false);

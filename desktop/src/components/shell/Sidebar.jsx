@@ -425,7 +425,7 @@ function UserFooter({ collapsed }) {
           <MenuItem icon={Cog} label="Cài đặt"
                     onClick={() => { nav("/settings"); setOpen(false); }} />
           <MenuItem icon={UserIcon} label="Tài khoản"
-                    onClick={() => { nav("/settings#account"); setOpen(false); }} />
+                    onClick={() => { nav("/settings", { state: { tab: "account" } }); setOpen(false); }} />
           <div style={{ height: 1, background: "var(--n-3)", margin: "4px 4px" }} />
           <MenuItem icon={LogOut} label="Đăng xuất" danger
                     onClick={() => { logout(); setOpen(false); }} />

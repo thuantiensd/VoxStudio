@@ -1,4 +1,5 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, createContext, useContext } from "react";
+import { useLocation } from "react-router-dom";
 import {
   User, CreditCard, BarChart3, Bell, Lock, Server, Info, Loader2,
   Palette, Sun, Moon, Monitor, KeyRound, Package,
@@ -31,39 +32,27 @@ const TABS = [
   { id: "about", icon: Info, tKey: "settings.tabs.about" },
 ];
 
+// Cross-tab navigation helper (dùng trong SettingsPage; tránh xài
+// window.location.hash vì conflict với HashRouter)
+const SettingsNavCtx = createContext(() => {});
+
 export default function SettingsPage() {
   const t = useT();
-  // Initial tab từ URL hash (vd /settings#integrations từ deep link)
-  const initialTab = () => {
-    const h = typeof window !== "undefined"
-      ? window.location.hash.replace(/^#/, "") : "";
-    return TABS.find((tb) => tb.id === h) ? h : "account";
-  };
+  const loc = useLocation();
+  // Deep link qua state: navigate("/settings", { state: { tab: "integrations" } })
+  const initialTab = loc.state?.tab && TABS.find((tb) => tb.id === loc.state.tab)
+    ? loc.state.tab : "account";
   const [active, setActive] = useState(initialTab);
-
-  // Đồng bộ hash khi user click tab (để deep-link lần sau mở đúng)
+  // Nếu state.tab đổi sau mount (nav lần nữa tới settings với tab khác)
   useEffect(() => {
-    try {
-      const newHash = `#${active}`;
-      if (window.location.hash !== newHash) {
-        window.history.replaceState(null, "", `${window.location.pathname}${newHash}`);
-      }
-    } catch {}
-  }, [active]);
-
-  // Listen hashchange — cho phép deep-link tới tab cụ thể khi đang ở trang Settings
-  useEffect(() => {
-    const onHash = () => {
-      const h = window.location.hash.replace(/^#/, "");
-      if (TABS.find((tb) => tb.id === h)) setActive(h);
-    };
-    window.addEventListener("hashchange", onHash);
-    return () => window.removeEventListener("hashchange", onHash);
-  }, []);
-
+    if (loc.state?.tab && TABS.find((tb) => tb.id === loc.state.tab)) {
+      setActive(loc.state.tab);
+    }
+  }, [loc.state]);
   const activeTab = TABS.find((tb) => tb.id === active) || TABS[0];
 
   return (
+    <SettingsNavCtx.Provider value={setActive}>
     <div className="flex h-full overflow-hidden"
          style={{ background: "var(--n-0)" }}>
       {/* Left: tab list */}
@@ -150,6 +139,7 @@ export default function SettingsPage() {
         </div>
       </main>
     </div>
+    </SettingsNavCtx.Provider>
   );
 }
 
@@ -679,9 +669,8 @@ function BillingTab() {
   const plan = me?.plan;
   const planName = plan?.name || "Miễn phí";
   const isFree = (user?.plan || "free") === "free";
-  const goPlans = () => {
-    try { window.location.hash = "#plans"; } catch {}
-  };
+  const navTab = useContext(SettingsNavCtx);
+  const goPlans = () => navTab("plans");
 
   return (
     <>

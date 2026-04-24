@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { HashRouter, Routes, Route, Navigate } from "react-router-dom";
 import AppShell from "./components/shell/AppShell";
 import TTSPage from "./pages/TTSPage";
 import VoiceClonePage from "./pages/VoiceClonePage";
@@ -69,14 +69,14 @@ export default function App() {
       <QuotaMonitor />
       <UpdateBanner />
       <BatchProvider>
-        <BrowserRouter>
+        <HashRouter>
           <Routes>
             <Route path="/login"  element={<PublicOnlyRoute><LoginPage  /></PublicOnlyRoute>} />
             <Route path="/signup" element={<PublicOnlyRoute><SignupPage /></PublicOnlyRoute>} />
             {/* Bắt buộc đăng nhập để vào app */}
             <Route path="/*" element={<ProtectedRoute><Shell /></ProtectedRoute>} />
           </Routes>
-        </BrowserRouter>
+        </HashRouter>
       </BatchProvider>
       </AuthProvider>
       </ToastProvider>
