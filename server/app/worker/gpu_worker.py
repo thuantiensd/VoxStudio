@@ -149,9 +149,36 @@ async def _process_one(job_row) -> None:
         logger.exception("[worker] ✗ %s failed: %s", job_id, e)
 
 
+async def _reset_orphan_jobs():
+    """Mark 'running' jobs as canceled — khi worker thread vừa start, không
+    thể có job nào đang thật sự chạy. Nếu có row status='running' trong DB,
+    đó là orphan từ lần crash/restart trước → quota backend sẽ tưởng user
+    vẫn chiếm slot. Reset để user drop video mới không bị 429."""
+    from datetime import datetime
+    from sqlalchemy import update
+    from app.db.models import Job
+    try:
+        async with AsyncSessionLocal() as db:
+            result = await db.execute(
+                update(Job)
+                .where(Job.status == "running")
+                .values(
+                    status="canceled",
+                    error="Máy chủ khởi động lại khi đang xử lý. Vui lòng thử lại.",
+                    finished_at=datetime.utcnow(),
+                )
+            )
+            if result.rowcount:
+                logger.info("[worker] reset %d orphan running job(s)", result.rowcount)
+            await db.commit()
+    except Exception as e:
+        logger.warning("[worker] reset orphan failed: %s", e)
+
+
 async def _worker_loop():
     """Poll DB mỗi giây, pick + run."""
     logger.info("[worker] started")
+    await _reset_orphan_jobs()
     while not _stop_event.is_set():
         try:
             async with AsyncSessionLocal() as db:

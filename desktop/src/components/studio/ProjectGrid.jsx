@@ -1,5 +1,7 @@
 import { AnimatePresence } from "motion/react";
+import { Trash2, AlertTriangle } from "lucide-react";
 import ProjectCard from "./ProjectCard";
+import { useBatch } from "../../batch/BatchContext";
 
 /**
  * ProjectGrid — 2 section: "Đang xử lý" và "Hoàn tất hôm nay".
@@ -8,14 +10,17 @@ import ProjectCard from "./ProjectCard";
  * (để DropZone chiếm hết không gian trang).
  */
 export default function ProjectGrid({ queue, onOpen, onRetry }) {
+  const { clearByStatus } = useBatch();
   if (!queue?.length) return null;
 
   const active = queue.filter((q) =>
     q.status === "running" || q.status === "pending"
   );
-  const finished = queue.filter((q) =>
-    q.status === "done" || q.status === "error" || q.status === "canceled"
+  const done = queue.filter((q) => q.status === "done");
+  const errored = queue.filter((q) =>
+    q.status === "error" || q.status === "canceled"
   );
+  const finished = [...done, ...errored];
 
   return (
     <div style={{ marginTop: 28 }}>
@@ -37,7 +42,30 @@ export default function ProjectGrid({ queue, onOpen, onRetry }) {
       )}
 
       {finished.length > 0 && (
-        <Section title="Đã xử lý gần đây" count={finished.length} mt={active.length > 0 ? 28 : 0}>
+        <Section
+          title="Đã xử lý gần đây"
+          count={finished.length}
+          mt={active.length > 0 ? 28 : 0}
+          actions={
+            <>
+              {done.length > 0 && (
+                <ClearBtn
+                  onClick={() => clearByStatus("done")}
+                  icon={Trash2}
+                  label={`Xoá ${done.length} đã xong`}
+                />
+              )}
+              {errored.length > 0 && (
+                <ClearBtn
+                  onClick={() => clearByStatus(["error", "canceled"])}
+                  icon={AlertTriangle}
+                  label={`Xoá ${errored.length} lỗi`}
+                  danger
+                />
+              )}
+            </>
+          }
+        >
           <Grid>
             <AnimatePresence>
               {finished.map((it) => (
@@ -56,7 +84,35 @@ export default function ProjectGrid({ queue, onOpen, onRetry }) {
   );
 }
 
-function Section({ title, count, children, mt = 0 }) {
+function ClearBtn({ onClick, icon: Icon, label, danger }) {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        display: "inline-flex", alignItems: "center", gap: 5,
+        padding: "4px 10px", borderRadius: 6,
+        background: "transparent",
+        border: "1px solid var(--n-3)",
+        color: danger ? "var(--err)" : "var(--n-8)",
+        fontSize: 11, fontWeight: 500, cursor: "pointer",
+        letterSpacing: 0, textTransform: "none",
+      }}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.background = danger
+          ? "rgba(239,68,68,0.08)"
+          : "var(--n-2)";
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.background = "transparent";
+      }}
+    >
+      <Icon size={10} />
+      {label}
+    </button>
+  );
+}
+
+function Section({ title, count, children, mt = 0, actions }) {
   return (
     <div style={{ marginTop: mt }}>
       <div
@@ -78,6 +134,11 @@ function Section({ title, count, children, mt = 0 }) {
         >
           {count}
         </span>
+        {actions && (
+          <div style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
+            {actions}
+          </div>
+        )}
       </div>
       {children}
     </div>

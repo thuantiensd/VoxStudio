@@ -1,15 +1,17 @@
 import { createContext, useContext, useEffect, useRef, useState } from "react";
 import {
   autoDub, exportVideo, exportDownloadURL, getDubbingProject, cancelAutoDub,
+  fetchMe,
 } from "../services/api";
 import { showError } from "../services/errors";
 import { useToast } from "../components/ui/Toast";
 import { userStorage } from "../services/userScope";
+import { useAuth } from "../auth/AuthContext";
 
 const STORAGE_KEY = "voxstudio:batch:outputFolder";
 const QUEUE_KEY = "voxstudio:batch:queue";
 const MAX_HISTORY = 50;
-const MAX_CONCURRENT = 2;  // số job chạy song song (giới hạn theo VRAM/CPU)
+const DEFAULT_CONCURRENT = 1;  // fallback khi chưa load được plan
 
 const BatchCtx = createContext(null);
 
@@ -25,9 +27,21 @@ const BatchCtx = createContext(null);
  */
 export function BatchProvider({ children }) {
   const toast = useToast();
+  const { isAuthenticated } = useAuth() || {};
   const [outputFolder, setOutputFolderState] = useState(() => {
     try { return userStorage.getItem(STORAGE_KEY) || ""; } catch { return ""; }
   });
+  // Dynamic concurrent limit từ plan. Mặc định 1 (free tier) cho tới khi
+  // load xong /me. Tránh frontend chạy 2 job song song khi backend chỉ
+  // cho phép 1 → bị 429 orphan.
+  const [maxConcurrent, setMaxConcurrent] = useState(DEFAULT_CONCURRENT);
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    fetchMe().then((me) => {
+      const n = me?.plan?.limits?.concurrent_jobs;
+      if (Number.isFinite(n) && n >= 1) setMaxConcurrent(n);
+    }).catch(() => {});
+  }, [isAuthenticated]);
   // Queue từ localStorage — convert "running" đang dở thành "pending" để
   // worker tiếp tục khi app mở lại. Giới hạn MAX_HISTORY mục cũ nhất.
   const [queue, setQueue] = useState(() => {
@@ -131,17 +145,24 @@ export function BatchProvider({ children }) {
     setQueue((q) => q.filter((it) => it.projectId !== projectId));
   };
 
-  // Worker: mỗi khi queue đổi, start thêm job nếu còn slot MAX_CONCURRENT.
+  // Xoá tất cả item ở 1 hoặc nhiều trạng thái. Dùng cho "Xoá lỗi"/"Xoá xong".
+  const clearByStatus = (statuses) => {
+    const set = new Set(Array.isArray(statuses) ? statuses : [statuses]);
+    setQueue((q) => q.filter((it) => !set.has(it.status)));
+  };
+
+  // Worker: mỗi khi queue đổi hoặc limit đổi, start thêm job nếu còn slot.
+  // maxConcurrent = plan.limits.concurrent_jobs (free=1, pro=2, studio=5).
   useEffect(() => {
     const running = runningSetRef.current;
-    while (running.size < MAX_CONCURRENT) {
+    while (running.size < maxConcurrent) {
       const next = queue.find(
         (it) => it.status === "pending" && !running.has(it.projectId)
       );
       if (!next) break;
       runJob(next);
     }
-  }, [queue, outputFolder]);
+  }, [queue, outputFolder, maxConcurrent]);
 
   function runJob(next) {
     runningSetRef.current.add(next.projectId);
@@ -275,8 +296,10 @@ export function BatchProvider({ children }) {
     queue,
     enqueue,
     clearDone,
+    clearByStatus,
     cancelItem,
     removeItem,
+    maxConcurrent,
   };
 
   return <BatchCtx.Provider value={value}>{children}</BatchCtx.Provider>;

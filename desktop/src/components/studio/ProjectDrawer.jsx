@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import {
   X, Loader2, Play, FolderOpen, RotateCcw, Settings, ChevronRight,
@@ -8,8 +8,8 @@ import { getDubbingProject, thumbnailURL, dubbingVideoURL, listEdgeVoices, updat
 import { useToast } from "../ui/Toast";
 import { showError } from "../../services/errors";
 import ProjectCard from "./ProjectCard";
-import DubbingTab from "./DubbingTab";
-import AdvancedTab from "./AdvancedTab";
+import SegmentEditor from "./SegmentEditor";
+import SubtitlePanel from "./panels/SubtitlePanel";
 
 /**
  * ProjectDrawer — side panel trượt từ phải, không navigate đi đâu.
@@ -27,7 +27,7 @@ export default function ProjectDrawer({ item, open, onClose }) {
   const [project, setProject] = useState(null);
   const [loading, setLoading] = useState(false);
   const [expert, setExpert] = useState(false);
-  const [expertTab, setExpertTab] = useState("dubbing");
+  const [expertTab, setExpertTab] = useState("quick");
 
   useEffect(() => {
     if (!open || !item) {
@@ -397,31 +397,139 @@ function SimpleFallback({ item, onClose }) {
 }
 
 
-/* ─── Expert view — pro user ──────────────────────────── */
+/* ─── Expert view — pro user, 2-cột: SegmentEditor + Settings ──────── */
 
 function ExpertView({ project, setProject, tab, setTab }) {
+  const videoRef = useRef(null);
+  const [currentTime, setCurrentTime] = useState(0);
+  const toast = useToast();
+
+  // Sync currentTime từ video player
+  useEffect(() => {
+    const v = videoRef.current;
+    if (!v) return;
+    const tick = () => setCurrentTime(v.currentTime);
+    const iv = setInterval(() => {
+      if (!v.paused) tick();
+    }, 200);
+    v.addEventListener("seeked", tick);
+    v.addEventListener("play", tick);
+    return () => {
+      clearInterval(iv);
+      v.removeEventListener("seeked", tick);
+      v.removeEventListener("play", tick);
+    };
+  }, [project?.id]);
+
+  const handleSeek = (sec) => {
+    const v = videoRef.current;
+    if (!v) return;
+    v.currentTime = sec;
+    if (v.paused) v.play().catch(() => {});
+  };
+
+  const handleSegmentChange = (seg) => {
+    setProject((p) => {
+      if (!p) return p;
+      return {
+        ...p,
+        segments: (p.segments || []).map((s) => s.id === seg.id ? { ...s, ...seg } : s),
+      };
+    });
+  };
+
   return (
-    <div style={{ flex: 1, display: "flex", flexDirection: "column",
-                    minHeight: 0, overflow: "hidden" }}>
-      {/* Tab switcher */}
+    <div style={{
+      flex: 1, display: "flex", minHeight: 0, overflow: "hidden",
+    }}>
+      {/* Left column: video + segments */}
       <div style={{
-        flexShrink: 0,
-        padding: "8px 14px",
-        borderBottom: "1px solid var(--n-3)",
-        display: "flex", gap: 6,
+        flex: 1, minWidth: 0,
+        display: "flex", flexDirection: "column",
+        borderRight: "1px solid var(--n-3)",
       }}>
-        <TabBtn active={tab === "dubbing"} onClick={() => setTab("dubbing")}>
-          Lồng tiếng
-        </TabBtn>
-        <TabBtn active={tab === "advanced"} onClick={() => setTab("advanced")}>
-          Timeline
-        </TabBtn>
+        <div style={{
+          flexShrink: 0,
+          padding: 12,
+          background: "var(--n-1)",
+          borderBottom: "1px solid var(--n-3)",
+        }}>
+          <ExpertVideo project={project} videoRef={videoRef} />
+        </div>
+        <div style={{ flex: 1, minHeight: 0, overflow: "hidden" }}>
+          <SegmentEditor
+            project={project}
+            currentTime={currentTime}
+            onSeek={handleSeek}
+            onSegmentChange={handleSegmentChange}
+          />
+        </div>
       </div>
-      <div style={{ flex: 1, minHeight: 0, overflow: "hidden" }}>
-        {tab === "dubbing"
-          ? <DubbingTab project={project} setProject={setProject} />
-          : <AdvancedTab project={project} setProject={setProject} />}
+
+      {/* Right column: settings panels */}
+      <div style={{
+        flexShrink: 0, width: 320,
+        display: "flex", flexDirection: "column",
+        background: "var(--n-1)",
+      }}>
+        <div style={{
+          flexShrink: 0,
+          padding: "10px 14px",
+          borderBottom: "1px solid var(--n-3)",
+          display: "flex", gap: 4,
+        }}>
+          <TabBtn active={tab === "style"} onClick={() => setTab("style")}>
+            Kiểu phụ đề
+          </TabBtn>
+          <TabBtn active={tab === "quick"} onClick={() => setTab("quick")}>
+            Cài đặt
+          </TabBtn>
+        </div>
+        <div style={{ flex: 1, minHeight: 0, overflowY: "auto" }}>
+          {tab === "style" && (
+            <SubtitlePanel project={project} setProject={setProject} />
+          )}
+          {tab === "quick" && (
+            <div style={{ padding: 14 }}>
+              <QuickConfig project={project} setProject={setProject} />
+            </div>
+          )}
+        </div>
       </div>
+    </div>
+  );
+}
+
+
+function ExpertVideo({ project, videoRef }) {
+  const [failed, setFailed] = useState(false);
+  const src = dubbingVideoURL(project?.id);
+
+  if (failed) {
+    return (
+      <div style={{
+        aspectRatio: "16/9", maxHeight: 220,
+        display: "flex", alignItems: "center", justifyContent: "center",
+        background: "var(--n-2)", borderRadius: 8,
+        color: "var(--n-7)", fontSize: 12,
+      }}>
+        Chưa có video để xem (đang xử lý)
+      </div>
+    );
+  }
+
+  return (
+    <div style={{
+      background: "#000", borderRadius: 8, overflow: "hidden",
+      maxHeight: 240,
+    }}>
+      <video
+        ref={videoRef}
+        src={src}
+        controls
+        style={{ width: "100%", maxHeight: 240, display: "block" }}
+        onError={() => setFailed(true)}
+      />
     </div>
   );
 }

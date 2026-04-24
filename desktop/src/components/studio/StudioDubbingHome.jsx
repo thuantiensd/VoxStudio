@@ -25,9 +25,13 @@ import ProjectDrawer from "./ProjectDrawer";
 export default function StudioDubbingHome() {
   const toast = useToast();
   const navigate = useNavigate();
-  const { queue, enqueue } = useBatch();
+  const { queue, enqueue, maxConcurrent } = useBatch();
   const [busy, setBusy] = useState(false);
   const [drawerItem, setDrawerItem] = useState(null);
+
+  const runningCount = queue.filter((q) => q.status === "running").length;
+  const pendingCount = queue.filter((q) => q.status === "pending").length;
+  const slotFull = runningCount >= maxConcurrent;
 
   async function handleFiles(files, preset) {
     if (busy) return;
@@ -103,6 +107,25 @@ export default function StudioDubbingHome() {
       />
       <PageContent maxWidth={1100}>
         <DropZone onFilesAccepted={handleFiles} />
+        {slotFull && (
+          <div style={{
+            marginTop: 12,
+            padding: "10px 14px",
+            borderRadius: 8,
+            background: "rgba(251,191,36,0.08)",
+            border: "1px solid rgba(251,191,36,0.3)",
+            fontSize: 12.5,
+            color: "var(--n-9)",
+            display: "flex", alignItems: "center", gap: 8,
+          }}>
+            <span style={{ fontSize: 14 }}>⏳</span>
+            <span>
+              Đang xử lý <b>{runningCount}</b> video
+              {pendingCount > 0 && `, ${pendingCount} đang chờ`}.
+              Gói hiện tại cho phép tối đa {maxConcurrent} tác vụ cùng lúc — video mới thả vào sẽ xếp hàng tự động.
+            </span>
+          </div>
+        )}
         <ProjectGrid
           queue={queue}
           onOpen={openProject}
