@@ -70,19 +70,34 @@ export function BatchProvider({ children }) {
 
   const enqueue = (items) => {
     // items: [{ projectId, filename }]
-    setQueue((q) => [
-      ...q,
-      ...items.map((it) => ({
-        projectId: it.projectId,
-        filename: it.filename,
-        status: "pending",
-        startedAt: null,
-        finishedAt: null,
-        progress: 0,
-        step: null,      // label pipeline step hiện tại
-        error: null,
-      })),
-    ]);
+    // Nếu projectId đã có trong queue (state error/canceled/done) → reset
+    // sang pending thay vì tạo entry mới. Dùng cho flow Retry.
+    setQueue((q) => {
+      const byId = new Map(q.map((it) => [it.projectId, it]));
+      const out = [...q];
+      for (const it of items) {
+        const existing = byId.get(it.projectId);
+        const fresh = {
+          projectId: it.projectId,
+          filename: it.filename || existing?.filename,
+          status: "pending",
+          startedAt: null, finishedAt: null,
+          progress: 0, step: null, error: null,
+          outputPath: null,
+        };
+        if (existing) {
+          // Clear flags từ worker tracking để worker có thể pick lại
+          canceledRef.current.delete(it.projectId);
+          runningSetRef.current.delete(it.projectId);
+          abortMapRef.current.delete(it.projectId);
+          const idx = out.indexOf(existing);
+          out[idx] = fresh;
+        } else {
+          out.push(fresh);
+        }
+      }
+      return out;
+    });
   };
 
   const clearDone = () => {
