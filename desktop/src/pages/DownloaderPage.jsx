@@ -27,6 +27,7 @@ const HISTORY_KEY = "voxstudio:download:history";
 const AGREED_KEY = "voxstudio:download:disclaimerAgreed";
 const ENGINE_KEY = "voxstudio:download:engine";
 const RES_KEY = "voxstudio:download:maxHeight";
+const LAST_FOLDER_KEY = "voxstudio:download:lastFolder";
 const MAX_HISTORY = 20;
 
 const PLATFORM_COLORS = {
@@ -266,14 +267,15 @@ export default function DownloaderPage() {
 
 
   const handleToFolder = () => withDisclaimer(() => {
-    if (!info?.video_url) {
-      toast.warn("Hãy phân tích link trước.");
+    if (!validUrl) {
+      toast.warn("URL chưa hợp lệ.");
       return;
     }
-    if (!window.voxstudio?.saveRemoteFileToFolder) {
-      toast.warn("Chức năng tải về thư mục cần chạy trong desktop app.");
+    if (!window.voxstudio?.downloader?.start) {
+      toast.warn("Tải về máy yêu cầu chạy trong app desktop.");
       return;
     }
+    // Không bắt phải phân tích trước — yt-dlp local tải được URL thẳng
     setSaveAsOpen(true);
   });
 
@@ -284,6 +286,11 @@ export default function DownloaderPage() {
   const localDlIdRef = useRef(null);
   const doDownloadToFolder = async ({ folder, filename, overwrite }) => {
     setSaveAsOpen(false);
+
+    // Remember folder này → lần sau mở SaveAsModal tự điền
+    if (folder) {
+      try { userStorage.setItem(LAST_FOLDER_KEY, folder); } catch {}
+    }
 
     // Fallback server nếu không chạy trong Electron (rare — web preview)
     if (!window.voxstudio?.downloader?.start) {
@@ -497,7 +504,10 @@ export default function DownloaderPage() {
         open={saveAsOpen}
         onClose={() => setSaveAsOpen(false)}
         defaultName={cleanName(info?.title || "video")}
-        defaultFolder={userStorage.getItem("voxstudio:batch:outputFolder")}
+        defaultFolder={
+          userStorage.getItem(LAST_FOLDER_KEY) ||
+          userStorage.getItem("voxstudio:batch:outputFolder") || ""
+        }
         ext=".mp4"
         onSave={doDownloadToFolder}
       />
@@ -595,10 +605,15 @@ function HeroInput({ url, onUrl, onPaste, onAnalyze, fetching, disabled,
         </div>
       </div>
       {currentHint && (
-        <p style={{ fontSize: 11, color: "var(--n-8)", marginTop: -8, marginBottom: 12 }}>
+        <p style={{ fontSize: 11, color: "var(--n-8)", marginTop: -8, marginBottom: 4 }}>
           · {currentHint}
         </p>
       )}
+      <p style={{ fontSize: 10.5, color: "var(--n-7)",
+                  marginTop: 0, marginBottom: 12, fontStyle: "italic" }}>
+        Engine chỉ áp dụng khi "Tải + Lồng tiếng". "Tải về máy" luôn dùng
+        yt-dlp local trên máy bạn.
+      </p>
 
       {/* Resolution row */}
       <div className="flex items-center gap-2 mb-3 flex-wrap">

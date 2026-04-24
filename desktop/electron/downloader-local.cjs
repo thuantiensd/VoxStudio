@@ -14,6 +14,7 @@
  */
 const { spawn } = require("node:child_process");
 const fs = require("node:fs");
+const fsPromises = require("node:fs/promises");
 const path = require("node:path");
 const os = require("node:os");
 
@@ -80,6 +81,23 @@ function resolveFfmpeg() {
   return null;
 }
 
+/**
+ * _uniqueSyncPath — tìm tên file chưa tồn tại trong folder.
+ * Nếu "name.mp4" đã có → thử "name (1).mp4" → "name (2).mp4" ...
+ */
+function _uniqueSyncPath(folder, filename) {
+  const ext = path.extname(filename);
+  const base = path.basename(filename, ext);
+  let candidate = path.join(folder, filename);
+  let i = 1;
+  while (fs.existsSync(candidate)) {
+    candidate = path.join(folder, `${base} (${i})${ext}`);
+    i += 1;
+    if (i > 999) break;  // safety
+  }
+  return candidate;
+}
+
 /** yt-dlp format selector — ưu tiên H.264 tối đa để QuickTime mở được. */
 function buildFormatSelector(maxHeight = 1080, prefer264 = true) {
   const h = Math.max(240, Math.min(2160, parseInt(maxHeight) || 1080));
@@ -142,14 +160,19 @@ function download(opts) {
     + '"downloaded":"%(progress._downloaded_bytes_str)s",'
     + '"total":"%(progress._total_bytes_str)s"}';
 
-  // User provide custom filename? Strip ext để yt-dlp tự thêm .mp4
+  // Resolve output filename. Nếu user cho custom filename → unique sync ngay.
+  // Nếu không → dùng template có %(id)s để yt-dlp tự tránh collision same video.
   let outTemplate;
   if (filename && typeof filename === "string") {
     const clean = filename.replace(/\.[a-z0-9]{1,5}$/i, "");
-    // yt-dlp không cần escape template trong filename user
-    outTemplate = path.join(folder, `${clean}.%(ext)s`);
+    // Tìm tên unique: "name.mp4" → "name (1).mp4" → ...
+    const target = _uniqueSyncPath(folder, `${clean}.mp4`);
+    const base = path.basename(target, ".mp4");
+    outTemplate = path.join(folder, `${base}.%(ext)s`);
   } else {
-    outTemplate = path.join(folder, "%(title).180s.%(ext)s");
+    // Include short video ID nếu không có custom name — đảm bảo different
+    // videos cùng title không đè nhau, same video re-download → replace OK.
+    outTemplate = path.join(folder, "%(title).150s [%(id).11s].%(ext)s");
   }
 
   // ffmpeg cần thiết để yt-dlp merge video+audio thành 1 file
@@ -178,14 +201,9 @@ function download(opts) {
     args.push("--ffmpeg-location", ffmpegPath);
   }
 
-  if (transcode) {
-    // Post-process: ffmpeg convert sang H.264 sau download (heavy trên máy yếu).
-    // User bật khi FB/YouTube chỉ có VP9/AV1 → cần transcode để QuickTime mở.
-    args.push(
-      "--recode-video", "mp4",
-      "--postprocessor-args", "ffmpeg:-c:v libx264 -preset fast -crf 22 -c:a aac",
-    );
-  }
+  // KHÔNG dùng yt-dlp --recode-video vì nó chỉ check ext (mp4) không check
+  // codec bên trong (VP9 trong .mp4 vẫn bị skip). Thay bằng transcode
+  // manual sau khi yt-dlp xong (xem block post-download bên dưới).
 
   args.push(url);
 
@@ -256,14 +274,30 @@ function download(opts) {
     child.on("error", (e) => {
       reject(new Error(`Không chạy được yt-dlp: ${e.message}. Cài đặt qua: brew install yt-dlp hoặc pip install yt-dlp`));
     });
-    child.on("close", (code) => {
-      if (code === 0) {
-        emit({ step: "done", label: "Hoàn tất", progress: 100, path: finalPath });
-        resolve({ path: finalPath });
-      } else {
+    child.on("close", async (code) => {
+      if (code !== 0) {
         const userMsg = extractUserError(stderrBuf) || `Lỗi tải (code ${code})`;
         reject(new Error(userMsg));
+        return;
       }
+      // Download xong — nếu transcode=true thì check codec thực và
+      // re-encode sang H.264 + AAC cho QuickTime compat.
+      if (transcode && finalPath && ffmpegPath) {
+        try {
+          const needsTranscode = await _probeNeedsTranscode(ffmpegPath, finalPath);
+          if (needsTranscode) {
+            emit({ step: "transcoding",
+                    label: "Chuyển mã H.264 cho QuickTime…",
+                    progress: 96 });
+            await _transcodeToH264(ffmpegPath, finalPath, emit);
+          }
+        } catch (e) {
+          // Transcode fail không fatal — user vẫn có file VP9, chỉ warn
+          console.warn("[downloader] transcode skipped:", e?.message);
+        }
+      }
+      emit({ step: "done", label: "Hoàn tất", progress: 100, path: finalPath });
+      resolve({ path: finalPath });
     });
   });
 
@@ -273,6 +307,80 @@ function download(opts) {
       try { child.kill("SIGTERM"); } catch {}
     },
   };
+}
+
+
+/**
+ * Probe codec bằng ffmpeg -i (stderr) — return true nếu cần transcode.
+ * Cần transcode nếu vcodec không phải h264/hevc HOẶC acodec không phải aac.
+ */
+async function _probeNeedsTranscode(ffmpegPath, filePath) {
+  return new Promise((resolve) => {
+    const p = spawn(ffmpegPath, ["-hide_banner", "-i", filePath],
+                     { stdio: ["ignore", "pipe", "pipe"] });
+    let stderr = "";
+    p.stderr.on("data", (c) => { stderr += c.toString(); });
+    p.on("close", () => {
+      // Parse stderr cho "Stream #...: Video: <codec>"
+      const videoMatch = stderr.match(/Stream .*: Video: (\w+)/);
+      const audioMatch = stderr.match(/Stream .*: Audio: (\w+)/);
+      const vcodec = (videoMatch?.[1] || "").toLowerCase();
+      const acodec = (audioMatch?.[1] || "").toLowerCase();
+      // h264 / hevc OK cho QuickTime. aac OK cho audio.
+      const videoOK = ["h264", "hevc", "h265"].includes(vcodec);
+      const audioOK = ["aac", "mp3"].includes(acodec);
+      resolve(!videoOK || !audioOK);
+    });
+    p.on("error", () => resolve(false));
+  });
+}
+
+
+/** Chạy ffmpeg transcode → h264+aac, ghi đè file gốc. */
+async function _transcodeToH264(ffmpegPath, filePath, emit) {
+  const tmpPath = filePath.replace(/\.[^.]+$/, "") + ".transcode.mp4";
+  return new Promise((resolve, reject) => {
+    const args = [
+      "-hide_banner", "-loglevel", "error", "-stats",
+      "-y",
+      "-i", filePath,
+      "-c:v", "libx264", "-preset", "fast", "-crf", "22",
+      "-pix_fmt", "yuv420p",        // bắt buộc cho QuickTime
+      "-c:a", "aac", "-b:a", "192k",
+      "-movflags", "+faststart",    // streamable
+      tmpPath,
+    ];
+    const p = spawn(ffmpegPath, args, { stdio: ["ignore", "pipe", "pipe"] });
+    // Parse progress từ ffmpeg stats (time=HH:MM:SS.xx)
+    let stderr = "";
+    p.stderr.on("data", (c) => {
+      const s = c.toString();
+      stderr += s;
+      const m = s.match(/time=(\d+):(\d+):([\d.]+)/);
+      if (m) {
+        // Lần đầu chưa biết tổng duration → hiện progress dạng "Đã xử lý Xs"
+        const secs = parseInt(m[1]) * 3600 + parseInt(m[2]) * 60 + parseFloat(m[3]);
+        emit({ step: "transcoding",
+                label: `Chuyển mã H.264… (đã xử lý ${Math.round(secs)}s)`,
+                progress: 97 });
+      }
+    });
+    p.on("error", (e) => reject(e));
+    p.on("close", async (code) => {
+      if (code !== 0) {
+        reject(new Error(`ffmpeg transcode failed (${code}): ${stderr.slice(-300)}`));
+        return;
+      }
+      // Replace original file
+      try {
+        await fsPromises.unlink(filePath);
+        await fsPromises.rename(tmpPath, filePath);
+        resolve();
+      } catch (e) {
+        reject(e);
+      }
+    });
+  });
 }
 
 /** Extract user-friendly error từ yt-dlp stderr. */
