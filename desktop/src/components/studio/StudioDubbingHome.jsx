@@ -7,6 +7,7 @@ import { createDubbingProject } from "../../services/api";
 import { showError } from "../../services/errors";
 import DropZone from "./DropZone";
 import ProjectGrid from "./ProjectGrid";
+import ProjectDrawer from "./ProjectDrawer";
 
 /**
  * StudioDubbingHome — trang chính lồng tiếng video.
@@ -26,6 +27,7 @@ export default function StudioDubbingHome() {
   const navigate = useNavigate();
   const { queue, enqueue } = useBatch();
   const [busy, setBusy] = useState(false);
+  const [drawerItem, setDrawerItem] = useState(null);
 
   async function handleFiles(files, preset) {
     if (busy) return;
@@ -81,14 +83,10 @@ export default function StudioDubbingHome() {
   }
 
   function openProject(item) {
-    // Done + có outputPath → mở file native. Khác → vào editor để xem detail.
-    if (item.status === "done" && item.outputPath) {
-      window.voxstudio?.openFileInApp?.(item.outputPath)
-        .catch((err) => showError(toast, err, { context: "open file" }));
-      return;
-    }
-    // Running / pending / error → navigate tới editor để xem progress/sửa
-    navigate(`/studio/dubbing/${item.projectId}`);
+    // Mở drawer bên phải, không navigate đi đâu — user vẫn thấy grid.
+    // Drawer tự quyết định: done → video player, running → progress + config,
+    // error → chi tiết lỗi + retry.
+    setDrawerItem(item);
   }
 
   function retryProject(item) {
@@ -111,6 +109,11 @@ export default function StudioDubbingHome() {
           onRetry={retryProject}
         />
       </PageContent>
+      <ProjectDrawer
+        item={drawerItem}
+        open={!!drawerItem}
+        onClose={() => setDrawerItem(null)}
+      />
     </Page>
   );
 }
