@@ -3,7 +3,7 @@ import {
   Clapperboard, Image as ImageIcon, Wand2, Sparkles, Music,
   Scissors, Sunrise, Lock,
 } from "lucide-react";
-import StudioHome from "./StudioHome";
+import StudioDubbingHome from "./StudioDubbingHome";
 
 /**
  * StudioHub — hub đa công cụ AI (phương án B: split view).
@@ -224,7 +224,7 @@ function ToolItem({ tool, active, onClick }) {
 /* ─── Tool content dispatcher ─── */
 
 function ToolContent({ tool }) {
-  if (tool.id === "dubbing") return <StudioHome />;
+  if (tool.id === "dubbing") return <StudioDubbingHome />;
   // fallback — không nên xảy ra vì mọi ready tool đều được handle
   return <ComingSoon tool={tool} />;
 }
