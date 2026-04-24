@@ -470,7 +470,7 @@ export default function STTPage() {
     <Page>
       <PageHeader
         title="Phụ đề (STT)"
-        subtitle="Trích xuất phụ đề từ audio/video · batch theo thư mục · xuất SRT · VTT · TXT · JSON · CSV"
+        subtitle="Trích xuất phụ đề từ audio/video · xử lý nhiều file cùng lúc · xuất SRT · VTT · TXT · JSON · CSV"
       >
         {items.length > 0 && !running && (
           <Button size="sm" variant="ghost" icon={Trash2} onClick={clearAll}>
@@ -560,7 +560,7 @@ export default function STTPage() {
                 ))}
               </select>
               <p style={{ marginTop: 6, fontSize: 11, color: "var(--n-7)" }}>
-                Whisper tự nhận diện khá chính xác — chỉ chọn tay khi auto sai.
+                Ứng dụng tự nhận diện khá chính xác — chỉ chọn tay khi sai.
               </p>
             </ConfigCard>
 

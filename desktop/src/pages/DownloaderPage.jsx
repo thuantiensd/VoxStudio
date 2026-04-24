@@ -307,7 +307,7 @@ export default function DownloaderPage() {
     const offProgress = window.voxstudio.downloader.onProgress((p) => {
       if (p.id !== localDlIdRef.current) return;
       if (p.step === "starting")
-        setProgressLabel("Khởi động yt-dlp…");
+        setProgressLabel("Đang chuẩn bị…");
       else if (p.step === "downloading") {
         setProgressLabel("Đang tải…");
         setProgressDetail(
@@ -318,8 +318,8 @@ export default function DownloaderPage() {
         setProgressLabel("Ghép video + audio…");
         setProgress(95);
       } else if (p.step === "transcoding") {
-        setProgressLabel("Chuyển mã H.264…");
-        setProgressDetail("Xử lý local, CPU cao tạm thời");
+        setProgressLabel("Đang tối ưu video…");
+        setProgressDetail("Gần xong, máy sẽ bận 1 chút");
         setProgress(97);
       } else if (p.step === "done") {
         setProgress(100);
@@ -362,7 +362,7 @@ export default function DownloaderPage() {
       };
     } catch (e) {
       offProgress?.();
-      toast.error(e?.message || "Không khởi động được yt-dlp",
+      toast.error(e?.message || "Không tải được video. Vui lòng thử lại.",
                    { title: "Lỗi" });
       reset();
     }
@@ -611,8 +611,8 @@ function HeroInput({ url, onUrl, onPaste, onAnalyze, fetching, disabled,
       )}
       <p style={{ fontSize: 10.5, color: "var(--n-7)",
                   marginTop: 0, marginBottom: 12, fontStyle: "italic" }}>
-        Engine chỉ áp dụng khi "Tải + Lồng tiếng". "Tải về máy" luôn dùng
-        yt-dlp local trên máy bạn.
+        Chế độ chỉ áp dụng khi "Tải + Lồng tiếng". "Tải về máy" luôn
+        xử lý ngay trên máy bạn.
       </p>
 
       {/* Resolution row */}
@@ -627,10 +627,10 @@ function HeroInput({ url, onUrl, onPaste, onAnalyze, fetching, disabled,
           options={resOptions}
         />
         <div style={{ flex: 1 }} />
-        {/* H.264 transcode toggle — default ON cho QuickTime compat */}
+        {/* Transcode toggle — default ON cho QuickTime compat */}
         <label
           className="flex items-center gap-1.5 cursor-pointer"
-          title="Chuyển mã H.264 để QuickTime / mọi video player đọc được. Tắt nếu muốn giữ codec gốc (nhanh hơn, chỉ mở bằng VLC/Chrome)."
+          title="Tối ưu video để mở được trên QuickTime và mọi ứng dụng video. Tắt nếu muốn tải nhanh hơn (giữ định dạng gốc — có thể chỉ mở được bằng VLC / Chrome)."
           style={{ fontSize: 11, color: "var(--n-8)" }}
         >
           <input
@@ -639,7 +639,7 @@ function HeroInput({ url, onUrl, onPaste, onAnalyze, fetching, disabled,
             onChange={(e) => onTranscode?.(e.target.checked)}
             style={{ accentColor: "var(--accent)" }}
           />
-          QuickTime-compatible (H.264)
+          Tương thích cao
         </label>
       </div>
       <div
