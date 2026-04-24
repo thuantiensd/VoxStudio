@@ -83,8 +83,12 @@ export default function DownloaderPage() {
   // tương thích QuickTime/iMovie cũ
   const TRANSCODE_KEY = "voxstudio:download:transcodeH264";
   const [transcodeH264, setTranscodeH264] = useState(() => {
-    try { return userStorage.getItem(TRANSCODE_KEY) === "1"; }
-    catch { return false; }
+    // Default ON — đa số user trên Mac mở bằng QuickTime, cần H.264 compat.
+    // FB Reels/YouTube 4K trả VP9/AV1 mà QuickTime không decode được.
+    try {
+      const v = userStorage.getItem(TRANSCODE_KEY);
+      return v === null ? true : v === "1";
+    } catch { return true; }
   });
   const setTranscodePersist = (v) => {
     setTranscodeH264(v);
@@ -608,10 +612,10 @@ function HeroInput({ url, onUrl, onPaste, onAnalyze, fetching, disabled,
           options={resOptions}
         />
         <div style={{ flex: 1 }} />
-        {/* H.264 transcode toggle — default OFF (nhẹ máy) */}
+        {/* H.264 transcode toggle — default ON cho QuickTime compat */}
         <label
           className="flex items-center gap-1.5 cursor-pointer"
-          title="Chuyển mã H.264 nếu video gốc dùng AV1/HEVC — cần cho QuickTime/iMovie cũ. Tốn CPU máy bạn 30-90s."
+          title="Chuyển mã H.264 để QuickTime / mọi video player đọc được. Tắt nếu muốn giữ codec gốc (nhanh hơn, chỉ mở bằng VLC/Chrome)."
           style={{ fontSize: 11, color: "var(--n-8)" }}
         >
           <input
@@ -620,7 +624,7 @@ function HeroInput({ url, onUrl, onPaste, onAnalyze, fetching, disabled,
             onChange={(e) => onTranscode?.(e.target.checked)}
             style={{ accentColor: "var(--accent)" }}
           />
-          Tương thích cao (H.264)
+          QuickTime-compatible (H.264)
         </label>
       </div>
       <div

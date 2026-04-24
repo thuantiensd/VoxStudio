@@ -80,14 +80,25 @@ function resolveFfmpeg() {
   return null;
 }
 
-/** yt-dlp format selector — ưu tiên H.264 sẵn để không cần transcode. */
+/** yt-dlp format selector — ưu tiên H.264 tối đa để QuickTime mở được. */
 function buildFormatSelector(maxHeight = 1080, prefer264 = true) {
   const h = Math.max(240, Math.min(2160, parseInt(maxHeight) || 1080));
   if (prefer264) {
-    // Ưu tiên avc1 (H.264) sẵn → mọi player đọc được, không cần transcode.
-    // Fallback sang bestvideo nếu source không có H.264.
+    // Thử lần lượt từ ngon → tệ:
+    //   1. H.264 + AAC (QuickTime native)
+    //   2. H.264 + bất cứ audio nào
+    //   3. Progressive MP4 single file (thường FB/YT có bản H.264 720p)
+    //   4. HEVC/H.265 (QuickTime từ macOS 10.13 hỗ trợ)
+    //   5. Bất cứ MP4 container
+    //   6. Whatever is best (VP9/AV1 — last resort, QuickTime may fail)
     return (
       `bestvideo[vcodec^=avc1][height<=${h}]+bestaudio[acodec^=mp4a]` +
+      `/bestvideo[vcodec^=avc1][height<=${h}]+bestaudio` +
+      `/best[vcodec^=avc1][height<=${h}][ext=mp4]` +
+      `/bestvideo[vcodec^=hvc1][height<=${h}]+bestaudio` +
+      `/bestvideo[vcodec^=h265][height<=${h}]+bestaudio` +
+      `/bestvideo[ext=mp4][height<=${h}]+bestaudio[ext=m4a]` +
+      `/best[ext=mp4][height<=${h}]` +
       `/bestvideo[height<=${h}]+bestaudio` +
       `/best[height<=${h}]`
     );
@@ -151,6 +162,10 @@ function download(opts) {
     "--newline",
     "--restrict-filenames",   // dấu tiếng Việt OK, nhưng bỏ ký tự đặc biệt
     "--format", fmt,
+    // Sort format: ưu tiên codec H.264 trên mọi thứ khác — yt-dlp sẽ
+    // pick H.264 ở res thấp hơn thay vì VP9/AV1 ở res cao, vì mục tiêu
+    // là file chạy được trên QuickTime/mọi player.
+    "--format-sort", "vcodec:h264,vcodec:h265,ext:mp4,res,br,acodec:m4a",
     "--merge-output-format", "mp4",
     "--progress-template", progressTemplate,
     "-o", outTemplate,
@@ -164,10 +179,11 @@ function download(opts) {
   }
 
   if (transcode) {
-    // Post-process: ffmpeg convert sang H.264 sau download (heavy trên máy yếu)
+    // Post-process: ffmpeg convert sang H.264 sau download (heavy trên máy yếu).
+    // User bật khi FB/YouTube chỉ có VP9/AV1 → cần transcode để QuickTime mở.
     args.push(
       "--recode-video", "mp4",
-      "--postprocessor-args", "ffmpeg:-c:v libx264 -preset fast -crf 22",
+      "--postprocessor-args", "ffmpeg:-c:v libx264 -preset fast -crf 22 -c:a aac",
     );
   }
 
