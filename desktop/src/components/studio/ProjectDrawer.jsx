@@ -1,38 +1,32 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import {
-  X, Loader2, Play, FolderOpen, RotateCcw, Settings, ChevronRight,
-  AlertTriangle, Sparkles, Check, ExternalLink,
+  X, Loader2, FolderOpen, RotateCcw,
+  AlertTriangle, Check, ExternalLink,
 } from "lucide-react";
-import { getDubbingProject, thumbnailURL, dubbingVideoURL, listEdgeVoices, updateProjectSettings } from "../../services/api";
+import { getDubbingProject, thumbnailURL, dubbingVideoURL, exportStreamURL, listEdgeVoices, updateProjectSettings } from "../../services/api";
 import { useToast } from "../ui/Toast";
 import { showError } from "../../services/errors";
 import ProjectCard from "./ProjectCard";
-import SegmentEditor from "./SegmentEditor";
-import SubtitlePanel from "./panels/SubtitlePanel";
+import { useT } from "../../i18n/I18nContext";
 
 /**
- * ProjectDrawer — side panel trượt từ phải, không navigate đi đâu.
+ * ProjectDrawer — side panel trượt từ phải để xem nhanh dự án.
  *
- * UX:
- *   • Simple mode (default): video preview + 3 field gọn + actions (Mở file,
- *     Mở thư mục, Chỉnh lại với setting mới, Thử lại)
- *   • Expert mode: toggle button phía trên → xổ full DubbingTab /
- *     AdvancedTab như cũ, dùng cho pro user
+ * Hiển thị: thumbnail/video preview + status (running/done/error) + actions
+ * (Mở video, Mở thư mục, Thử lại) + cấu hình nhanh (giọng + đích + toggle).
  *
  * Click backdrop hoặc nút X để đóng. ESC cũng đóng.
  */
 export default function ProjectDrawer({ item, open, onClose }) {
+  const t = useT();
   const toast = useToast();
   const [project, setProject] = useState(null);
   const [loading, setLoading] = useState(false);
-  const [expert, setExpert] = useState(false);
-  const [expertTab, setExpertTab] = useState("quick");
 
   useEffect(() => {
     if (!open || !item) {
       setProject(null);
-      setExpert(false);
       return;
     }
     setLoading(true);
@@ -66,22 +60,29 @@ export default function ProjectDrawer({ item, open, onClose }) {
               backdropFilter: "blur(3px)",
             }}
           />
-          {/* Drawer */}
+          {/* Modal nổi giữa màn hình */}
           <motion.div
-            initial={{ x: "100%" }}
-            animate={{ x: 0 }}
-            exit={{ x: "100%" }}
-            transition={{ duration: 0.22, ease: [0.2, 0.8, 0.2, 1] }}
+            initial={{ opacity: 0, scale: 0.96, y: 8 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.96, y: 8 }}
+            transition={{ duration: 0.18, ease: [0.2, 0.8, 0.2, 1] }}
             style={{
-              position: "fixed", top: 0, right: 0, bottom: 0,
-              width: expert ? "min(1200px, 92vw)" : "min(560px, 92vw)",
-              zIndex: 150,
+              position: "fixed", inset: 0, zIndex: 150,
+              display: "flex", alignItems: "center", justifyContent: "center",
+              padding: 24, pointerEvents: "none",
+            }}
+          >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: "min(820px, 96vw)", maxHeight: "calc(100vh - 48px)",
               background: "var(--n-0)",
-              borderLeft: "1px solid var(--n-3)",
-              boxShadow: "-12px 0 28px rgba(0,0,0,0.25)",
+              border: "1px solid var(--n-3)",
+              borderRadius: 12,
+              boxShadow: "0 24px 60px rgba(0,0,0,0.55)",
               display: "flex", flexDirection: "column",
               overflow: "hidden",
-              transition: "width 0.22s cubic-bezier(0.2, 0.8, 0.2, 1)",
+              pointerEvents: "auto",
             }}
           >
             {/* Header */}
@@ -96,8 +97,8 @@ export default function ProjectDrawer({ item, open, onClose }) {
               <button
                 onClick={onClose}
                 style={iconBtn}
-                title="Đóng (ESC)"
-                aria-label="Đóng"
+                title={t("drawer.closeEsc")}
+                aria-label={t("aria.close")}
               >
                 <X size={15} />
               </button>
@@ -106,7 +107,7 @@ export default function ProjectDrawer({ item, open, onClose }) {
                   fontSize: 14, fontWeight: 600, color: "var(--n-10)",
                   whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
                 }} title={item?.filename}>
-                  {item?.filename || item?.projectId || "Dự án"}
+                  {item?.filename || item?.projectId || t("drawer.project")}
                 </div>
                 {project?.video_duration && (
                   <div style={{ fontSize: 11, color: "var(--n-7)", marginTop: 2 }}>
@@ -115,43 +116,27 @@ export default function ProjectDrawer({ item, open, onClose }) {
                   </div>
                 )}
               </div>
-              <button
-                onClick={() => setExpert((v) => !v)}
-                style={{
-                  ...iconBtn,
-                  padding: "6px 10px",
-                  background: expert ? "var(--accent-soft)" : "transparent",
-                  color: expert ? "var(--accent)" : "var(--n-8)",
-                  fontSize: 12, gap: 4, width: "auto",
-                }}
-                title={expert ? "Ẩn chế độ chuyên gia" : "Bật chế độ chuyên gia"}
-              >
-                <Settings size={12} />
-                {expert ? "Đơn giản" : "Chuyên gia"}
-              </button>
             </header>
 
             {/* Content */}
-            <div style={{ flex: 1, overflowY: expert ? "hidden" : "auto",
+            <div style={{ flex: 1, overflowY: "auto",
                            display: "flex", flexDirection: "column" }}>
               {loading && (
                 <div style={{
                   flex: 1, display: "flex", alignItems: "center",
                   justifyContent: "center", color: "var(--n-8)", gap: 8,
                 }}>
-                  <Loader2 size={16} className="animate-spin" /> Đang tải…
+                  <Loader2 size={16} className="animate-spin" /> {t("drawer.loading")}
                 </div>
               )}
 
               {!loading && !project && (
                 <div style={{ padding: 24 }}>
-                  {/* Fallback — project chưa load được (backend lỗi) — vẫn
-                      hiển thị thumbnail + status dựa trên `item` của queue */}
                   <SimpleFallback item={item} onClose={onClose} />
                 </div>
               )}
 
-              {!loading && project && !expert && (
+              {!loading && project && (
                 <SimpleView
                   item={item}
                   project={project}
@@ -160,16 +145,8 @@ export default function ProjectDrawer({ item, open, onClose }) {
                   onRevealFolder={() => revealOutput(item)}
                 />
               )}
-
-              {!loading && project && expert && (
-                <ExpertView
-                  project={project}
-                  setProject={setProject}
-                  tab={expertTab}
-                  setTab={setExpertTab}
-                />
-              )}
             </div>
+          </div>
           </motion.div>
         </>
       )}
@@ -181,20 +158,36 @@ export default function ProjectDrawer({ item, open, onClose }) {
 /* ─── Simple view — 95% user dùng ──────────────────────── */
 
 function SimpleView({ item, project, setProject, onOpenFile, onRevealFolder }) {
-  const isDone = item?.status === "done" && item?.outputPath;
-  const isError = item?.status === "error";
-  const isRunning = item?.status === "running" || item?.status === "pending";
+  const t = useT();
+  // Ưu tiên status từ backend project (nguồn sự thật) — fallback queue item
+  const status = project?.status || item?.status;
+  const isDone = status === "done";
+  const isError = status === "error" || item?.status === "error";
+  const isRunning = !isDone && !isError &&
+    (status === "running" || status === "pending" ||
+     item?.status === "running" || item?.status === "pending");
 
   return (
     <div style={{ padding: 18, display: "flex", flexDirection: "column", gap: 18 }}>
-      {/* Preview */}
-      <Preview item={item} project={project} />
+      {/* Preview — auto-play khi xong */}
+      <Preview item={item} project={project} isDone={isDone} />
 
-      {/* Status / Actions */}
+      {/* Done → chỉ nút mở thư mục (video tự phát ở trên). KHÔNG hiện cấu hình. */}
       {isDone && (
-        <div style={{ display: "flex", gap: 8 }}>
-          <ActionButton primary icon={Play} label="Mở video" onClick={onOpenFile} />
-          <ActionButton icon={FolderOpen} label="Mở thư mục" onClick={onRevealFolder} />
+        <div style={{ display: "flex", justifyContent: "flex-end" }}>
+          <button
+            onClick={onRevealFolder}
+            style={{
+              display: "inline-flex", alignItems: "center", gap: 6,
+              padding: "9px 14px", borderRadius: 8,
+              background: "var(--n-1)", color: "var(--n-10)",
+              border: "1px solid var(--n-3)",
+              fontSize: 13, fontWeight: 500, cursor: "pointer",
+              fontFamily: "inherit",
+            }}
+          >
+            <FolderOpen size={14} /> {t("drawer.openFolder")}
+          </button>
         </div>
       )}
 
@@ -207,7 +200,7 @@ function SimpleView({ item, project, setProject, onOpenFile, onRevealFolder }) {
           display: "flex", alignItems: "center", gap: 8,
         }}>
           <Loader2 size={13} className="animate-spin" style={{ color: "var(--accent)" }} />
-          {item.step || "Đang xử lý…"} {item.progress ? `(${Math.round(item.progress)}%)` : ""}
+          {item?.step || t("drawer.processing")} {item?.progress ? `(${Math.round(item.progress)}%)` : ""}
         </div>
       )}
 
@@ -220,41 +213,33 @@ function SimpleView({ item, project, setProject, onOpenFile, onRevealFolder }) {
         }}>
           <div style={{ display: "flex", alignItems: "center", gap: 6,
                          color: "var(--err)", fontWeight: 600, marginBottom: 4 }}>
-            <AlertTriangle size={13} /> Xử lý thất bại
+            <AlertTriangle size={13} /> {t("drawer.failed")}
           </div>
           <div style={{ color: "var(--n-8)", lineHeight: 1.5 }}>
-            {item.error || "Không rõ nguyên nhân. Vui lòng thử lại."}
+            {item?.error || t("drawer.unknownReason")}
           </div>
         </div>
       )}
 
-      {/* Quick config — áp dụng khi re-run */}
-      <QuickConfig project={project} setProject={setProject} />
-
-      {/* Hint expert */}
-      <div style={{
-        padding: "10px 14px", borderRadius: 8,
-        background: "var(--n-1)", border: "1px solid var(--n-3)",
-        fontSize: 11.5, color: "var(--n-7)", lineHeight: 1.55,
-        display: "flex", gap: 8,
-      }}>
-        <Sparkles size={13} style={{ flexShrink: 0, marginTop: 1,
-                                       color: "var(--accent)" }} />
-        <div>
-          Cần chỉnh từng câu phụ đề, timing, hoặc kiểm soát chi tiết? Bật{" "}
-          <b style={{ color: "var(--n-10)" }}>Chế độ chuyên gia</b> ở góc phải.
-        </div>
-      </div>
+      {/* Cấu hình nhanh — chỉ hiện khi CHƯA xong (chỉnh trước khi chạy lại) */}
+      {!isDone && (
+        <QuickConfig project={project} setProject={setProject} />
+      )}
     </div>
   );
 }
 
 
-function Preview({ item, project }) {
-  const isDone = item?.status === "done" && item?.outputPath;
-  const videoSrc = isDone
+function Preview({ item, project, isDone }) {
+  const t = useT();
+  const projectId = item?.projectId || project?.id;
+  // Khi xong: ưu tiên file local (nhanh, offline), nếu không có thì stream
+  // file export đã dub (KHÔNG phải video gốc). Khi đang xử lý → video gốc.
+  const videoSrc = item?.outputPath
     ? `file://${encodeURI(item.outputPath).replace(/#/g, "%23")}`
-    : dubbingVideoURL(item.projectId);
+    : isDone
+      ? exportStreamURL(projectId)
+      : dubbingVideoURL(projectId);
 
   return (
     <div style={{
@@ -266,8 +251,10 @@ function Preview({ item, project }) {
     }}>
       {isDone ? (
         <video
+          key={videoSrc}
           src={videoSrc}
           controls
+          autoPlay
           style={{ width: "100%", height: "100%", objectFit: "contain",
                     background: "#000" }}
         />
@@ -290,10 +277,10 @@ function Preview({ item, project }) {
             fontSize: 13,
           }}>
             {item.status === "running"
-              ? "Đang xử lý… video sẽ hiện khi xong"
+              ? t("drawer.processingHint")
               : item.status === "error"
-              ? "Xử lý thất bại"
-              : "Chưa có video"}
+              ? t("drawer.failed")
+              : t("drawer.noVideo")}
           </div>
         </>
       )}
@@ -303,6 +290,7 @@ function Preview({ item, project }) {
 
 
 function QuickConfig({ project, setProject }) {
+  const t = useT();
   const toast = useToast();
   const [voices, setVoices] = useState([]);
   useEffect(() => {
@@ -329,16 +317,16 @@ function QuickConfig({ project, setProject }) {
       <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.06em",
                      textTransform: "uppercase", color: "var(--n-7)",
                      marginBottom: 4 }}>
-        Chỉnh nhanh
+        {t("drawer.quickEdit")}
       </div>
 
-      <Field label="Giọng đọc">
+      <Field label={t("drawer.voice")}>
         <select
           value={project.voice_id || ""}
           onChange={(e) => patch({ voice_id: e.target.value || null })}
           style={selectStyle}
         >
-          <option value="">Giọng mặc định</option>
+          <option value="">{t("drawer.voiceDefault")}</option>
           {voices.map((v) => (
             <option key={v.id} value={v.id}>
               {v.name || v.id}
@@ -347,13 +335,13 @@ function QuickConfig({ project, setProject }) {
         </select>
       </Field>
 
-      <Field label="Ngôn ngữ đích">
+      <Field label={t("drawer.targetLang")}>
         <select
           value={project.target_language || "vietnamese"}
           onChange={(e) => patch({ target_language: e.target.value })}
           style={selectStyle}
         >
-          <option value="vietnamese">Tiếng Việt</option>
+          <option value="vietnamese">{t("langs.vietnamese")}</option>
           <option value="english">English</option>
           <option value="chinese">中文</option>
           <option value="japanese">日本語</option>
@@ -363,12 +351,12 @@ function QuickConfig({ project, setProject }) {
 
       <div style={{ display: "flex", gap: 12, marginTop: 4 }}>
         <Checkbox
-          label="Lồng tiếng"
+          label={t("drawer.dubbing")}
           checked={!!project.enable_dubbing}
           onChange={(v) => patch({ enable_dubbing: v })}
         />
         <Checkbox
-          label="Phụ đề"
+          label={t("drawer.subtitle")}
           checked={!!project.enable_subtitle}
           onChange={(v) => patch({ enable_subtitle: v })}
         />
@@ -379,6 +367,7 @@ function QuickConfig({ project, setProject }) {
 
 
 function SimpleFallback({ item, onClose }) {
+  const t = useT();
   return (
     <div style={{
       textAlign: "center", padding: "40px 20px",
@@ -386,10 +375,10 @@ function SimpleFallback({ item, onClose }) {
     }}>
       <AlertTriangle size={32} style={{ color: "var(--warn)", margin: "0 auto 10px" }} />
       <div style={{ fontSize: 14, fontWeight: 600, color: "var(--n-10)" }}>
-        Không tải được chi tiết dự án
+        {t("drawer.fallbackTitle")}
       </div>
       <div style={{ fontSize: 12, marginTop: 4 }}>
-        Dự án có thể đang khởi tạo — vui lòng chờ 1 chút.
+        {t("drawer.fallbackHint")}
       </div>
       <ProjectCard item={item} onOpen={() => {}} />
     </div>
@@ -397,182 +386,6 @@ function SimpleFallback({ item, onClose }) {
 }
 
 
-/* ─── Expert view — pro user, 2-cột: SegmentEditor + Settings ──────── */
-
-function ExpertView({ project, setProject, tab, setTab }) {
-  const videoRef = useRef(null);
-  const [currentTime, setCurrentTime] = useState(0);
-  const toast = useToast();
-
-  // Sync currentTime từ video player
-  useEffect(() => {
-    const v = videoRef.current;
-    if (!v) return;
-    const tick = () => setCurrentTime(v.currentTime);
-    const iv = setInterval(() => {
-      if (!v.paused) tick();
-    }, 200);
-    v.addEventListener("seeked", tick);
-    v.addEventListener("play", tick);
-    return () => {
-      clearInterval(iv);
-      v.removeEventListener("seeked", tick);
-      v.removeEventListener("play", tick);
-    };
-  }, [project?.id]);
-
-  const handleSeek = (sec) => {
-    const v = videoRef.current;
-    if (!v) return;
-    v.currentTime = sec;
-    if (v.paused) v.play().catch(() => {});
-  };
-
-  const handleSegmentChange = (seg) => {
-    setProject((p) => {
-      if (!p) return p;
-      return {
-        ...p,
-        segments: (p.segments || []).map((s) => s.id === seg.id ? { ...s, ...seg } : s),
-      };
-    });
-  };
-
-  return (
-    <div style={{
-      flex: 1, display: "flex", minHeight: 0, overflow: "hidden",
-    }}>
-      {/* Left column: video + segments */}
-      <div style={{
-        flex: 1, minWidth: 0,
-        display: "flex", flexDirection: "column",
-        borderRight: "1px solid var(--n-3)",
-      }}>
-        <div style={{
-          flexShrink: 0,
-          padding: 12,
-          background: "var(--n-1)",
-          borderBottom: "1px solid var(--n-3)",
-        }}>
-          <ExpertVideo project={project} videoRef={videoRef} />
-        </div>
-        <div style={{ flex: 1, minHeight: 0, overflow: "hidden" }}>
-          <SegmentEditor
-            project={project}
-            currentTime={currentTime}
-            onSeek={handleSeek}
-            onSegmentChange={handleSegmentChange}
-          />
-        </div>
-      </div>
-
-      {/* Right column: settings panels */}
-      <div style={{
-        flexShrink: 0, width: 320,
-        display: "flex", flexDirection: "column",
-        background: "var(--n-1)",
-      }}>
-        <div style={{
-          flexShrink: 0,
-          padding: "10px 14px",
-          borderBottom: "1px solid var(--n-3)",
-          display: "flex", gap: 4,
-        }}>
-          <TabBtn active={tab === "style"} onClick={() => setTab("style")}>
-            Kiểu phụ đề
-          </TabBtn>
-          <TabBtn active={tab === "quick"} onClick={() => setTab("quick")}>
-            Cài đặt
-          </TabBtn>
-        </div>
-        <div style={{ flex: 1, minHeight: 0, overflowY: "auto" }}>
-          {tab === "style" && (
-            <SubtitlePanel project={project} setProject={setProject} />
-          )}
-          {tab === "quick" && (
-            <div style={{ padding: 14 }}>
-              <QuickConfig project={project} setProject={setProject} />
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-
-function ExpertVideo({ project, videoRef }) {
-  const [failed, setFailed] = useState(false);
-  const src = dubbingVideoURL(project?.id);
-
-  if (failed) {
-    return (
-      <div style={{
-        aspectRatio: "16/9", maxHeight: 220,
-        display: "flex", alignItems: "center", justifyContent: "center",
-        background: "var(--n-2)", borderRadius: 8,
-        color: "var(--n-7)", fontSize: 12,
-      }}>
-        Chưa có video để xem (đang xử lý)
-      </div>
-    );
-  }
-
-  return (
-    <div style={{
-      background: "#000", borderRadius: 8, overflow: "hidden",
-      maxHeight: 240,
-    }}>
-      <video
-        ref={videoRef}
-        src={src}
-        controls
-        style={{ width: "100%", maxHeight: 240, display: "block" }}
-        onError={() => setFailed(true)}
-      />
-    </div>
-  );
-}
-
-
-/* ─── Small parts ─── */
-
-function ActionButton({ icon: Icon, label, primary, onClick }) {
-  return (
-    <button
-      onClick={onClick}
-      style={{
-        flex: 1,
-        padding: "9px 14px", borderRadius: 8,
-        background: primary ? "var(--accent)" : "var(--n-1)",
-        color: primary ? "#fff" : "var(--n-10)",
-        border: primary ? "none" : "1px solid var(--n-3)",
-        fontSize: 13, fontWeight: 500, cursor: "pointer",
-        display: "flex", alignItems: "center", justifyContent: "center",
-        gap: 6,
-      }}
-    >
-      <Icon size={13} /> {label}
-    </button>
-  );
-}
-
-function TabBtn({ active, onClick, children }) {
-  return (
-    <button
-      onClick={onClick}
-      style={{
-        padding: "6px 14px", borderRadius: 6,
-        background: active ? "var(--accent-soft)" : "transparent",
-        color: active ? "var(--accent)" : "var(--n-8)",
-        border: "none", cursor: "pointer",
-        fontSize: 12.5, fontWeight: active ? 600 : 500,
-      }}
-    >
-      {children}
-    </button>
-  );
-}
 
 function Field({ label, children }) {
   return (

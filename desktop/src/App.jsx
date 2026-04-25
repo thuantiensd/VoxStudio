@@ -49,13 +49,33 @@ function ProtectedRoute({ children }) {
 }
 
 /**
- * PublicOnlyRoute — ngược lại: đã login rồi thì không cho quay lại /login,
- * /signup (redirect về home).
+ * PublicOnlyRoute — đã login rồi thì không cho quay lại /login, /signup.
  */
 function PublicOnlyRoute({ children }) {
   const { isAuthenticated } = useAuth();
   if (isAuthenticated) return <Navigate to="/" replace />;
   return children;
+}
+
+/**
+ * UserScopedRoot — bọc BatchProvider + Routes trong 1 key theo user.id.
+ * Đổi tài khoản → toàn bộ subtree remount, BatchProvider reset queue +
+ * các page reset state nội bộ. Tránh leak data từ user trước qua user sau
+ * (storage đã scope qua userStorage; key này lo phần state trong RAM).
+ */
+function UserScopedRoot() {
+  const { user } = useAuth();
+  return (
+    <BatchProvider key={user?.id || "guest"}>
+      <HashRouter>
+        <Routes>
+          <Route path="/login"  element={<PublicOnlyRoute><LoginPage  /></PublicOnlyRoute>} />
+          <Route path="/signup" element={<PublicOnlyRoute><SignupPage /></PublicOnlyRoute>} />
+          <Route path="/*" element={<ProtectedRoute><Shell /></ProtectedRoute>} />
+        </Routes>
+      </HashRouter>
+    </BatchProvider>
+  );
 }
 
 export default function App() {
@@ -68,16 +88,7 @@ export default function App() {
       <AuthProvider>
       <QuotaMonitor />
       <UpdateBanner />
-      <BatchProvider>
-        <HashRouter>
-          <Routes>
-            <Route path="/login"  element={<PublicOnlyRoute><LoginPage  /></PublicOnlyRoute>} />
-            <Route path="/signup" element={<PublicOnlyRoute><SignupPage /></PublicOnlyRoute>} />
-            {/* Bắt buộc đăng nhập để vào app */}
-            <Route path="/*" element={<ProtectedRoute><Shell /></ProtectedRoute>} />
-          </Routes>
-        </HashRouter>
-      </BatchProvider>
+      <UserScopedRoot />
       </AuthProvider>
       </ToastProvider>
       </ThemeProvider>

@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { CheckCircle2, AlertTriangle, XCircle, Info, X } from "lucide-react";
+import { useT } from "../../i18n/I18nContext";
 
 /**
  * Toast — notification góc phải dưới, auto-dismiss. Stack nhiều toast.
@@ -78,6 +79,7 @@ const VARIANTS = {
 };
 
 function ToastItem({ toast, onDismiss }) {
+  const t = useT();
   const { Icon, color } = VARIANTS[toast.variant] || VARIANTS.info;
   return (
     <motion.div
@@ -111,7 +113,7 @@ function ToastItem({ toast, onDismiss }) {
       </div>
       <button
         onClick={onDismiss}
-        aria-label="Đóng"
+        aria-label={t("aria.close")}
         style={{
           background: "transparent", border: "none", cursor: "pointer",
           color: "var(--n-6)", padding: 2, marginTop: -2,

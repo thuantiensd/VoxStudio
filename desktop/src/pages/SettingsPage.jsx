@@ -36,6 +36,18 @@ const TABS = [
 // window.location.hash vì conflict với HashRouter)
 const SettingsNavCtx = createContext(() => {});
 
+// Resolve plan display name through i18n. Backend may send a localized name
+// (e.g. "Miễn phí"), but we prefer plan.id → auth.plan.<id> when available so
+// switching locale immediately reflects.
+function planLabel(t, plan) {
+  if (!plan) return t("auth.plan.free");
+  const id = (plan.id || "").toLowerCase();
+  const key = `auth.plan.${id}`;
+  const tr = t(key);
+  if (tr && tr !== key) return tr;
+  return plan.name || t("auth.plan.free");
+}
+
 export default function SettingsPage() {
   const t = useT();
   const loc = useLocation();
@@ -297,8 +309,8 @@ function AppearanceTab() {
     { id: "system", icon: Monitor, label: t("settings.appearance.system") },
   ];
   const langOptions = [
-    { id: "vi", label: "Tiếng Việt", hint: "Vietnamese" },
-    { id: "en", label: "English",    hint: "Tiếng Anh" },
+    { id: "vi", label: "Tiếng Việt", hint: t("settings.appearance.langViHint") },
+    { id: "en", label: "English",    hint: t("settings.appearance.langEnHint") },
   ];
 
   return (
@@ -329,8 +341,8 @@ function AppearanceTab() {
         </div>
       </Section>
 
-      <Section title={t("user.language") || "Ngôn ngữ"}
-               description="Chọn ngôn ngữ giao diện · Choose interface language">
+      <Section title={t("user.language")}
+               description={t("settings.appearance.languageDesc")}>
         <div className="grid grid-cols-2 gap-2">
           {langOptions.map(({ id, label, hint }) => {
             const active = locale === id;
@@ -392,31 +404,32 @@ function FeatureItem({ ok, label }) {
 }
 
 function PlanCard({ plan, isCurrent, highlighted, onUpgrade }) {
+  const t = useT();
   const { features = {}, limits = {} } = plan;
   const unlimited = (v) => v === -1 ? "∞" : v;
-  const fmtMin = (v) => v === -1 ? "∞" : `${v} phút`;
+  const fmtMin = (v) => v === -1 ? "∞" : t("settings.plans.stat.unitMin", { n: v });
   const fmtChars = (v) => v === -1 ? "∞" : `${(v / 1000).toLocaleString()}k`;
 
   const quickStats = [
-    { label: "Lồng tiếng",   val: fmtMin(limits.dubbing_min_month),  suffix: "/tháng" },
-    { label: "Phụ đề STT",   val: fmtMin(limits.stt_min_month),      suffix: "/tháng" },
-    { label: "TTS",          val: fmtChars(limits.tts_chars_month),  suffix: " ký tự/tháng" },
-    { label: "Clone giọng",  val: unlimited(limits.voice_clone_max), suffix: " giọng" },
+    { label: t("settings.plans.stat.dubbing"),    val: fmtMin(limits.dubbing_min_month),  suffix: t("settings.plans.stat.suffixMonth") },
+    { label: t("settings.plans.stat.stt"),        val: fmtMin(limits.stt_min_month),      suffix: t("settings.plans.stat.suffixMonth") },
+    { label: t("settings.plans.stat.tts"),        val: fmtChars(limits.tts_chars_month),  suffix: t("settings.plans.stat.suffixCharsMonth") },
+    { label: t("settings.plans.stat.voiceClone"), val: unlimited(limits.voice_clone_max), suffix: t("settings.plans.stat.suffixVoices") },
   ];
 
   const perks = [
     { k: "concurrent", always: true,
-      l: `${unlimited(limits.concurrent_jobs)} tác vụ song song` },
-    { k: "batch",          l: "Xử lý nhiều file cùng lúc" },
-    { k: "priority_queue", l: "Ưu tiên hàng đợi GPU" },
-    { k: "export_4k",      l: "Xuất chất lượng 4K" },
-    { k: "watermark_free", l: "Không watermark" },
-    { k: "api",            l: "API cho developer" },
+      l: t("settings.plans.perks.concurrent", { n: unlimited(limits.concurrent_jobs) }) },
+    { k: "batch",          l: t("settings.plans.perks.batch") },
+    { k: "priority_queue", l: t("settings.plans.perks.priority") },
+    { k: "export_4k",      l: t("settings.plans.perks.export4k") },
+    { k: "watermark_free", l: t("settings.plans.perks.watermarkFree") },
+    { k: "api",            l: t("settings.plans.perks.api") },
   ];
 
   const priceDisplay = plan.price_vnd === 0
-    ? { big: "0đ", small: "miễn phí" }
-    : { big: `${(plan.price_vnd / 1000).toFixed(0)}k`, small: "/tháng" };
+    ? { big: "0đ", small: t("settings.plans.free") }
+    : { big: `${(plan.price_vnd / 1000).toFixed(0)}k`, small: t("settings.plans.perMonth") };
 
   return (
     <div
@@ -439,14 +452,14 @@ function PlanCard({ plan, isCurrent, highlighted, onUpgrade }) {
           padding: "2px 10px", borderRadius: 6,
           fontSize: 10, fontWeight: 700, letterSpacing: "0.08em",
         }}>
-          PHỔ BIẾN
+          {t("settings.plans.popular")}
         </div>
       )}
 
       {/* Header */}
       <div style={{ fontSize: 14, fontWeight: 600, color: "var(--n-9)",
                      textTransform: "uppercase", letterSpacing: "0.05em" }}>
-        {plan.name}
+        {planLabel(t, plan)}
       </div>
       <div style={{ display: "flex", alignItems: "baseline", gap: 4,
                      marginTop: 6 }}>
@@ -468,9 +481,9 @@ function PlanCard({ plan, isCurrent, highlighted, onUpgrade }) {
           border: "1px solid rgba(251,191,36,0.25)",
           fontSize: 10.5, lineHeight: 1.4,
         }}>
-          <div style={{ color: "#f59e0b", fontWeight: 700 }}>🎁 Trọn đời</div>
+          <div style={{ color: "#f59e0b", fontWeight: 700 }}>{t("settings.plans.ltdTitle")}</div>
           <div style={{ color: "var(--n-9)", marginTop: 1 }}>
-            <b>{formatVND(plan.ltd.price_vnd)}</b> · còn {plan.ltd.slots_available} suất
+            <b>{formatVND(plan.ltd.price_vnd)}</b> · {t("settings.plans.ltdSlots", { n: plan.ltd.slots_available })}
           </div>
         </div>
       )}
@@ -517,7 +530,7 @@ function PlanCard({ plan, isCurrent, highlighted, onUpgrade }) {
             border: "1px solid var(--n-3)", fontSize: 12.5, fontWeight: 600,
             cursor: "default",
           }}>
-            ✓ Đang dùng
+            {t("settings.plans.currentBadge")}
           </button>
         ) : plan.id === "free" ? (
           <button disabled style={{
@@ -526,7 +539,7 @@ function PlanCard({ plan, isCurrent, highlighted, onUpgrade }) {
             border: "1px solid var(--n-3)", fontSize: 12.5,
             cursor: "default",
           }}>
-            Gói cơ bản
+            {t("settings.plans.basicPlan")}
           </button>
         ) : (
           <button
@@ -543,7 +556,7 @@ function PlanCard({ plan, isCurrent, highlighted, onUpgrade }) {
                 ? "0 4px 14px rgba(108,92,231,0.3)" : "none",
             }}
           >
-            Chọn {plan.name}
+            {t("settings.plans.choose", { name: planLabel(t, plan) })}
           </button>
         )}
       </div>
@@ -557,6 +570,7 @@ function PlanCard({ plan, isCurrent, highlighted, onUpgrade }) {
    Click CTA → chuyển sang tab Thanh toán để checkout thật.
    ───────────────────────────────────────────────────────── */
 function PlansTab() {
+  const t = useT();
   const { user } = useAuth();
   const toast = useToast();
   const [plans, setPlans] = useState([]);
@@ -571,8 +585,8 @@ function PlansTab() {
   const onUpgrade = (plan) => {
     // Chưa tích hợp payment gateway → toast thông báo
     toast?.info?.(
-      `Thanh toán gói ${plan.name} sẽ ra mắt sớm. Theo dõi email để nhận ưu đãi sớm.`,
-      { title: "Sắp mở thanh toán" }
+      t("settings.plans.paymentSoon", { name: planLabel(t, plan) }),
+      { title: t("settings.plans.paymentSoonTitle") }
     );
   };
 
@@ -580,14 +594,14 @@ function PlansTab() {
     return (
       <div className="flex items-center gap-2 text-sm"
            style={{ color: "var(--n-8)" }}>
-        <Loader2 size={14} className="animate-spin" /> Đang tải bảng giá…
+        <Loader2 size={14} className="animate-spin" /> {t("settings.plans.loadingPrices")}
       </div>
     );
   }
   if (!plans.length) {
     return (
       <div className="text-sm" style={{ color: "var(--n-7)" }}>
-        Chưa lấy được bảng giá. Vui lòng thử lại sau.
+        {t("settings.plans.pricesUnavailable")}
       </div>
     );
   }
@@ -600,12 +614,9 @@ function PlansTab() {
       <div style={{ marginBottom: 16 }}>
         <h2 style={{ fontSize: 16, fontWeight: 600, color: "var(--n-10)",
                       marginBottom: 4 }}>
-          Chọn gói phù hợp
+          {t("settings.plans.heading")}
         </h2>
-        <p style={{ fontSize: 12.5, color: "var(--n-8)" }}>
-          Mọi gói đều cho phép dùng <b>API key cá nhân</b> (OpenAI, Gemini,
-          Claude…) — không bị markup, bạn trả trực tiếp cho nhà cung cấp.
-        </p>
+        <p style={{ fontSize: 12.5, color: "var(--n-8)" }} dangerouslySetInnerHTML={{ __html: t("settings.plans.apiKeyNote") }} />
       </div>
 
       <div style={{
@@ -632,9 +643,8 @@ function PlansTab() {
         fontSize: 12, color: "var(--n-8)",
         lineHeight: 1.55,
       }}>
-        <b style={{ color: "var(--n-10)" }}>💡 Ưu đãi trọn đời (Early Believer)</b>{" "}
-        Chỉ 100 suất đầu cho mỗi gói — thanh toán 1 lần, dùng mãi mãi.
-        Khi hết suất, chỉ còn gói hàng tháng bình thường.
+        <b style={{ color: "var(--n-10)" }}>{t("settings.plans.ltdHeading")}</b>{" "}
+        {t("settings.plans.ltdInfo")}
       </div>
     </>
   );
@@ -649,6 +659,7 @@ function PlansTab() {
      • Huỷ / đổi gói
    ───────────────────────────────────────────────────────── */
 function BillingTab() {
+  const t = useT();
   const { user } = useAuth();
   const [me, setMe] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -661,13 +672,13 @@ function BillingTab() {
     return (
       <div className="flex items-center gap-2 text-sm"
            style={{ color: "var(--n-8)" }}>
-        <Loader2 size={14} className="animate-spin" /> Đang tải…
+        <Loader2 size={14} className="animate-spin" /> {t("settings.billingFull.loading")}
       </div>
     );
   }
 
   const plan = me?.plan;
-  const planName = plan?.name || "Miễn phí";
+  const planName = planLabel(t, plan);
   const isFree = (user?.plan || "free") === "free";
   const navTab = useContext(SettingsNavCtx);
   const goPlans = () => navTab("plans");
@@ -691,7 +702,7 @@ function BillingTab() {
                            textTransform: "uppercase",
                            letterSpacing: "0.08em",
                            marginBottom: 4 }}>
-              Gói hiện tại
+              {t("settings.billingFull.currentLabel")}
             </div>
             <div style={{ fontSize: 22, fontWeight: 700, color: "var(--n-10)",
                            letterSpacing: "-0.02em" }}>
@@ -699,13 +710,13 @@ function BillingTab() {
             </div>
             {!isFree && plan?.price_vnd > 0 && (
               <div style={{ fontSize: 13, color: "var(--n-8)", marginTop: 4 }}>
-                {formatVND(plan.price_vnd)}/tháng
+                {t("settings.billingFull.pricePerMonth", { vnd: (plan.price_vnd || 0).toLocaleString("vi-VN") })}
               </div>
             )}
             <div style={{ fontSize: 12, color: "var(--n-7)", marginTop: 8 }}>
               {isFree
-                ? "Bạn đang dùng gói miễn phí. Nâng cấp để mở khoá toàn bộ tính năng."
-                : "Gói đang hoạt động. Xem chi tiết sử dụng ở tab Sử dụng."}
+                ? t("settings.billingFull.freeHint")
+                : t("settings.billingFull.paidHint")}
             </div>
           </div>
           <button
@@ -722,39 +733,39 @@ function BillingTab() {
               boxShadow: isFree ? "0 4px 14px rgba(108,92,231,0.3)" : "none",
             }}
           >
-            {isFree ? "Nâng cấp ngay →" : "Đổi gói"}
+            {isFree ? t("settings.billingFull.upgradeNow") : t("settings.billingFull.changePlan")}
           </button>
         </div>
       </div>
 
       {/* Payment method */}
-      <Section title="Phương thức thanh toán">
+      <Section title={t("settings.billingFull.paymentMethod")}>
         <Card>
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm" style={{ color: "var(--text-primary)" }}>
-                Chưa có phương thức thanh toán
+                {t("settings.billingFull.noMethod")}
               </p>
               <p className="text-xs mt-1" style={{ color: "var(--text-secondary)" }}>
-                Sẽ tự động yêu cầu khi bạn nâng cấp gói.
+                {t("settings.billingFull.noMethodHint")}
               </p>
             </div>
             <GhostButton disabled style={{ opacity: 0.5, cursor: "not-allowed" }}>
-              Sắp ra mắt
+              {t("settings.billingFull.comingSoon")}
             </GhostButton>
           </div>
         </Card>
       </Section>
 
       {/* Invoices */}
-      <Section title="Lịch sử giao dịch">
+      <Section title={t("settings.billingFull.invoiceHistory")}>
         <Card>
           <div style={{ padding: "20px 0", textAlign: "center" }}>
             <div style={{ fontSize: 13, color: "var(--n-7)" }}>
-              Chưa có giao dịch nào
+              {t("settings.billingFull.noInvoices")}
             </div>
             <div style={{ fontSize: 11, color: "var(--n-7)", marginTop: 4 }}>
-              Hoá đơn sẽ hiện ở đây sau khi bạn thanh toán.
+              {t("settings.billingFull.noInvoicesHint")}
             </div>
           </div>
         </Card>
@@ -762,18 +773,18 @@ function BillingTab() {
 
       {/* Cancel subscription — chỉ hiện nếu đang có gói trả phí */}
       {!isFree && (
-        <Section title="Quản lý gói">
+        <Section title={t("settings.billingFull.managePlan")}>
           <Card>
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm" style={{ color: "var(--text-primary)" }}>
-                  Huỷ gói {planName}
+                  {t("settings.billingFull.cancelPlan", { name: planName })}
                 </p>
                 <p className="text-xs mt-1" style={{ color: "var(--text-secondary)" }}>
-                  Bạn sẽ chuyển về gói Miễn phí khi hết chu kỳ hiện tại.
+                  {t("settings.billingFull.cancelHint")}
                 </p>
               </div>
-              <GhostButton danger>Huỷ gói</GhostButton>
+              <GhostButton danger>{t("settings.billingFull.cancel")}</GhostButton>
             </div>
           </Card>
         </Section>
@@ -784,6 +795,7 @@ function BillingTab() {
 
 // ── Usage ───────────────────────────────
 function UsageTab() {
+  const t = useT();
   const [me, setMe] = useState(null);
   const [loading, setLoading] = useState(true);
 
@@ -795,39 +807,39 @@ function UsageTab() {
     return (
       <div className="flex items-center gap-2 text-sm"
            style={{ color: "var(--n-8)" }}>
-        <Loader2 size={14} className="animate-spin" /> Đang tải dữ liệu sử dụng…
+        <Loader2 size={14} className="animate-spin" /> {t("settings.usageFull.loadingData")}
       </div>
     );
   }
 
   const usage = me?.usage_month || {};
   const limits = me?.plan?.limits || {};
-  const planName = me?.plan?.name || "Miễn phí";
+  const planName = planLabel(t, me?.plan);
 
   return (
     <>
       <div style={{ marginBottom: 14 }}>
         <h2 style={{ fontSize: 15, fontWeight: 600, color: "var(--n-10)" }}>
-          Tháng {new Date().getMonth() + 1}/{new Date().getFullYear()} · Gói {planName}
+          {t("settings.usageFull.monthHeader", { m: new Date().getMonth() + 1, y: new Date().getFullYear(), plan: planName })}
         </h2>
         <p style={{ fontSize: 12, color: "var(--n-8)", marginTop: 2 }}>
-          Hạn mức reset vào ngày 1 mỗi tháng.
+          {t("settings.usageFull.resetHint")}
         </p>
       </div>
       <Card>
-        <UsageRow label="Phút lồng tiếng"
+        <UsageRow label={t("settings.usageFull.dubbingMin")}
                    used={Math.round(usage.dubbing_min || 0)}
                    limit={limits.dubbing_min_month} />
         <div className="h-3" />
-        <UsageRow label="Phút phụ đề (STT)"
+        <UsageRow label={t("settings.usageFull.sttMin")}
                    used={Math.round(usage.stt_min || 0)}
                    limit={limits.stt_min_month} />
         <div className="h-3" />
-        <UsageRow label="Ký tự TTS"
+        <UsageRow label={t("settings.usageFull.ttsChars")}
                    used={usage.tts_chars || 0}
                    limit={limits.tts_chars_month} />
         <div className="h-3" />
-        <UsageRow label="Token dịch (dùng key của bạn)"
+        <UsageRow label={t("settings.usageFull.translateTokens")}
                    used={usage.translate_tokens || 0}
                    limit={-1} />
       </Card>
@@ -836,6 +848,7 @@ function UsageTab() {
 }
 
 function UsageRow({ label, used, limit }) {
+  const t = useT();
   // limit = -1 → unlimited
   const unlimited = limit === -1;
   const pct = unlimited ? 0 : Math.min(100, Math.round((used / Math.max(1, limit)) * 100));
@@ -849,7 +862,7 @@ function UsageRow({ label, used, limit }) {
                                     : warning ? "var(--warn)"
                                     : "var(--text-secondary)" }}>
           {unlimited
-            ? `${used.toLocaleString()} · Không giới hạn`
+            ? `${used.toLocaleString()} · ${t("settings.usageFull.unlimitedSuffix")}`
             : `${used.toLocaleString()} / ${limit.toLocaleString()}`}
         </span>
       </div>
@@ -966,10 +979,10 @@ function ServerTab() {
         </div>
         <div className="text-xs" style={{ color: "var(--text-secondary)" }}>
           {health?.status === "ok"
-            ? "Dịch vụ đang hoạt động bình thường."
+            ? t("settings.serverFull.okMsg")
             : health?.status === "error"
-            ? "Dịch vụ tạm ngưng. Vui lòng thử lại sau ít phút."
-            : "Đang kiểm tra kết nối…"}
+            ? t("settings.serverFull.offlineMsg")
+            : t("settings.serverFull.checkingMsg")}
         </div>
       </Card>
     </Section>

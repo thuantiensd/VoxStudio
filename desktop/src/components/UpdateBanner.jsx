@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Download, RefreshCw, X } from "lucide-react";
+import { useT } from "../i18n/I18nContext";
 
 /**
  * UpdateBanner — hiện khi electron-updater tìm thấy hoặc tải xong bản
@@ -12,6 +13,7 @@ import { Download, RefreshCw, X } from "lucide-react";
  *   error       → ẩn (user sẽ check lại lần mở app sau)
  */
 export default function UpdateBanner() {
+  const t = useT();
   const [state, setState] = useState("none");
   const [version, setVersion] = useState("");
   const [progress, setProgress] = useState(0);
@@ -76,13 +78,13 @@ export default function UpdateBanner() {
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: 13, fontWeight: 600, color: "var(--n-10)" }}>
             {state === "downloaded"
-              ? `Bản mới ${version} sẵn sàng`
-              : `Đang tải bản ${version}…`}
+              ? t("update.ready", { v: version })
+              : t("update.downloading", { v: version })}
           </div>
           <div style={{ fontSize: 11.5, color: "var(--n-8)", marginTop: 2, lineHeight: 1.4 }}>
             {state === "downloaded"
-              ? "Khởi động lại để cập nhật — mọi thiết lập giữ nguyên."
-              : `Đã tải ${progress}%. Bạn có thể tiếp tục làm việc.`}
+              ? t("update.readyHint")
+              : t("update.progressHint", { p: progress })}
           </div>
 
           {state === "available" && (
@@ -117,7 +119,7 @@ export default function UpdateBanner() {
                   fontSize: 12, fontWeight: 600, cursor: "pointer",
                 }}
               >
-                Cập nhật ngay
+                {t("update.installNow")}
               </button>
               <button
                 onClick={() => setDismissed(true)}
@@ -128,14 +130,14 @@ export default function UpdateBanner() {
                   fontSize: 12, cursor: "pointer",
                 }}
               >
-                Để sau
+                {t("update.later")}
               </button>
             </div>
           )}
         </div>
         <button
           onClick={() => setDismissed(true)}
-          aria-label="Đóng"
+          aria-label={t("aria.close")}
           style={{
             background: "transparent", border: "none", cursor: "pointer",
             color: "var(--n-7)", padding: 2,

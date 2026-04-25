@@ -1,3 +1,5 @@
+import { useT } from "../../i18n/I18nContext";
+
 const COLORS = {
   running:  "var(--accent)",
   pending:  "var(--n-6)",
@@ -7,20 +9,13 @@ const COLORS = {
   canceled: "var(--n-6)",
 };
 
-const LABELS = {
-  running: "Đang chạy",
-  pending: "Chờ",
-  queued:  "Chờ",
-  done:    "Hoàn tất",
-  error:   "Lỗi",
-  canceled:"Đã huỷ",
-};
-
 /**
  * StatusDot — dot + label, dùng thống nhất trong history/queue.
  */
 export default function StatusDot({ status, withLabel = true, pulse }) {
+  const t = useT();
   const color = COLORS[status] || COLORS.pending;
+  const label = t(`status.${status}`);
   return (
     <span style={{
       display: "inline-flex", alignItems: "center", gap: 6,
@@ -34,7 +29,7 @@ export default function StatusDot({ status, withLabel = true, pulse }) {
           animation: pulse ? "pulse 2s ease-in-out infinite" : "none",
         }}
       />
-      {withLabel && (LABELS[status] || status)}
+      {withLabel && (label && label !== `status.${status}` ? label : status)}
     </span>
   );
 }

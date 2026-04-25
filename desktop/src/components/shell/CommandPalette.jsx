@@ -10,6 +10,7 @@ import {
 import { useTheme } from "../../theme/ThemeContext";
 import { useBatch } from "../../batch/BatchContext";
 import { useT, useI18n } from "../../i18n/I18nContext";
+import { userStorage } from "../../services/userScope";
 
 /**
  * CommandPalette — ⌘K. Navigate + actions + recent projects.
@@ -44,14 +45,7 @@ export default function CommandPalette({ open, onClose }) {
     { id: "act:upload",   icon: Upload,        label: t("palette.uploadVideo"),      group: ACT, run: go("/studio") },
     { id: "act:output",   icon: FolderOpen,    label: t("palette.openOutputFolder"), group: ACT,
       run: () => {
-        // Dùng userStorage để scope theo user (batch folder là workflow riêng)
-        const folder = (() => {
-          try {
-            const uid = JSON.parse(localStorage.getItem("voxstudio:auth") || "{}")?.user?.id;
-            if (uid) return localStorage.getItem(`voxstudio:u/${uid}:batch:outputFolder`);
-            return localStorage.getItem("voxstudio:batch:outputFolder");
-          } catch { return null; }
-        })();
+        const folder = userStorage.getItem("batch:outputFolder");
         if (folder) window.voxstudio?.revealFileInFolder?.(folder);
         onClose();
       } },

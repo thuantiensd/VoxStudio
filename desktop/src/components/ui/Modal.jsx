@@ -1,6 +1,7 @@
 import { AnimatePresence, motion } from "motion/react";
 import { X } from "lucide-react";
 import { useEffect } from "react";
+import { useT } from "../../i18n/I18nContext";
 
 /**
  * Modal — centered dialog, backdrop blur, fade+scale 120ms.
@@ -10,6 +11,7 @@ import { useEffect } from "react";
 export default function Modal({
   open, onClose, title, children, actions, width = 480,
 }) {
+  const t = useT();
   useEffect(() => {
     if (!open) return;
     const onKey = (e) => { if (e.key === "Escape") onClose?.(); };
@@ -62,7 +64,7 @@ export default function Modal({
                 </h3>
                 <button
                   onClick={onClose}
-                  aria-label="Đóng"
+                  aria-label={t("aria.close")}
                   style={{
                     background: "transparent", border: "none", cursor: "pointer",
                     color: "var(--n-8)", padding: 4,

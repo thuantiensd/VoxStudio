@@ -161,7 +161,7 @@ export default function DownloaderPage() {
         inputRef.current?.focus();
       }
     } catch {
-      toast.warn("Không truy cập được clipboard.");
+      toast.warn(t("downloader.toastClipboardFail"));
     }
   };
 
@@ -246,8 +246,16 @@ export default function DownloaderPage() {
             at: Date.now(),
             kind: "project",
           });
-          toast.success(`Đã tải: ${d.title || d.filename}`);
-          nav(`/studio/dubbing/${d.project_id}`);
+          toast.success(t("downloader.toastDownloaded", { name: d.title || d.filename }));
+          // Chuyển sang Studio với project pre-fill để user cấu hình + chạy
+          nav("/studio", {
+            state: {
+              fromDownload: {
+                projectId: d.project_id,
+                filename: d.title || d.filename || `download-${d.project_id}.mp4`,
+              },
+            },
+          });
         }
         reset();
       },
@@ -268,11 +276,11 @@ export default function DownloaderPage() {
 
   const handleToFolder = () => withDisclaimer(() => {
     if (!validUrl) {
-      toast.warn("URL chưa hợp lệ.");
+      toast.warn(t("downloader.toastUrlInvalid"));
       return;
     }
     if (!window.voxstudio?.downloader?.start) {
-      toast.warn("Tải về máy yêu cầu chạy trong app desktop.");
+      toast.warn(t("downloader.toastDesktopOnly"));
       return;
     }
     // Không bắt phải phân tích trước — yt-dlp local tải được URL thẳng
@@ -294,36 +302,36 @@ export default function DownloaderPage() {
 
     // Fallback server nếu không chạy trong Electron (rare — web preview)
     if (!window.voxstudio?.downloader?.start) {
-      toast.warn("Tải về máy yêu cầu chạy trong app desktop.");
+      toast.warn(t("downloader.toastDesktopOnly"));
       return;
     }
 
     setDownloading(true);
     setProgress(0);
-    setProgressLabel("Khởi động…");
+    setProgressLabel(t("downloader.progressInit"));
     setProgressDetail("");
 
     // Subscribe progress events
     const offProgress = window.voxstudio.downloader.onProgress((p) => {
       if (p.id !== localDlIdRef.current) return;
       if (p.step === "starting")
-        setProgressLabel("Đang chuẩn bị…");
+        setProgressLabel(t("downloader.progressPreparing"));
       else if (p.step === "downloading") {
-        setProgressLabel("Đang tải…");
+        setProgressLabel(t("downloader.progressDownloading"));
         setProgressDetail(
           [p.speed, p.eta && `ETA ${p.eta}`].filter(Boolean).join(" · ")
         );
         if (typeof p.progress === "number") setProgress(p.progress);
       } else if (p.step === "merging") {
-        setProgressLabel("Ghép video + audio…");
+        setProgressLabel(t("downloader.progressMux"));
         setProgress(95);
       } else if (p.step === "transcoding") {
-        setProgressLabel("Đang tối ưu video…");
-        setProgressDetail("Gần xong, máy sẽ bận 1 chút");
+        setProgressLabel(t("downloader.progressOptimize"));
+        setProgressDetail(t("downloader.progressOptimizeDetail"));
         setProgress(97);
       } else if (p.step === "done") {
         setProgress(100);
-        setProgressLabel("Hoàn tất");
+        setProgressLabel(t("downloader.progressDone"));
         pushHistory({
           url: url.trim(),
           path: p.path,
@@ -334,11 +342,11 @@ export default function DownloaderPage() {
           at: Date.now(),
           kind: "folder",
         });
-        toast.success(`Đã lưu: ${p.path}`, { duration: 6000 });
+        toast.success(t("downloader.toastSavedAt", { path: p.path }), { duration: 6000 });
         offProgress?.();
         reset();
       } else if (p.step === "error") {
-        toast.error(p.error || "Không tải được video", { title: "Lỗi tải" });
+        toast.error(p.error || t("downloader.toastDownloadFailed"), { title: t("downloader.toastDownloadFailedTitle") });
         offProgress?.();
         reset();
       }
@@ -362,8 +370,8 @@ export default function DownloaderPage() {
       };
     } catch (e) {
       offProgress?.();
-      toast.error(e?.message || "Không tải được video. Vui lòng thử lại.",
-                   { title: "Lỗi" });
+      toast.error(e?.message || t("downloader.toastDownloadGeneric"),
+                   { title: t("common.error") });
       reset();
     }
   };
@@ -410,9 +418,9 @@ export default function DownloaderPage() {
                 onOpenChrome={async () => {
                   try {
                     await window.voxstudio?.openInChrome?.(loginNeeded.url);
-                    toast.info("Đã mở trong Chrome. Login xong → Cmd+Q Chrome → quay lại app, bấm Phân tích.");
+                    toast.info(t("downloader.toastChromeOpened"));
                   } catch {
-                    toast.error("Không mở được Chrome.");
+                    toast.error(t("downloader.toastChromeFailed"));
                   }
                 }}
                 onRetry={() => {
@@ -493,7 +501,7 @@ export default function DownloaderPage() {
           items={history}
           onClear={clearHistory}
           onReplay={(u) => setUrl(u)}
-          onOpenProject={(id) => nav(`/studio/dubbing/${id}`)}
+          onOpenProject={() => nav(`/studio`)}
           onOpenFolder={(path) => window.voxstudio?.revealFileInFolder?.(path)}
           t={t}
         />
@@ -552,6 +560,7 @@ export default function DownloaderPage() {
           </p>
         </div>
       </Modal>
+
     </Page>
   );
 }
@@ -611,8 +620,7 @@ function HeroInput({ url, onUrl, onPaste, onAnalyze, fetching, disabled,
       )}
       <p style={{ fontSize: 10.5, color: "var(--n-7)",
                   marginTop: 0, marginBottom: 12, fontStyle: "italic" }}>
-        Chế độ chỉ áp dụng khi "Tải + Lồng tiếng". "Tải về máy" luôn
-        xử lý ngay trên máy bạn.
+        {t("downloader.modeNote")}
       </p>
 
       {/* Resolution row */}
@@ -630,7 +638,7 @@ function HeroInput({ url, onUrl, onPaste, onAnalyze, fetching, disabled,
         {/* Transcode toggle — default ON cho QuickTime compat */}
         <label
           className="flex items-center gap-1.5 cursor-pointer"
-          title="Tối ưu video để mở được trên QuickTime và mọi ứng dụng video. Tắt nếu muốn tải nhanh hơn (giữ định dạng gốc — có thể chỉ mở được bằng VLC / Chrome)."
+          title={t("downloader.transcodeTitle")}
           style={{ fontSize: 11, color: "var(--n-8)" }}
         >
           <input
@@ -639,7 +647,7 @@ function HeroInput({ url, onUrl, onPaste, onAnalyze, fetching, disabled,
             onChange={(e) => onTranscode?.(e.target.checked)}
             style={{ accentColor: "var(--accent)" }}
           />
-          Tương thích cao
+          {t("downloader.transcodeLabel")}
         </label>
       </div>
       <div
@@ -1064,18 +1072,18 @@ function LoginNeededCard({ url, message, onOpenChrome, onRetry, onDismiss, t }) 
             fontSize: 13, fontWeight: 600, color: "var(--n-10)",
             marginBottom: 4,
           }}>
-            Video cần đăng nhập để xem
+            {t("downloader.needLoginTitle")}
           </div>
           <p style={{ fontSize: 12, color: "var(--n-8)", lineHeight: 1.55, margin: 0 }}>
-            Làm theo 3 bước:
+            {t("downloader.needLoginSteps")}
           </p>
           <ol style={{
             margin: "6px 0 12px", paddingLeft: 18,
             fontSize: 12, color: "var(--n-9)", lineHeight: 1.7,
           }}>
-            <li>Bấm <b>"Mở trong Chrome"</b> → login TikTok (hoặc platform đó)</li>
-            <li>Trong Chrome bấm <kbd>⌘Q</kbd> để tắt hẳn (cookie mới unlock)</li>
-            <li>Quay lại đây → bấm <b>"Thử lại"</b></li>
+            <li>{t("downloader.needLoginStep1")}</li>
+            <li>{t("downloader.needLoginStep2")}</li>
+            <li>{t("downloader.needLoginStep3")}</li>
           </ol>
           <div className="flex items-center gap-2">
             <Button
@@ -1084,7 +1092,7 @@ function LoginNeededCard({ url, message, onOpenChrome, onRetry, onDismiss, t }) 
               icon={Chrome}
               onClick={onOpenChrome}
             >
-              Mở trong Chrome
+              {t("downloader.openInChrome")}
             </Button>
             <Button
               variant="secondary"
@@ -1092,10 +1100,10 @@ function LoginNeededCard({ url, message, onOpenChrome, onRetry, onDismiss, t }) 
               icon={Sparkles}
               onClick={onRetry}
             >
-              Thử lại
+              {t("downloader.retry")}
             </Button>
             <Button variant="ghost" size="md" onClick={onDismiss}>
-              Bỏ qua
+              {t("downloader.skip")}
             </Button>
           </div>
         </div>

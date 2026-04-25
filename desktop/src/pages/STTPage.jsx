@@ -13,6 +13,7 @@ import { transcribe, translateTexts } from "../services/api";
 import { showError } from "../services/errors";
 import { getKey, listKeys } from "../services/keyvault";
 import { userStorage } from "../services/userScope";
+import { useT } from "../i18n/I18nContext";
 
 /* ─────────────────────────────────────────────────────────
    Speech-to-Text page
@@ -30,7 +31,7 @@ const MEDIA_EXTS = [
 const MEDIA_RE = new RegExp(`\\.(${MEDIA_EXTS.join("|")})$`, "i");
 
 const LANGUAGES = [
-  { code: "auto", label: "Tự động nhận diện" },
+  { code: "auto", labelKey: "stt.sourceLangAuto", label: "Tự động nhận diện" },
   { code: "vi",   label: "Tiếng Việt" },
   { code: "en",   label: "English" },
   { code: "zh",   label: "中文 (Chinese)" },
@@ -54,11 +55,11 @@ const LANGUAGES = [
 ];
 
 const FORMATS = [
-  { key: "srt",  ext: "srt",  label: "SRT",  hint: "Subtitle chuẩn cho player" },
-  { key: "vtt",  ext: "vtt",  label: "VTT",  hint: "WebVTT cho <video> HTML5" },
-  { key: "txt",  ext: "txt",  label: "TXT",  hint: "Văn bản thuần" },
-  { key: "json", ext: "json", label: "JSON", hint: "Segments + timestamps raw" },
-  { key: "csv",  ext: "csv",  label: "CSV",  hint: "Bảng tính: start,end,text" },
+  { key: "srt",  ext: "srt",  label: "SRT",  hintKey: "stt.fmtSrtHint" },
+  { key: "vtt",  ext: "vtt",  label: "VTT",  hintKey: "stt.fmtVttHint" },
+  { key: "txt",  ext: "txt",  label: "TXT",  hintKey: "stt.fmtTxtHint" },
+  { key: "json", ext: "json", label: "JSON", hintKey: "stt.fmtJsonHint" },
+  { key: "csv",  ext: "csv",  label: "CSV",  hintKey: "stt.fmtCsvHint" },
 ];
 
 const LS_LANG   = "voxstudio:stt:language";
@@ -69,7 +70,7 @@ const LS_TR_TGT = "voxstudio:stt:translateTarget";
 const LS_TR_ENG = "voxstudio:stt:translateEngine";
 
 const TRANSLATE_ENGINES = [
-  { id: "google_free",  label: "Google (miễn phí)",   needsKey: false },
+  { id: "google_free",  labelKey: "stt.googleFree",   label: "Google (miễn phí)", needsKey: false },
   { id: "google_cloud", label: "Google Cloud",         needsKey: true  },
   { id: "deepl",        label: "DeepL",                needsKey: true  },
   { id: "gemini",       label: "Gemini",               needsKey: true  },
@@ -149,6 +150,7 @@ function browserDownload(filename, content) {
 /* ─── Main component ──────────────────────────────────── */
 
 export default function STTPage() {
+  const t = useT();
   const toast = useToast();
   const nav = useNavigate();
   const isElectron = !!window.voxstudio?.isElectron;
@@ -241,8 +243,8 @@ export default function STTPage() {
 
   const pickFolder = async () => {
     if (!isElectron) {
-      toast.info("Chọn thư mục chỉ có trong app desktop. Kết quả sẽ tải về qua trình duyệt.",
-                  { title: "Chế độ web" });
+      toast.info(t("stt.toastFolderWebOnly"),
+                  { title: t("stt.toastWebMode") });
       return;
     }
     const folder = await window.voxstudio.pickFolder();
@@ -276,20 +278,20 @@ export default function STTPage() {
 
   const pickFolderForBatch = async () => {
     if (!isElectron) {
-      toast.warn("Quét thư mục chỉ có trong app desktop.",
-                  { title: "Không khả dụng" });
+      toast.warn(t("stt.toastFolderScanDesktop"),
+                  { title: t("stt.toastNotAvailable") });
       return;
     }
     const folder = await window.voxstudio.pickFolder();
     if (!folder) return;
     const list = await window.voxstudio.listMediaInFolder(folder);
     if (!list?.length) {
-      toast.warn("Thư mục không chứa audio/video hỗ trợ.",
-                  { title: "Không có media" });
+      toast.warn(t("stt.toastNoMedia"),
+                  { title: t("stt.toastNoMediaTitle") });
       return;
     }
     addFiles(list.map((f) => ({ name: f.name, path: f.path, size: f.size })));
-    toast.success(`${list.length} file từ ${folder}`, { title: "Đã thêm" });
+    toast.success(t("stt.toastFilesAdded", { n: list.length, folder }), { title: t("stt.toastAdded") });
   };
 
   const onDrop = (e) => {
@@ -297,7 +299,7 @@ export default function STTPage() {
     const dropped = Array.from(e.dataTransfer.files || []);
     const filtered = dropped.filter((f) => MEDIA_RE.test(f.name));
     if (!filtered.length) {
-      toast.warn("Chỉ nhận audio/video.", { title: "File không hỗ trợ" });
+      toast.warn(t("stt.toastUnsupported"), { title: t("stt.toastUnsupportedTitle") });
       return;
     }
     addFiles(filtered.map((f) => ({
@@ -381,16 +383,16 @@ export default function STTPage() {
     if (running) return;
     const pending = items.filter((x) => x.status !== "done");
     if (!pending.length) {
-      toast.warn("Thêm file rồi bấm chạy.", { title: "Không có file" });
+      toast.warn(t("stt.toastNoFiles"), { title: t("stt.toastNoFilesTitle") });
       return;
     }
     if (!formats.length) {
-      toast.warn("Tick ít nhất 1 format đầu ra.", { title: "Chọn định dạng" });
+      toast.warn(t("stt.toastPickFormat"), { title: t("stt.toastPickFormatTitle") });
       return;
     }
     if (isElectron && !outputFolder) {
-      toast.info("Chưa có output folder — file sẽ tải về qua Downloads của trình duyệt.",
-                  { title: "Chọn thư mục lưu" });
+      toast.info(t("stt.toastNoFolderHint"),
+                  { title: t("stt.toastNoFolderTitle") });
     }
 
     // Pre-flight: nếu bật dịch + engine cần key → check key trước khi chạy
@@ -401,9 +403,10 @@ export default function STTPage() {
       if (engineMeta?.needsKey) {
         translateApiKey = await getKey(trEngine);
         if (!translateApiKey) {
+          const engineLabel = engineMeta.labelKey ? t(engineMeta.labelKey) : engineMeta.label;
           toast.error(
-            `Mở Cài đặt → AI & API keys để thêm key ${engineMeta.label}, hoặc đổi engine sang Google (miễn phí).`,
-            { title: `Thiếu API key cho ${engineMeta.label}` },
+            t("stt.toastNeedKey", { engine: engineLabel }),
+            { title: t("stt.missingKeyTip", { engine: engineLabel }) },
           );
           return;
         }
@@ -420,7 +423,7 @@ export default function STTPage() {
         try {
           let file = it.file;
           if (!file && it.path) file = await pathToFile(it.path);
-          if (!file) throw new Error("Không đọc được file");
+          if (!file) throw new Error(t("stt.readFileError"));
           const r = await transcribe(file, { language: lang });
           const segments = r?.segments || [];
           const patch = {
@@ -449,7 +452,7 @@ export default function STTPage() {
           const msg = e?.message || String(e);
           setItems((prev) => prev.map((x) =>
             x.id === it.id ? { ...x, status: "error", error: msg } : x));
-          showError(toast, e, "Lỗi STT");
+          showError(toast, e, t("stt.sttError"));
         }
       }
     } finally {
@@ -469,26 +472,26 @@ export default function STTPage() {
   return (
     <Page>
       <PageHeader
-        title="Phụ đề (STT)"
-        subtitle="Trích xuất phụ đề từ audio/video · xử lý nhiều file cùng lúc · xuất SRT · VTT · TXT · JSON · CSV"
+        title={t("stt.title")}
+        subtitle={t("stt.subtitle")}
       >
         {items.length > 0 && !running && (
           <Button size="sm" variant="ghost" icon={Trash2} onClick={clearAll}>
-            Xoá tất cả
+            {t("stt.clearAll")}
           </Button>
         )}
         {running ? (
           <Button size="md" variant="danger" icon={X} onClick={cancel}>
-            Huỷ
+            {t("stt.cancel")}
           </Button>
         ) : (
           <Button size="md" variant="primary" icon={Play}
                   onClick={runAll}
                   disabled={!items.length || !formats.length || trMissingKey}
                   title={trMissingKey
-                    ? `Thiếu API key cho ${trEngineMeta.label} — mở Cài đặt → AI & API keys`
+                    ? t("stt.missingKeyTip", { engine: trEngineMeta.labelKey ? t(trEngineMeta.labelKey) : trEngineMeta.label })
                     : undefined}>
-            Bắt đầu {items.filter((x) => x.status !== "done").length > 0
+            {t("stt.start")} {items.filter((x) => x.status !== "done").length > 0
               ? `(${items.filter((x) => x.status !== "done").length})` : ""}
           </Button>
         )}
@@ -516,10 +519,10 @@ export default function STTPage() {
               <div style={{ marginTop: 16,
                             display: "flex", alignItems: "center", gap: 12,
                             fontSize: 12, color: "var(--n-8)" }}>
-                <span>{items.length} file</span>
-                {counts.done > 0 && <span>· {counts.done} xong</span>}
+                <span>{t("stt.fileCountFile", { n: items.length })}</span>
+                {counts.done > 0 && <span>{t("stt.countDone", { n: counts.done })}</span>}
                 {counts.error > 0 && <span style={{ color: "var(--err)" }}>
-                  · {counts.error} lỗi
+                  {t("stt.countError", { n: counts.error })}
                 </span>}
                 {counts.done > 0 && !running && (
                   <button
@@ -531,7 +534,7 @@ export default function STTPage() {
                       fontSize: 12,
                     }}
                   >
-                    Xoá các mục đã xong
+                    {t("stt.clearDone")}
                   </button>
                 )}
               </div>
@@ -549,22 +552,22 @@ export default function STTPage() {
           {/* ── Right: config sidebar ── */}
           <aside style={{ display: "flex", flexDirection: "column", gap: 16,
                           position: "sticky", top: 0, alignSelf: "start" }}>
-            <ConfigCard title="Ngôn ngữ nguồn" icon={Languages}>
+            <ConfigCard title={t("stt.sectionSourceLang")} icon={Languages}>
               <select
                 value={lang}
                 onChange={(e) => setLangPersist(e.target.value)}
                 style={selectStyle}
               >
                 {LANGUAGES.map((L) => (
-                  <option key={L.code} value={L.code}>{L.label}</option>
+                  <option key={L.code} value={L.code}>{L.labelKey ? t(L.labelKey) : L.label}</option>
                 ))}
               </select>
               <p style={{ marginTop: 6, fontSize: 11, color: "var(--n-7)" }}>
-                Ứng dụng tự nhận diện khá chính xác — chỉ chọn tay khi sai.
+                {t("stt.sourceLangHint")}
               </p>
             </ConfigCard>
 
-            <ConfigCard title="Định dạng xuất" icon={FileText}>
+            <ConfigCard title={t("stt.sectionFormats")} icon={FileText}>
               <div style={{ display: "grid", gap: 6 }}>
                 {FORMATS.map((f) => {
                   const on = formats.includes(f.key);
@@ -593,7 +596,7 @@ export default function STTPage() {
                       <span style={{ fontWeight: 600, fontSize: 12.5,
                                       width: 42 }}>{f.label}</span>
                       <span style={{ fontSize: 11, color: "var(--n-7)" }}>
-                        {f.hint}
+                        {t(f.hintKey)}
                       </span>
                     </button>
                   );
@@ -601,7 +604,7 @@ export default function STTPage() {
               </div>
             </ConfigCard>
 
-            <ConfigCard title="Dịch phụ đề" icon={Languages}>
+            <ConfigCard title={t("stt.sectionTranslate")} icon={Languages}>
               <label style={{ display: "flex", alignItems: "center", gap: 8,
                                cursor: "pointer", marginBottom: trOn ? 10 : 0 }}>
                 <input
@@ -611,14 +614,14 @@ export default function STTPage() {
                   style={{ accentColor: "var(--accent)" }}
                 />
                 <span style={{ fontSize: 12.5, color: "var(--n-10)" }}>
-                  Tự động dịch sau khi STT
+                  {t("stt.autoTranslate")}
                 </span>
               </label>
               {trOn && (
                 <>
                   <div style={{ fontSize: 11, color: "var(--n-7)", marginBottom: 4,
                                  marginTop: 6 }}>
-                    Dịch sang
+                    {t("stt.translateTo")}
                   </div>
                   <select
                     value={trTarget}
@@ -626,13 +629,13 @@ export default function STTPage() {
                     style={selectStyle}
                   >
                     {LANGUAGES.filter((L) => L.code !== "auto").map((L) => (
-                      <option key={L.code} value={L.code}>{L.label}</option>
+                      <option key={L.code} value={L.code}>{L.labelKey ? t(L.labelKey) : L.label}</option>
                     ))}
                   </select>
 
                   <div style={{ fontSize: 11, color: "var(--n-7)", marginBottom: 4,
                                  marginTop: 10 }}>
-                    Engine
+                    {t("stt.engine")}
                   </div>
                   <select
                     value={trEngine}
@@ -641,8 +644,8 @@ export default function STTPage() {
                   >
                     {TRANSLATE_ENGINES.map((E) => (
                       <option key={E.id} value={E.id}>
-                        {E.label}
-                        {E.needsKey ? (savedKeys[E.id] ? " ✓" : " (cần key)") : ""}
+                        {E.labelKey ? t(E.labelKey) : E.label}
+                        {E.needsKey ? (savedKeys[E.id] ? " ✓" : t("stt.needKeySuffix")) : ""}
                       </option>
                     ))}
                   </select>
@@ -656,7 +659,7 @@ export default function STTPage() {
                     }}>
                       <div style={{ fontSize: 11.5, color: "var(--err)",
                                      lineHeight: 1.5, marginBottom: 8 }}>
-                        Chưa có API key cho <b>{trEngineMeta.label}</b>.
+                        {t("stt.missingKeyText")} <b>{trEngineMeta.labelKey ? t(trEngineMeta.labelKey) : trEngineMeta.label}</b>.
                       </div>
                       <div style={{ display: "flex", gap: 6 }}>
                         <button
@@ -669,7 +672,7 @@ export default function STTPage() {
                             fontSize: 12, fontWeight: 500,
                           }}
                         >
-                          Thêm key ngay →
+                          {t("stt.addKeyNow")}
                         </button>
                         <button
                           onClick={() => setTrEnginePersist("google_free")}
@@ -679,9 +682,9 @@ export default function STTPage() {
                             border: "1px solid var(--n-4)", cursor: "pointer",
                             fontSize: 12,
                           }}
-                          title="Đổi sang Google (miễn phí)"
+                          title={t("stt.switchGoogleTitle")}
                         >
-                          Dùng Google
+                          {t("stt.useGoogle")}
                         </button>
                       </div>
                     </div>
@@ -689,14 +692,14 @@ export default function STTPage() {
 
                   <p style={{ marginTop: 8, fontSize: 11, color: "var(--n-7)",
                                lineHeight: 1.5 }}>
-                    Xuất thêm 2 bộ file: <code>.{trTarget}.srt</code> (bản dịch) và{" "}
-                    <code>.bilingual.srt</code> (gốc + dịch chồng).
+                    {t("stt.translateExportNote")}<code>.{trTarget}.srt</code>{t("stt.translateExportNote2")}
+                    <code>.bilingual.srt</code>{t("stt.translateExportNote3")}
                   </p>
                 </>
               )}
             </ConfigCard>
 
-            <ConfigCard title="Thư mục lưu" icon={Folder}>
+            <ConfigCard title={t("stt.sectionFolder")} icon={Folder}>
               {isElectron ? (
                 <>
                   <button
@@ -710,11 +713,11 @@ export default function STTPage() {
                       overflow: "hidden", textOverflow: "ellipsis",
                       whiteSpace: "nowrap",
                     }}
-                    title={outputFolder || "Chọn thư mục…"}
+                    title={outputFolder || t("stt.chooseFolderDots")}
                   >
                     <FolderOpen size={11} style={{ display: "inline", marginRight: 6,
                                                     verticalAlign: "-1px" }} />
-                    {outputFolder || "Chọn thư mục…"}
+                    {outputFolder || t("stt.chooseFolderDots")}
                   </button>
                   {outputFolder && (
                     <button
@@ -725,13 +728,13 @@ export default function STTPage() {
                         color: "var(--n-7)", fontSize: 11, cursor: "pointer",
                       }}
                     >
-                      Xoá chọn (tải về Downloads)
+                      {t("stt.clearFolderChoice")}
                     </button>
                   )}
                 </>
               ) : (
                 <p style={{ fontSize: 11, color: "var(--n-7)" }}>
-                  Ở web, file xuất sẽ tải về thư mục Downloads của trình duyệt.
+                  {t("stt.webHint")}
                 </p>
               )}
             </ConfigCard>
@@ -745,6 +748,7 @@ export default function STTPage() {
 /* ─── DropZone ─── */
 
 function DropZone({ onDrop, onPickFiles, onPickFolder }) {
+  const t = useT();
   const [over, setOver] = useState(false);
   return (
     <div
@@ -762,17 +766,17 @@ function DropZone({ onDrop, onPickFiles, onPickFolder }) {
     >
       <UploadCloud size={36} style={{ color: "var(--n-7)", margin: "0 auto 12px" }} />
       <div style={{ fontSize: 15, fontWeight: 600, color: "var(--n-10)" }}>
-        Kéo thả audio / video vào đây
+        {t("stt.dropHere")}
       </div>
       <div style={{ fontSize: 12, color: "var(--n-7)", marginTop: 4 }}>
-        MP3 · WAV · M4A · MP4 · MOV · MKV · WEBM … (nhiều file cùng lúc)
+        {t("stt.dropTypes")}
       </div>
       <div style={{ display: "flex", gap: 8, justifyContent: "center", marginTop: 16 }}>
         <Button size="sm" variant="secondary" icon={FileAudio} onClick={onPickFiles}>
-          Chọn file
+          {t("stt.chooseFile")}
         </Button>
         <Button size="sm" variant="ghost" icon={FolderOpen} onClick={onPickFolder}>
-          Quét thư mục
+          {t("stt.scanFolder")}
         </Button>
       </div>
     </div>
@@ -782,15 +786,16 @@ function DropZone({ onDrop, onPickFiles, onPickFolder }) {
 /* ─── ItemRow ─── */
 
 function ItemRow({ item, onRemove, disabled }) {
+  const t = useT();
   const { name, size, status, error, segments, lang: detected } = item;
   const isVideo = /\.(mp4|mov|mkv|avi|webm)$/i.test(name);
   const Icon = isVideo ? FileVideo : FileAudio;
 
   const badge = {
-    pending: { label: "Chờ",     color: "var(--n-7)",  bg: "var(--n-2)" },
-    running: { label: "Đang xử lý", color: "var(--accent)", bg: "var(--accent-soft)" },
-    done:    { label: "Xong",     color: "var(--ok)",   bg: "rgba(34,197,94,0.12)" },
-    error:   { label: "Lỗi",      color: "var(--err)",  bg: "rgba(239,68,68,0.12)" },
+    pending: { labelKey: "stt.badgePending", color: "var(--n-7)",  bg: "var(--n-2)" },
+    running: { labelKey: "stt.badgeRunning", color: "var(--accent)", bg: "var(--accent-soft)" },
+    done:    { labelKey: "stt.badgeDone",    color: "var(--ok)",   bg: "rgba(34,197,94,0.12)" },
+    error:   { labelKey: "stt.badgeError",   color: "var(--err)",  bg: "rgba(239,68,68,0.12)" },
   }[status];
 
   return (
@@ -837,13 +842,13 @@ function ItemRow({ item, onRemove, disabled }) {
         {status === "running" && <Loader2 size={10} className="animate-spin" />}
         {status === "done"    && <Check size={10} />}
         {status === "error"   && <AlertTriangle size={10} />}
-        {badge.label}
+        {t(badge.labelKey)}
       </div>
 
       {!disabled && status !== "running" && (
         <button
           onClick={onRemove}
-          title="Xoá khỏi danh sách"
+          title={t("stt.removeFromList")}
           style={{
             background: "transparent", border: "none", cursor: "pointer",
             color: "var(--n-7)", padding: 4, display: "flex",

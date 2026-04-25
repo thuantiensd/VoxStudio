@@ -131,7 +131,7 @@ function SettingsPanel({ s }) {
             background: isCloud ? 'var(--accent)' : 'transparent',
             color: isCloud ? '#fff' : 'var(--text-secondary)',
           }}>
-          <Cloud size={14} /> VoxCloud
+          <Cloud size={14} /> {t('tts.cloudName')}
         </button>
         <button onClick={() => s.setEngine('omnivoice')}
           className="flex-1 flex items-center justify-center gap-2 py-2 rounded-md text-sm font-medium transition-colors"
@@ -139,7 +139,7 @@ function SettingsPanel({ s }) {
             background: !isCloud ? 'var(--accent)' : 'transparent',
             color: !isCloud ? '#fff' : 'var(--text-secondary)',
           }}>
-          <Cpu size={14} /> VoxLocal
+          <Cpu size={14} /> {t('tts.localName')}
         </button>
       </div>
 

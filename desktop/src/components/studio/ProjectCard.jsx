@@ -8,6 +8,7 @@ import { useBatch } from "../../batch/BatchContext";
 import { useToast } from "../ui/Toast";
 import { thumbnailURL } from "../../services/api";
 import { showError } from "../../services/errors";
+import { useT } from "../../i18n/I18nContext";
 
 /**
  * ProjectCard — 1 card hiển thị 1 dự án trong grid.
@@ -20,6 +21,7 @@ import { showError } from "../../services/errors";
  *   canceled → xám + [Xoá]
  */
 export default function ProjectCard({ item, onOpen, onRetry }) {
+  const t = useT();
   const { cancelItem, removeItem } = useBatch();
   const toast = useToast();
 
@@ -42,7 +44,7 @@ export default function ProjectCard({ item, onOpen, onRetry }) {
   const handleCancel = (e) => {
     e.stopPropagation();
     if (canCancel) {
-      if (confirm(`Huỷ xử lý "${item.filename || item.projectId}"?`)) {
+      if (confirm(t("grid.cancelConfirm", { name: item.filename || item.projectId }))) {
         cancelItem(item.projectId);
       }
     } else {
@@ -81,15 +83,15 @@ export default function ProjectCard({ item, onOpen, onRetry }) {
 
   // Thời gian tương đối (đã xong X phút trước)
   const relTime = (() => {
-    const t = item.finishedAt || item.startedAt;
-    if (!t) return "vừa thêm";
-    const secs = Math.floor((Date.now() - t) / 1000);
-    if (secs < 60) return `${secs}s trước`;
+    const ts = item.finishedAt || item.startedAt;
+    if (!ts) return t("grid.justAdded");
+    const secs = Math.floor((Date.now() - ts) / 1000);
+    if (secs < 60) return t("grid.relSec", { s: secs });
     const m = Math.floor(secs / 60);
-    if (m < 60) return `${m} phút trước`;
+    if (m < 60) return t("grid.relMin", { m });
     const h = Math.floor(m / 60);
-    if (h < 24) return `${h} giờ trước`;
-    return `${Math.floor(h / 24)} ngày trước`;
+    if (h < 24) return t("grid.relHour", { h });
+    return t("grid.relDay", { d: Math.floor(h / 24) });
   })();
 
   const borderColor =
@@ -151,7 +153,7 @@ export default function ProjectCard({ item, onOpen, onRetry }) {
         {/* Close/cancel button top-right */}
         <button
           onClick={handleCancel}
-          title={canCancel ? "Huỷ xử lý" : "Xoá khỏi lịch sử"}
+          title={canCancel ? t("grid.cancelTitle") : t("grid.removeTitle")}
           style={{
             position: "absolute", top: 8, right: 8,
             width: 22, height: 22,
@@ -188,7 +190,7 @@ export default function ProjectCard({ item, onOpen, onRetry }) {
           >
             <AlertTriangle size={12} />
             <span style={{ flex: 1 }} title={item.error}>
-              {truncate(item.error, 60) || "Xử lý thất bại"}
+              {truncate(item.error, 60) || t("grid.failedDefault")}
             </span>
           </div>
         )}
@@ -208,7 +210,7 @@ export default function ProjectCard({ item, onOpen, onRetry }) {
               cursor: "pointer", backdropFilter: "blur(8px)",
               boxShadow: "0 4px 12px rgba(0,0,0,0.3)",
             }}
-            title="Mở video"
+            title={t("grid.openVideo")}
           >
             <Play size={18} fill="#fff" />
           </button>
@@ -243,9 +245,9 @@ export default function ProjectCard({ item, onOpen, onRetry }) {
                 color: "var(--accent)", fontSize: 10.5, cursor: "pointer",
                 padding: 0,
               }}
-              title="Hiện trong Finder"
+              title={t("grid.showInFinder")}
             >
-              Mở thư mục
+              {t("grid.openFolder")}
             </button>
           )}
           {isError && (
@@ -257,9 +259,9 @@ export default function ProjectCard({ item, onOpen, onRetry }) {
                 padding: 0,
                 display: "flex", alignItems: "center", gap: 3,
               }}
-              title="Thử lại"
+              title={t("grid.retry")}
             >
-              <RotateCcw size={10} /> Thử lại
+              <RotateCcw size={10} /> {t("grid.retry")}
             </button>
           )}
         </div>
@@ -269,14 +271,15 @@ export default function ProjectCard({ item, onOpen, onRetry }) {
 }
 
 function StatusBadge({ status }) {
+  const t = useT();
   const cfg = {
-    pending:  { label: "Chờ",    bg: "rgba(107,114,128,0.85)", icon: Hourglass },
-    running:  { label: "Đang xử lý", bg: "rgba(108,92,231,0.88)", icon: Loader2 },
-    done:     { label: "Xong",   bg: "rgba(34,197,94,0.88)",  icon: Check },
-    error:    { label: "Lỗi",    bg: "rgba(239,68,68,0.88)",  icon: AlertTriangle },
-    canceled: { label: "Huỷ",    bg: "rgba(148,163,184,0.88)", icon: X },
+    pending:  { labelKey: "status.badgePending", bg: "rgba(107,114,128,0.85)", icon: Hourglass },
+    running:  { labelKey: "status.badgeRunning", bg: "rgba(108,92,231,0.88)", icon: Loader2 },
+    done:     { labelKey: "status.badgeDone",    bg: "rgba(34,197,94,0.88)",  icon: Check },
+    error:    { labelKey: "status.badgeError",   bg: "rgba(239,68,68,0.88)",  icon: AlertTriangle },
+    canceled: { labelKey: "status.badgeCanceled",bg: "rgba(148,163,184,0.88)", icon: X },
   }[status] || {};
-  if (!cfg.label) return null;
+  if (!cfg.labelKey) return null;
   const Icon = cfg.icon;
   return (
     <div
@@ -290,12 +293,13 @@ function StatusBadge({ status }) {
       }}
     >
       <Icon size={10} className={status === "running" ? "animate-spin" : ""} />
-      {cfg.label}
+      {t(cfg.labelKey)}
     </div>
   );
 }
 
 function ProgressOverlay({ isRunning, progress, step, eta }) {
+  const t = useT();
   return (
     <div
       style={{
@@ -351,7 +355,7 @@ function ProgressOverlay({ isRunning, progress, step, eta }) {
               fontSize: 9.5, color: "rgba(255,255,255,0.85)",
               textShadow: "0 1px 2px rgba(0,0,0,0.5)",
             }}>
-              · còn ~{eta}
+              {t("grid.etaSuffix", { eta })}
             </span>
           )}
         </div>

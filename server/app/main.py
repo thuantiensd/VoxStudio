@@ -1,5 +1,14 @@
 """VoxStudio — FastAPI Server."""
 
+# Load .env TRƯỚC khi import bất kỳ module nào của app — vì jwt_tokens.py đọc
+# JWT_SECRET tại import-time, nếu .env chưa load thì sẽ fallback random secret
+# → token cũ invalid sau mỗi restart.
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except Exception:
+    pass
+
 import logging
 from contextlib import asynccontextmanager
 
@@ -11,13 +20,6 @@ from app.config import DEVICE, DTYPE
 from app.core.gpu_manager import gpu
 from app.db.session import init_db
 from app.db.migrations import run_migrations
-
-# Load .env (JWT_SECRET + GOOGLE_OAUTH_CLIENT_ID/SECRET + SENTRY_DSN)
-try:
-    from dotenv import load_dotenv
-    load_dotenv()
-except Exception:
-    pass
 
 # Sentry init TRƯỚC khi tạo FastAPI — để middleware bắt được cả init errors.
 # DSN opt-in qua env — không có DSN thì skip.
@@ -77,12 +79,19 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS — allow desktop app to connect
+# CORS — allow desktop app to connect.
+# QUAN TRỌNG: phải LIST EXPLICIT các header (đặc biệt Authorization), wildcard
+# "*" KHÔNG match Authorization header theo CORS spec → browser strip header,
+# backend nhận request rỗng → 401 "Missing token". Đã debug 1 buổi vì lý do này.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"],
+    allow_headers=[
+        "Authorization", "Content-Type", "Accept", "Origin",
+        "X-Requested-With", "ngrok-skip-browser-warning",
+    ],
+    expose_headers=["*"],
 )
 
 # Routes

@@ -199,10 +199,12 @@ ipcMain.handle("fs:getUniqueFilename", async (_event, { folder, filename }) => {
 
 // Download URL remote → lưu vào folder chỉ định. Nếu trùng tên, auto
 // thêm (1), (2) vào tên trừ khi overwrite=true.
-ipcMain.handle("fs:saveRemoteFile", async (_event, { url, folder, filename, overwrite }) => {
+ipcMain.handle("fs:saveRemoteFile", async (_event, { url, folder, filename, overwrite, headers }) => {
   const fs = await import("node:fs/promises");
   const path = await import("node:path");
-  const res = await fetch(url);
+  // Renderer truyền sẵn header (Authorization Bearer token + ngrok-skip…) — bắt buộc
+  // vì backend yêu cầu auth cho mọi endpoint download.
+  const res = await fetch(url, { headers: headers || {} });
   if (!res.ok) throw new Error(`Download failed: ${res.status}`);
   const buf = Buffer.from(await res.arrayBuffer());
   const dest = overwrite

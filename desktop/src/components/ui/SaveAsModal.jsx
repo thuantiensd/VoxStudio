@@ -86,7 +86,7 @@ export default function SaveAsModal({
     <Modal
       open={open}
       onClose={onClose}
-      title={t("save.title") || "Lưu file"}
+      title={t("save.title")}
       width={520}
       actions={
         <>
@@ -97,7 +97,7 @@ export default function SaveAsModal({
             variant="primary" size="md" icon={Save}
             onClick={doSave} loading={saving} disabled={!canSave}
           >
-            {saving ? t("common.saving") : (t("save.action") || "Lưu")}
+            {saving ? t("common.saving") : t("save.action")}
           </Button>
         </>
       }
@@ -106,7 +106,7 @@ export default function SaveAsModal({
         {/* Folder picker */}
         <div>
           <label style={fieldLabel}>
-            {t("save.folder") || "Thư mục lưu"}
+            {t("save.folder")}
           </label>
           <div
             style={{
@@ -126,10 +126,10 @@ export default function SaveAsModal({
                 color: folder ? "var(--n-9)" : "var(--n-6)",
               }}
             >
-              {folder || "(chưa chọn)"}
+              {folder || t("saveModal.folderNone")}
             </div>
             <Button size="sm" variant="secondary" onClick={pickFolder}>
-              {folder ? "Đổi" : "Chọn"}
+              {folder ? t("saveModal.change") : t("saveModal.choose")}
             </Button>
           </div>
         </div>
@@ -137,7 +137,7 @@ export default function SaveAsModal({
         {/* Name input */}
         <div>
           <label style={fieldLabel}>
-            {t("save.filename") || "Tên file"}
+            {t("save.filename")}
           </label>
           <div
             style={{
@@ -183,8 +183,8 @@ export default function SaveAsModal({
             <div style={{ fontSize: 10, fontWeight: 600, textTransform: "uppercase",
                           letterSpacing: "0.05em", color: "var(--n-6)", marginBottom: 4 }}>
               {willCollide
-                ? "Trùng tên → sẽ lưu thành"
-                : "Sẽ lưu tại"}
+                ? t("saveModal.willSaveAs")
+                : t("saveModal.willSaveAt")}
             </div>
             <div
               title={resolvedPath}
@@ -209,7 +209,7 @@ export default function SaveAsModal({
             onChange={(e) => setOverwrite(e.target.checked)}
             style={{ accentColor: "var(--accent)" }}
           />
-          <span>{t("save.overwrite") || "Ghi đè nếu trùng tên"}</span>
+          <span>{t("save.overwrite")}</span>
         </label>
       </div>
     </Modal>

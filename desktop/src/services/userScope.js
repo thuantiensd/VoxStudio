@@ -77,3 +77,40 @@ export function clearUserLocalStorage() {
     toDel.forEach((k) => localStorage.removeItem(k));
   } catch {}
 }
+
+/**
+ * Danh sách prefix các key data dạng cũ (chưa scope theo user) — viết bởi
+ * các bản trước khi userScope ra đời. Phải dọn 1 lần khi app khởi động
+ * (hoặc khi user đăng nhập) để tránh lộ dữ liệu user cũ ra user mới.
+ *
+ * KHÔNG thêm: voxstudio:auth, voxstudio:theme, voxstudio:locale,
+ * voxstudio:sidebar:collapsed (device-level, intentionally shared).
+ */
+const LEGACY_DATA_PREFIXES = [
+  "voxstudio:download:",
+  "voxstudio:batch:",
+  "voxstudio:stt:",
+  "voxstudio:studio:",
+  "voxstudio:apikey:",
+];
+
+/**
+ * purgeLegacyUnscopedData — gọi 1 lần lúc app boot. Xoá các key dữ liệu
+ * dạng cũ KHÔNG có "u/<uid>:" — bảo đảm không leak data từ phiên cũ.
+ * Idempotent: chạy nhiều lần cũng không sao.
+ */
+export function purgeLegacyUnscopedData() {
+  try {
+    const toDel = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (!k) continue;
+      // Bỏ qua nếu đã scope user ("voxstudio:u/...")
+      if (k.startsWith(`${PREFIX}u/`)) continue;
+      if (LEGACY_DATA_PREFIXES.some((p) => k.startsWith(p))) {
+        toDel.push(k);
+      }
+    }
+    toDel.forEach((k) => localStorage.removeItem(k));
+  } catch {}
+}

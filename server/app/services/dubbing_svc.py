@@ -822,6 +822,7 @@ def generate_segment(project_id: str, seg_id: str) -> dict:
 
     target_duration = seg["end"] - seg["start"]
     tts_engine = project.get("tts_engine", "edge")
+    auto_pace = project.get("auto_pace", True)  # default ON
     out_path = _segments_dir(project_id) / f"{seg_id}.wav"
 
     try:
@@ -842,8 +843,8 @@ def generate_segment(project_id: str, seg_id: str) -> dict:
             actual_dur = len(audio_np) / sr
             ratio = actual_dur / target_duration if target_duration > 0 else 1.0
 
-            # Pass 2: if too far off, re-generate with native speed
-            if abs(ratio - 1.0) > SPEED_TOLERANCE:
+            # Pass 2: if too far off, re-generate with native speed (chỉ khi auto_pace)
+            if auto_pace and abs(ratio - 1.0) > SPEED_TOLERANCE:
                 edge_speed = max(MIN_EDGE_SPEED, min(MAX_EDGE_SPEED, ratio))
                 mp3_v2 = seg_dir / f"{seg_id}_v2.mp3"
                 _edge_generate_sync(tts_text, str(mp3_v2), language=lang,
@@ -853,8 +854,8 @@ def generate_segment(project_id: str, seg_id: str) -> dict:
                 actual_dur = len(audio_np) / sr
                 ratio = actual_dur / target_duration if target_duration > 0 else 1.0
 
-            # Fine-tune with atempo
-            if actual_dur > 0 and abs(ratio - 1.0) > 0.03:
+            # Fine-tune with atempo (chỉ khi auto_pace)
+            if auto_pace and actual_dur > 0 and abs(ratio - 1.0) > 0.03:
                 stretched = seg_dir / f"{seg_id}_stretched.wav"
                 _atempo_stretch(out_path, stretched, ratio)
                 audio_np, sr = sf.read(str(stretched))
@@ -892,7 +893,7 @@ def generate_segment(project_id: str, seg_id: str) -> dict:
             # just let silence fill the gap naturally. Only compress when needed
             # to prevent overlap with next segment.
             actual_dur = len(audio_np) / sr
-            if target_duration > 0 and actual_dur > target_duration * 1.15:
+            if auto_pace and target_duration > 0 and actual_dur > target_duration * 1.15:
                 ratio = actual_dur / target_duration
                 # Cap at 1.3x — beyond that atempo creates "rushed/chipmunk" artifact.
                 # If still too long, accept slight overlap into next segment.
@@ -1314,6 +1315,23 @@ def export_video(project_id: str, keep_original_audio: bool = False,
     trim_s = project.get("trim_start", 0)
     trim_e = project.get("trim_end", project["video_duration"])
 
+    # User config từ project settings override API params (nếu user đã set ở UI)
+    if project.get("keep_original_audio") is not None:
+        keep_original_audio = bool(project["keep_original_audio"])
+    if project.get("original_audio_volume") is not None:
+        original_audio_volume = float(project["original_audio_volume"])
+    crop_mode = project.get("crop_mode", "smart")  # smart | center | letterbox
+
+    # ── 2 luồng audio mix riêng (mới) ──
+    # accompaniment = nhạc nền/SFX (đã loại giọng qua Demucs) — default ON
+    # vocals        = giọng người gốc (đã tách) — default OFF
+    keep_accomp = project.get("keep_accompaniment",
+                              keep_original_audio if keep_original_audio else True)
+    accomp_vol  = float(project.get("accompaniment_volume",
+                                    original_audio_volume if original_audio_volume else 0.35))
+    keep_vocals = bool(project.get("keep_original_voice", False))
+    vocals_vol  = float(project.get("original_voice_volume", 0.20))
+
     try:
         # ── Step 1: Prepare dubbed audio if enabled ──
         dubbed_audio_path = None
@@ -1355,8 +1373,8 @@ def export_video(project_id: str, keep_original_audio: bool = False,
                 logger.info("Export built full_audio from %d individual segment files",
                             len(project["segments"]))
 
-            if keep_original_audio:
-                # Use accompaniment (no vocals) if available, otherwise full original
+            # ── Mix accompaniment (nhạc nền + SFX, đã loại giọng) ──
+            if keep_accomp:
                 accomp_path = pdir / "accompaniment.wav"
                 orig_audio_path = pdir / "original_audio.wav"
                 bg_path = accomp_path if accomp_path.exists() else orig_audio_path
@@ -1367,15 +1385,12 @@ def export_video(project_id: str, keep_original_audio: bool = False,
                         bg_audio = resample(bg_audio, total_samples).astype(np.float32)
 
                     if enable_ducking and accomp_path.exists():
-                        # Professional mix chain: voice EQ + sidechain compressor
-                        # + LUFS normalize. Falls back to legacy envelope follower
-                        # if pedalboard unavailable or errors.
+                        # Pro mix: voice EQ + sidechain compressor + LUFS normalize.
                         used_pro = False
                         if use_pro_mix:
                             try:
                                 from app.services.audio_mix_svc import pro_mix
                                 logger.info("Applying PRO audio mix (LUFS target=%.1f)", target_lufs)
-                                # bg_audio may be stereo; reduce to mono for pro_mix
                                 bg_mono = bg_audio.mean(axis=1) if bg_audio.ndim > 1 else bg_audio
                                 full_audio = pro_mix(
                                     voice=full_audio,
@@ -1388,8 +1403,7 @@ def export_video(project_id: str, keep_original_audio: bool = False,
                                 logger.warning("Pro mix failed, falling back to envelope ducking: %s", e)
 
                         if not used_pro:
-                            logger.info("Applying legacy audio ducking (level=%.2f, attack=%.2f, release=%.2f)",
-                                        duck_level, duck_attack, duck_release)
+                            logger.info("Applying legacy audio ducking (level=%.2f)", duck_level)
                             full_audio = _apply_ducking(
                                 bg_audio, full_audio, sr,
                                 duck_level=duck_level,
@@ -1397,10 +1411,25 @@ def export_video(project_id: str, keep_original_audio: bool = False,
                                 release=duck_release,
                             )
                     else:
-                        # Simple mix (fallback)
                         mix_len = min(len(full_audio), len(bg_audio))
-                        vol = original_audio_volume if not accomp_path.exists() else min(original_audio_volume * 3, 1.0)
+                        vol = accomp_vol if not accomp_path.exists() else min(accomp_vol * 3, 1.0)
                         full_audio[:mix_len] += bg_audio[:mix_len] * vol
+
+            # ── Mix vocals (giọng người gốc, đã tách qua Demucs) — KHÔNG ducking ──
+            if keep_vocals:
+                vocals_path = pdir / "vocals.wav"
+                if vocals_path.exists():
+                    voc_audio, voc_sr = sf.read(str(vocals_path), dtype="float32")
+                    if voc_audio.ndim > 1:
+                        voc_audio = voc_audio.mean(axis=1)
+                    if voc_sr != sr:
+                        from scipy.signal import resample
+                        voc_audio = resample(voc_audio, int(len(voc_audio) * sr / voc_sr)).astype(np.float32)
+                    mix_len = min(len(full_audio), len(voc_audio))
+                    full_audio[:mix_len] += voc_audio[:mix_len] * vocals_vol
+                    logger.info("Mixed original vocals at vol=%.2f (%.1fs)", vocals_vol, mix_len / sr)
+                else:
+                    logger.warning("keep_original_voice=True but vocals.wav not found")
 
             dubbed_audio_path = pdir / "dubbed_audio.wav"
             sf.write(str(dubbed_audio_path), full_audio, sr)
@@ -1419,21 +1448,37 @@ def export_video(project_id: str, keep_original_audio: bool = False,
             input_kwargs["to"] = trim_e
         video_in = ffmpeg.input(str(video_path), **input_kwargs)
 
-        # Build crop filter for aspect ratio
-        crop_ratios = {"16:9": (16, 9), "9:16": (9, 16), "4:5": (4, 5), "1:1": (1, 1)}
+        # Build crop / letterbox filter for aspect ratio
+        crop_ratios = {"16:9": (16, 9), "9:16": (9, 16), "4:5": (4, 5), "1:1": (1, 1),
+                       "16:9w": (16, 9)}
         needs_crop = aspect_ratio in crop_ratios
         needs_encode = needs_crop or do_subtitle  # crop/subtitle requires re-encode
 
         def apply_video_filters(stream):
-            """Apply crop + subtitle filters to video stream."""
+            """Apply crop/letterbox + subtitle filters to video stream."""
             if needs_crop:
                 tw, th = crop_ratios[aspect_ratio]
-                # Crop to target aspect ratio centered
-                stream = stream.filter(
-                    "crop",
-                    f"min(iw\\,ih*{tw}/{th})", f"min(ih\\,iw*{th}/{tw})",
-                    f"(iw-min(iw\\,ih*{tw}/{th}))/2", f"(ih-min(ih\\,iw*{th}/{tw}))/2",
-                )
+                if crop_mode == "letterbox":
+                    # Giữ full video, thêm viền đen để đạt aspect đích
+                    # Output W = max(iw, ih*tw/th), H = max(ih, iw*th/tw)
+                    stream = stream.filter(
+                        "scale",
+                        f"if(gt(a\\,{tw}/{th})\\,iw\\,ih*{tw}/{th})",
+                        f"if(gt(a\\,{tw}/{th})\\,iw*{th}/{tw}\\,ih)",
+                        force_original_aspect_ratio="decrease",
+                    ).filter(
+                        "pad",
+                        f"if(gt(a\\,{tw}/{th})\\,iw\\,ih*{tw}/{th})",
+                        f"if(gt(a\\,{tw}/{th})\\,iw*{th}/{tw}\\,ih)",
+                        "(ow-iw)/2", "(oh-ih)/2", "black",
+                    )
+                else:
+                    # smart (TODO ML detect chủ thể) + center fallback = center crop
+                    stream = stream.filter(
+                        "crop",
+                        f"min(iw\\,ih*{tw}/{th})", f"min(ih\\,iw*{th}/{tw})",
+                        f"(iw-min(iw\\,ih*{tw}/{th}))/2", f"(ih-min(ih\\,iw*{th}/{tw}))/2",
+                    )
             if do_subtitle and ass_path:
                 stream = stream.filter("ass", str(ass_path))
             return stream
@@ -1590,13 +1635,50 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         overrides += f"\\pos({px},{py})"
     if abs(rot_val) > 0.1:
         overrides += f"\\frz{round(-rot_val, 1)}"  # ASS xoay ngược chiều CSS
-    override_tag = ("{" + overrides + "}") if overrides else ""
 
     # MarginL/R per-dialogue để wrap text theo max_width_pct
     if isinstance(max_width_pct, (int, float)) and 10 <= max_width_pct <= 100:
         margin_side = int(round(video_w * (1 - max_width_pct / 100) / 2))
     else:
         margin_side = 0  # 0 = dùng Style default (20)
+
+    # Animation prefix tags
+    anim = (style.get("animation") or project.get("animation") or "none").lower()
+    anim_tag = ""
+    if anim == "fade":
+        anim_tag = "\\fad(200,200)"
+    elif anim == "slide":
+        anim_tag = "\\move(0,30,0,0,0,200)"  # slide up nhẹ vào đầu
+
+    # Dynamic font size — co chữ khi câu quá dài, tránh tràn dòng
+    auto_font = bool(project.get("auto_font_size", False))
+    def _size_tag_for(t):
+        if not auto_font:
+            return ""
+        n = len(t)
+        if n <= 60:
+            return ""
+        # 60→1.0, 90→0.85, 120→0.7, >150→0.6
+        scale = max(0.6, 1.0 - (n - 60) / 200.0)
+        return f"\\fs{int(round(size * scale))}"
+
+    # Highlight từ khoá — wrap word matches với màu vàng
+    raw_kw = (project.get("highlight_keywords") or "").strip()
+    keywords = [w.strip() for w in raw_kw.split(",") if w.strip()] if raw_kw else []
+    hl_color = "&H0000F2FF&"  # ASS BGR vàng đậm
+
+    def _apply_highlight(t):
+        if not keywords:
+            return t
+        out = t
+        for kw in keywords:
+            if not kw:
+                continue
+            # Wrap không phân biệt hoa thường
+            import re
+            pattern = re.compile(re.escape(kw), re.IGNORECASE)
+            out = pattern.sub(lambda m: f"{{\\c{hl_color}}}{m.group(0)}{{\\r}}", out)
+        return out
 
     for seg in project["segments"]:
         text = seg["translated_text"] if use_translated and seg["translated_text"].strip() else seg["original_text"]
@@ -1607,8 +1689,12 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         start_ass = start[1:]
         end_ass = end[1:]
         clean_text = text.strip().replace("\n", "\\N")
+        clean_text = _apply_highlight(clean_text)
+        # Tổng hợp tag override: position + rotation + animation + auto-fontsize
+        seg_overrides = overrides + anim_tag + _size_tag_for(text)
+        seg_tag = ("{" + seg_overrides + "}") if seg_overrides else ""
         events.append(
-            f"Dialogue: 0,{start_ass},{end_ass},Default,,{margin_side},{margin_side},0,,{override_tag}{clean_text}"
+            f"Dialogue: 0,{start_ass},{end_ass},Default,,{margin_side},{margin_side},0,,{seg_tag}{clean_text}"
         )
 
     content = header + "\n".join(events) + "\n"
@@ -1632,8 +1718,26 @@ def update_project_settings(project_id: str, settings: dict) -> dict:
     project = _load_meta(project_id)
     if not project:
         raise ValueError("Project not found")
-    allowed = {"enable_dubbing", "enable_subtitle", "target_language", "voice_id", "source_language_input", "tts_engine", "edge_voice", "aspect_ratio", "trim_start", "trim_end"}
-    nullable = {"edge_voice", "voice_id"}
+    allowed = {
+        "enable_dubbing", "enable_subtitle",
+        "target_language", "voice_id", "source_language_input",
+        "tts_engine", "edge_voice",
+        "aspect_ratio", "trim_start", "trim_end",
+        # Mix audio — 2 luồng riêng:
+        #  · accompaniment (nhạc nền/SFX) — default ON
+        #  · vocals (giọng người gốc) — default OFF (tránh đụng giọng dub)
+        "keep_accompaniment", "accompaniment_volume",
+        "keep_original_voice", "original_voice_volume",
+        # Backward compat — flag cũ, vẫn đọc nếu set
+        "keep_original_audio", "original_audio_volume",
+        # Crop mode — apply trong ffmpeg ở export_video
+        "crop_mode",
+        # Cảm xúc mặc định — fallback khi LLM không set
+        "default_emotion",
+        # Auto features
+        "auto_font_size", "auto_pace", "smart_chunk", "highlight_keywords",
+    }
+    nullable = {"edge_voice", "voice_id", "default_emotion"}
     for k, v in settings.items():
         if k in allowed and (v is not None or k in nullable):
             project[k] = v
@@ -1928,15 +2032,26 @@ def auto_dub(project_id: str, engine: str = "google"):
             logger.info("Skipping Qwen rewrite (no CUDA). Using Google Translate only.")
         yield {"step": "translating", "label": "Dịch thuật hoàn tất!", "progress": r_transl[1]}
 
-        # Step 2.5: Auto-chunk
-        yield {"step": "chunking", "label": "Chia nhỏ phụ đề theo từng câu...",
-               "progress": r_chunk[0]}
-        try:
-            auto_chunk_project_segments(project_id)
-        except Exception as e:
-            logger.warning("auto_chunk_project_segments failed: %s", e)
-        yield {"step": "chunking", "label": "Chia nhỏ phụ đề theo từng câu...",
-               "progress": r_chunk[1]}
+        # Step 2.5: Auto-chunk (chỉ chạy khi user bật smart_chunk; default = True)
+        proj_now = _load_meta(project_id)
+        if proj_now.get("smart_chunk", True):
+            yield {"step": "chunking", "label": "Chia nhỏ phụ đề theo từng câu...",
+                   "progress": r_chunk[0]}
+            try:
+                auto_chunk_project_segments(project_id)
+            except Exception as e:
+                logger.warning("auto_chunk_project_segments failed: %s", e)
+            yield {"step": "chunking", "label": "Chia nhỏ phụ đề theo từng câu...",
+                   "progress": r_chunk[1]}
+
+        # Step 2.6: Default emotion fallback — set cho seg chưa có emotion từ LLM
+        proj_now = _load_meta(project_id)
+        default_emo = (proj_now.get("default_emotion") or "").strip()
+        if default_emo and default_emo != "normal":
+            for seg in proj_now.get("segments", []):
+                if not seg.get("emotion") or seg.get("emotion") == "neutral":
+                    seg["emotion"] = default_emo
+            _save_meta(proj_now)
 
         # Step 3: Generate TTS — stream + tick giữa các segment
         if do_dubbing and r_tts:

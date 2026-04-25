@@ -7,6 +7,7 @@ import { listKeys, getKey, setKey, isSecureBackend } from "../../services/keyvau
 import { translateTexts } from "../../services/api";
 import { useToast } from "../../components/ui/Toast";
 import Modal from "../../components/ui/Modal";
+import { useT } from "../../i18n/I18nContext";
 
 /* ─────────────────────────────────────────────────────────
    Settings → AI & API keys
@@ -16,39 +17,15 @@ import Modal from "../../components/ui/Modal";
    ───────────────────────────────────────────────────────── */
 
 const PROVIDERS = [
-  {
-    id: "openai", name: "OpenAI (GPT)",
-    hint: "Dùng cho translate + polish (mặc định gpt-4o-mini).",
-    link: "https://platform.openai.com/api-keys",
-    placeholder: "sk-proj-…",
-  },
-  {
-    id: "claude", name: "Anthropic Claude",
-    hint: "Translate + polish (claude-3-5-haiku).",
-    link: "https://console.anthropic.com/settings/keys",
-    placeholder: "sk-ant-api…",
-  },
-  {
-    id: "gemini", name: "Google Gemini",
-    hint: "Translate + reasoning (gemini-1.5-flash).",
-    link: "https://aistudio.google.com/apikey",
-    placeholder: "AIza…",
-  },
-  {
-    id: "deepl", name: "DeepL",
-    hint: "Máy dịch chất lượng cao. Free tier có giới hạn.",
-    link: "https://www.deepl.com/account/summary",
-    placeholder: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx:fx",
-  },
-  {
-    id: "google_cloud", name: "Google Cloud Translate",
-    hint: "Chất lượng cao, độ chính xác tốt. Cần đăng ký tài khoản Google Cloud.",
-    link: "https://console.cloud.google.com/apis/credentials",
-    placeholder: "AIza…",
-  },
+  { id: "openai",       name: "OpenAI (GPT)",          hintKey: "settings.integrations.hintOpenai",      link: "https://platform.openai.com/api-keys",                placeholder: "sk-proj-…" },
+  { id: "claude",       name: "Anthropic Claude",      hintKey: "settings.integrations.hintClaude",      link: "https://console.anthropic.com/settings/keys",          placeholder: "sk-ant-api…" },
+  { id: "gemini",       name: "Google Gemini",         hintKey: "settings.integrations.hintGemini",      link: "https://aistudio.google.com/apikey",                  placeholder: "AIza…" },
+  { id: "deepl",        name: "DeepL",                 hintKey: "settings.integrations.hintDeepl",       link: "https://www.deepl.com/account/summary",                placeholder: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx:fx" },
+  { id: "google_cloud", name: "Google Cloud Translate", hintKey: "settings.integrations.hintGoogleCloud", link: "https://console.cloud.google.com/apis/credentials",   placeholder: "AIza…" },
 ];
 
 export default function IntegrationsTab() {
+  const t = useT();
   const toast = useToast();
   const secure = isSecureBackend();
   const [saved, setSaved] = useState({});  // {id: bool}
@@ -80,28 +57,14 @@ export default function IntegrationsTab() {
         {secure
           ? <ShieldCheck size={16} style={{ color: "#22c55e", flexShrink: 0, marginTop: 1 }} />
           : <ShieldAlert  size={16} style={{ color: "#f59e0b", flexShrink: 0, marginTop: 1 }} />}
-        <div style={{ fontSize: 12.5, lineHeight: 1.55, color: "var(--n-9)" }}>
-          {secure ? (
-            <>
-              <b>Được mã hoá an toàn trên máy bạn.</b> Key chỉ lưu cục bộ,
-              không bao giờ được gửi đến chúng tôi. Khi dịch, key được gửi
-              trực tiếp tới nhà cung cấp bạn chọn (OpenAI / Claude / DeepL …)
-              qua kết nối mã hoá HTTPS.
-            </>
-          ) : (
-            <>
-              <b>Phiên bản trình duyệt — key chưa được mã hoá.</b>
-              Chỉ nên dùng tạm để thử. Hãy dùng app desktop để key được bảo
-              vệ bằng kho khoá an toàn của hệ điều hành.
-            </>
-          )}
-        </div>
+        <div style={{ fontSize: 12.5, lineHeight: 1.55, color: "var(--n-9)" }}
+             dangerouslySetInnerHTML={{ __html: secure ? t("settings.integrations.bannerSecure") : t("settings.integrations.bannerWeb") }} />
       </div>
 
       {loading && (
         <div style={{ display: "flex", alignItems: "center", gap: 8,
                        color: "var(--n-8)", fontSize: 13 }}>
-          <Loader2 size={14} className="animate-spin" /> Đang đọc vault…
+          <Loader2 size={14} className="animate-spin" /> {t("settings.integrations.loadingVault")}
         </div>
       )}
 
@@ -116,6 +79,7 @@ export default function IntegrationsTab() {
 }
 
 function ProviderRow({ provider, hasKey, onChanged, toast }) {
+  const t = useT();
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState("");
   const [show, setShow] = useState(false);
@@ -135,11 +99,11 @@ function ProviderRow({ provider, hasKey, onChanged, toast }) {
     setLoading(true);
     try {
       await setKey(provider.id, value.trim());
-      toast.success(provider.name, { title: "Đã lưu" });
+      toast.success(provider.name, { title: t("settings.integrations.toastSavedTitle") });
       setEditing(false);
       onChanged?.();
     } catch (e) {
-      toast.error(e?.message || "Không lưu được key.", { title: "Lỗi lưu key" });
+      toast.error(e?.message || t("settings.integrations.toastSaveError"), { title: t("settings.integrations.toastSaveErrorTitle") });
     } finally {
       setLoading(false);
     }
@@ -150,7 +114,7 @@ function ProviderRow({ provider, hasKey, onChanged, toast }) {
     setLoading(true);
     try {
       await setKey(provider.id, "");
-      toast.info(provider.name, { title: "Đã xoá" });
+      toast.info(provider.name, { title: t("settings.integrations.toastDeletedTitle") });
       setEditing(false);
       setValue("");
       onChanged?.();
@@ -165,7 +129,7 @@ function ProviderRow({ provider, hasKey, onChanged, toast }) {
     try {
       const key = editing ? value.trim() : await getKey(provider.id);
       if (!key) {
-        toast.warn("Paste key trước rồi test.", { title: "Chưa có key" });
+        toast.warn(t("settings.integrations.toastNoKey"), { title: t("settings.integrations.toastNoKeyTitle") });
         return;
       }
       const res = await translateTexts({
@@ -177,16 +141,16 @@ function ProviderRow({ provider, hasKey, onChanged, toast }) {
       const out = (res?.translations || [])[0];
       if (out) {
         setTestResult("ok");
-        toast.success(`"Hello world" → "${out}"`, { title: `${provider.name} OK` });
+        toast.success(`"Hello world" → "${out}"`, { title: t("settings.integrations.toastTestOk", { name: provider.name }) });
       } else {
         setTestResult("fail");
-        toast.warn("Provider trả về rỗng. Kiểm tra key hoặc quota.",
-                    { title: "Không có kết quả" });
+        toast.warn(t("settings.integrations.toastEmptyResult"),
+                    { title: t("settings.integrations.toastEmptyResultTitle") });
       }
     } catch (e) {
       setTestResult("fail");
-      toast.error(e?.message || "Không rõ nguyên nhân.",
-                   { title: `${provider.name} thất bại` });
+      toast.error(e?.message || t("settings.integrations.toastUnknownReason"),
+                   { title: t("settings.integrations.toastTestFailedTitle", { name: provider.name }) });
     } finally {
       setTesting(false);
     }
@@ -210,7 +174,7 @@ function ProviderRow({ provider, hasKey, onChanged, toast }) {
             {provider.name}
           </div>
           <div style={{ fontSize: 11.5, color: "var(--n-7)", marginTop: 2 }}>
-            {provider.hint}{" "}
+            {t(provider.hintKey)}{" "}
             <a href={provider.link}
                 onClick={(e) => {
                   e.preventDefault();
@@ -218,7 +182,7 @@ function ProviderRow({ provider, hasKey, onChanged, toast }) {
                   window.open(provider.link, "_blank");
                 }}
                 style={{ color: "var(--accent)", textDecoration: "none" }}>
-              Lấy key <ExternalLink size={10} style={{ display: "inline", verticalAlign: "-1px" }} />
+              {t("settings.integrations.getKey")} <ExternalLink size={10} style={{ display: "inline", verticalAlign: "-1px" }} />
             </a>
           </div>
         </div>
@@ -230,7 +194,7 @@ function ProviderRow({ provider, hasKey, onChanged, toast }) {
             onClick={startEdit}
             style={btnSecondary}
           >
-            {hasKey ? "Sửa" : "Thêm"}
+            {hasKey ? t("settings.integrations.edit") : t("settings.integrations.add")}
           </button>
         )}
       </div>
@@ -253,7 +217,7 @@ function ProviderRow({ provider, hasKey, onChanged, toast }) {
             />
             <button
               onClick={() => setShow((v) => !v)}
-              title={show ? "Ẩn key" : "Hiện key"}
+              title={show ? t("settings.integrations.hideKey") : t("settings.integrations.showKey")}
               style={{ ...iconBtn }}
             >
               {show ? <EyeOff size={13} /> : <Eye size={13} />}
@@ -266,25 +230,25 @@ function ProviderRow({ provider, hasKey, onChanged, toast }) {
                     disabled={loading || !value.trim()}
                     style={btnPrimary}>
               {loading ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
-              Lưu
+              {t("settings.integrations.save")}
             </button>
             <button onClick={test}
                     disabled={testing || !value.trim()}
                     style={btnSecondary}>
               {testing ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}
-              Test key
+              {t("settings.integrations.testKey")}
             </button>
             {hasKey && (
               <button onClick={() => setConfirmOpen(true)}
                       style={{ ...btnSecondary, color: "var(--err)",
                                 borderColor: "rgba(239,68,68,0.35)" }}>
-                <Trash2 size={12} /> Xoá
+                <Trash2 size={12} /> {t("settings.integrations.remove")}
               </button>
             )}
             <div style={{ flex: 1 }} />
             <button onClick={() => { setEditing(false); setValue(""); }}
                     style={btnGhost}>
-              Huỷ
+              {t("settings.integrations.cancel")}
             </button>
           </div>
         </div>
@@ -297,7 +261,7 @@ function ProviderRow({ provider, hasKey, onChanged, toast }) {
         actions={
           <>
             <button onClick={() => setConfirmOpen(false)} style={btnGhost}>
-              Huỷ
+              {t("settings.integrations.cancel")}
             </button>
             <button
               onClick={doRemove}
@@ -306,7 +270,7 @@ function ProviderRow({ provider, hasKey, onChanged, toast }) {
                 height: 32, padding: "0 14px", fontWeight: 500,
               }}
             >
-              <Trash2 size={13} /> Xoá key
+              <Trash2 size={13} /> {t("settings.integrations.removeKey")}
             </button>
           </>
         }
@@ -324,11 +288,10 @@ function ProviderRow({ provider, hasKey, onChanged, toast }) {
           <div style={{ flex: 1 }}>
             <div style={{ fontSize: 15, fontWeight: 600, color: "var(--n-10)",
                            marginBottom: 6 }}>
-              Xoá API key cho {provider.name}?
+              {t("settings.integrations.removeKeyTitle", { name: provider.name })}
             </div>
             <div style={{ fontSize: 12.5, color: "var(--n-8)", lineHeight: 1.55 }}>
-              Key sẽ bị xoá khỏi máy bạn. Các tính năng dùng {provider.name} sẽ
-              không hoạt động cho tới khi bạn thêm lại key mới.
+              {t("settings.integrations.removeKeyHint", { name: provider.name })}
             </div>
           </div>
         </div>
@@ -338,10 +301,11 @@ function ProviderRow({ provider, hasKey, onChanged, toast }) {
 }
 
 function StatusBadge({ hasKey, testResult }) {
-  if (testResult === "ok") return <Pill color="#22c55e" bg="rgba(34,197,94,0.12)" icon={Check} label="Đã test OK" />;
-  if (testResult === "fail") return <Pill color="var(--err)" bg="rgba(239,68,68,0.12)" icon={X} label="Test lỗi" />;
-  if (hasKey) return <Pill color="var(--n-9)" bg="var(--n-2)" icon={Check} label="Đã lưu" />;
-  return <Pill color="var(--n-7)" bg="transparent" label="Trống" />;
+  const t = useT();
+  if (testResult === "ok") return <Pill color="#22c55e" bg="rgba(34,197,94,0.12)" icon={Check} label={t("settings.integrations.badgeOk")} />;
+  if (testResult === "fail") return <Pill color="var(--err)" bg="rgba(239,68,68,0.12)" icon={X} label={t("settings.integrations.badgeFail")} />;
+  if (hasKey) return <Pill color="var(--n-9)" bg="var(--n-2)" icon={Check} label={t("settings.integrations.badgeSaved")} />;
+  return <Pill color="var(--n-7)" bg="transparent" label={t("settings.integrations.badgeEmpty")} />;
 }
 
 function Pill({ color, bg, icon: Icon, label }) {

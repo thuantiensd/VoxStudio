@@ -5,7 +5,7 @@ import {
   Clapperboard, Mic2, AudioWaveform, Library,
   ClockFading, Settings as Cog, CloudDownload,
   FileText, PanelLeftClose, PanelLeftOpen,
-  Sun, Moon, Monitor, LogOut, User as UserIcon,
+  Sun, Moon, Monitor, LogOut, User as UserIcon, Sparkles,
 } from "lucide-react";
 import { useBatch } from "../../batch/BatchContext";
 import { useT } from "../../i18n/I18nContext";
@@ -307,6 +307,7 @@ function BrandHeader({ collapsed, onToggle }) {
  * đứng cạnh bên phải.
  */
 function UserFooter({ collapsed }) {
+  const t = useT();
   const { user, logout } = useAuth() || {};
   const nav = useNavigate();
   const [open, setOpen] = useState(false);
@@ -341,6 +342,10 @@ function UserFooter({ collapsed }) {
         : initial}
     </div>
   );
+
+  // Free plan = chưa nâng cấp. Khi user mua gói (pro/studio/...) thì link biến mất.
+  const planId = (user?.plan || "free").toLowerCase();
+  const isFree = planId === "free" || planId === "";
 
   return (
     <div
@@ -386,12 +391,40 @@ function UserFooter({ collapsed }) {
                     style={{ color: "var(--n-10)" }}>
                 {user?.name || user?.email}
               </span>
-              <span className="text-[10px] truncate"
+              <span className="text-[10.5px] truncate"
                     style={{ color: "var(--n-7)" }}>
                 {user?.email}
               </span>
             </div>
           </button>
+          {isFree && (
+            <button
+              onClick={() => nav("/settings", { state: { tab: "plans" } })}
+              title={t("userMenu.upgradeTip")}
+              style={{
+                flexShrink: 0,
+                display: "inline-flex", alignItems: "center", gap: 4,
+                height: 30, padding: "0 10px", borderRadius: 7,
+                background: "linear-gradient(135deg, var(--accent), #ec4899)",
+                color: "#fff", border: "none",
+                fontSize: 11, fontWeight: 700,
+                letterSpacing: "0.02em",
+                cursor: "pointer", fontFamily: "inherit",
+                boxShadow: "0 2px 8px rgba(124,92,255,0.28)",
+                transition: "transform 0.12s, box-shadow 0.12s",
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.transform = "translateY(-1px)";
+                e.currentTarget.style.boxShadow = "0 4px 12px rgba(124,92,255,0.42)";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.transform = "translateY(0)";
+                e.currentTarget.style.boxShadow = "0 2px 8px rgba(124,92,255,0.28)";
+              }}
+            >
+              <Sparkles size={11} /> {t("userMenu.upgrade")}
+            </button>
+          )}
           <ThemeToggle />
         </div>
       )}
@@ -420,14 +453,19 @@ function UserFooter({ collapsed }) {
           )}
           <div style={{ padding: collapsed ? "0 10px 8px" : "8px 10px",
                          fontSize: 11, color: "var(--n-8)" }}>
-            Gói {user?.plan || "Free"}
+            {t("userMenu.plan", { name: (() => {
+              const id = (user?.plan || "free").toLowerCase();
+              const key = `auth.plan.${id}`;
+              const tr = t(key);
+              return (tr && tr !== key) ? tr : (user?.plan || "Free");
+            })() })}
           </div>
-          <MenuItem icon={Cog} label="Cài đặt"
+          <MenuItem icon={Cog} label={t("userMenu.settings")}
                     onClick={() => { nav("/settings"); setOpen(false); }} />
-          <MenuItem icon={UserIcon} label="Tài khoản"
+          <MenuItem icon={UserIcon} label={t("userMenu.account")}
                     onClick={() => { nav("/settings", { state: { tab: "account" } }); setOpen(false); }} />
           <div style={{ height: 1, background: "var(--n-3)", margin: "4px 4px" }} />
-          <MenuItem icon={LogOut} label="Đăng xuất" danger
+          <MenuItem icon={LogOut} label={t("userMenu.signOut")} danger
                     onClick={() => { logout(); setOpen(false); }} />
         </div>
       )}

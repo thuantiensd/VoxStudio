@@ -26,9 +26,18 @@ function readStored() {
 
 function writeStored(value) {
   try {
-    if (value) localStorage.setItem(STORAGE_KEY, JSON.stringify(value));
-    else localStorage.removeItem(STORAGE_KEY);
-  } catch {}
+    if (value) {
+      const json = JSON.stringify(value);
+      localStorage.setItem(STORAGE_KEY, json);
+      console.log("[AuthContext] writeStored OK — token len:", value.token?.length || 0,
+                  "user:", value.user?.email);
+    } else {
+      localStorage.removeItem(STORAGE_KEY);
+      console.log("[AuthContext] writeStored cleared");
+    }
+  } catch (e) {
+    console.error("[AuthContext] writeStored FAILED:", e);
+  }
 }
 
 async function callAuth(path, body) {
@@ -86,6 +95,11 @@ export function AuthProvider({ children }) {
     setLoading(true);
     try {
       const data = await callAuth("/login", { email, password });
+      console.log("[AuthContext] login response keys:", Object.keys(data || {}),
+                  "token:", typeof data?.token, "len:", data?.token?.length || 0);
+      // Persist NGAY (sync) trước khi setAuth — tránh race với child effects
+      // (QuotaMonitor v.v.) đọc localStorage trước khi useEffect[auth] kịp ghi.
+      writeStored({ user: data.user, token: data.token });
       setAuth({ user: data.user, token: data.token });
       return data.user;
     } finally {
@@ -97,6 +111,7 @@ export function AuthProvider({ children }) {
     setLoading(true);
     try {
       const data = await callAuth("/register", { email, password, name });
+      writeStored({ user: data.user, token: data.token });  // sync persist
       setAuth({ user: data.user, token: data.token });
       return data.user;
     } finally {
@@ -113,6 +128,7 @@ export function AuthProvider({ children }) {
         "ngrok-skip-browser-warning": "true",
       },
     }).catch(() => {});
+    writeStored(null);  // sync clear ngay
     // Clear sạch data của user trước khi xoá auth (lúc này uid còn đọc được)
     try {
       await clearCurrentUser();

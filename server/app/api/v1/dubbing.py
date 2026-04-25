@@ -280,6 +280,15 @@ async def download_export(project_id: str):
     return FileResponse(str(path), media_type="video/mp4", filename=filename)
 
 
+@router.get("/projects/{project_id}/export/stream")
+async def stream_export(project_id: str):
+    """Stream video đã dub inline (KHÔNG force download) — dùng cho <video> tag."""
+    path = dubbing_svc.get_export_path(project_id)
+    if not path:
+        raise HTTPException(status_code=404, detail="Export not found")
+    return FileResponse(str(path), media_type="video/mp4")
+
+
 @router.get("/projects/{project_id}/dubbed-track")
 async def get_dubbed_track(project_id: str):
     """Stream the continuous dubbed audio track."""

@@ -45,6 +45,14 @@ async function request(path, options = {}) {
     });
   }
   if (res.status === 401) {
+    // Log chi tiết để debug — token được gửi là gì, response body ra sao
+    let bodyText = '';
+    try { bodyText = await res.clone().text(); } catch {}
+    const tok = getAuthToken();
+    console.error('[api] 401 on', path,
+      '| token len:', tok?.length || 0,
+      '| token prefix:', tok?.slice(0, 30),
+      '| response:', bodyText);
     try { localStorage.removeItem(AUTH_STORAGE_KEY); } catch {}
     throw new AppError('Unauthorized — please sign in again', {
       kind: 'auth', status: 401,
@@ -323,6 +331,10 @@ export async function exportVideo(projectId, options = {}) {
 
 export function exportDownloadURL(projectId) {
   return `${API_BASE}/dubbing/projects/${projectId}/export/download`;
+}
+
+export function exportStreamURL(projectId) {
+  return `${API_BASE}/dubbing/projects/${projectId}/export/stream`;
 }
 
 // ── Vocal Separation ──────────────────────────────

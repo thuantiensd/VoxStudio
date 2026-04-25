@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import { useAuth } from "../auth/AuthContext";
 import { useToast } from "./ui/Toast";
 import { fetchMe } from "../services/api";
+import { useT } from "../i18n/I18nContext";
 
 /**
  * QuotaMonitor — poll /auth/me định kỳ, toast khi user dùng gần hết
@@ -14,33 +15,19 @@ const CHECK_INTERVAL_MS = 5 * 60 * 1000; // 5 phút
 const WARN_KEY_PREFIX = "voxstudio:quota-warned:";
 // Device-level storage — không scope per-user vì reset theo phiên app.
 
-const METRICS = [
-  {
-    key: "dubbing",
-    label: "Phút lồng tiếng",
-    usage: (u) => u.dubbing_min || 0,
-    limit: (lim) => lim.dubbing_min_month,
-    unit: "phút",
-  },
-  {
-    key: "stt",
-    label: "Phút phụ đề (STT)",
-    usage: (u) => u.stt_min || 0,
-    limit: (lim) => lim.stt_min_month,
-    unit: "phút",
-  },
-  {
-    key: "tts",
-    label: "Ký tự TTS",
-    usage: (u) => u.tts_chars || 0,
-    limit: (lim) => lim.tts_chars_month,
-    unit: "ký tự",
-  },
+const METRIC_DEFS = [
+  { key: "dubbing", labelKey: "quota.dubbingMinutes", unitKey: "quota.minutes",
+    usage: (u) => u.dubbing_min || 0, limit: (lim) => lim.dubbing_min_month },
+  { key: "stt", labelKey: "quota.subtitleMinutes", unitKey: "quota.minutes",
+    usage: (u) => u.stt_min || 0, limit: (lim) => lim.stt_min_month },
+  { key: "tts", labelKey: "quota.ttsChars", unitKey: "quota.chars",
+    usage: (u) => u.tts_chars || 0, limit: (lim) => lim.tts_chars_month },
 ];
 
 export default function QuotaMonitor() {
   const { isAuthenticated, token } = useAuth();
   const toast = useToast();
+  const t = useT();
   const warnedRef = useRef(new Set()); // tracking session, không persist
 
   useEffect(() => {
@@ -52,29 +39,34 @@ export default function QuotaMonitor() {
         const me = await fetchMe();
         const usage = me?.usage_month || {};
         const limits = me?.plan?.limits || {};
-        const planName = me?.plan?.name || "";
+        const planId = (me?.plan?.id || "").toLowerCase();
+        const planKey = `auth.plan.${planId}`;
+        const planTr = planId ? t(planKey) : "";
+        const planName = (planTr && planTr !== planKey) ? planTr : (me?.plan?.name || "");
 
-        for (const m of METRICS) {
+        for (const m of METRIC_DEFS) {
           const used = m.usage(usage);
           const limit = m.limit(limits);
-          if (limit === -1 || !limit) continue; // unlimited hoặc không có
+          if (limit === -1 || !limit) continue;
           const pct = used / limit;
           const keyHit  = `${m.key}:100`;
           const keyWarn = `${m.key}:80`;
+          const label = t(m.labelKey).toLowerCase();
+          const unit = t(m.unitKey);
 
           if (pct >= 1 && !warnedRef.current.has(keyHit)) {
             warnedRef.current.add(keyHit);
-            warnedRef.current.add(keyWarn); // skip warn level nếu đã hết
+            warnedRef.current.add(keyWarn);
             toast?.error?.(
-              `Bạn đã dùng hết ${limit.toLocaleString()} ${m.unit} ${m.label.toLowerCase()} trong gói ${planName} tháng này. Nâng cấp để tiếp tục.`,
-              { title: "Đã hết hạn mức" },
+              t("quota.exceededMsg", { limit: limit.toLocaleString(), unit, label, plan: planName }),
+              { title: t("quota.exceeded") },
             );
           } else if (pct >= 0.8 && !warnedRef.current.has(keyWarn)) {
             warnedRef.current.add(keyWarn);
             const remaining = Math.max(0, limit - used);
             toast?.warn?.(
-              `Còn ${remaining.toLocaleString()}/${limit.toLocaleString()} ${m.unit} ${m.label.toLowerCase()}. Cân nhắc nâng cấp gói.`,
-              { title: "Sắp hết hạn mức" },
+              t("quota.warningMsg", { remaining: remaining.toLocaleString(), limit: limit.toLocaleString(), unit, label }),
+              { title: t("quota.warning") },
             );
           }
         }
@@ -94,7 +86,7 @@ export default function QuotaMonitor() {
       clearTimeout(initTimer);
       clearInterval(iv);
     };
-  }, [isAuthenticated, token, toast]);
+  }, [isAuthenticated, token, toast, t]);
 
   // Reset warn set khi logout (token đổi null)
   useEffect(() => {

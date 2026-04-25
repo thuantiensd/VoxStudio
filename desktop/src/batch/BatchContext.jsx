@@ -83,7 +83,8 @@ export function BatchProvider({ children }) {
   };
 
   const enqueue = (items) => {
-    // items: [{ projectId, filename }]
+    // items: [{ projectId, filename, mode? }]
+    // mode = 'studio' → khi xong sẽ auto-open ProjectDrawer cho user edit tiếp.
     // Nếu projectId đã có trong queue (state error/canceled/done) → reset
     // sang pending thay vì tạo entry mới. Dùng cho flow Retry.
     setQueue((q) => {
@@ -94,6 +95,7 @@ export function BatchProvider({ children }) {
         const fresh = {
           projectId: it.projectId,
           filename: it.filename || existing?.filename,
+          mode: it.mode || existing?.mode || "batch",
           status: "pending",
           startedAt: null, finishedAt: null,
           progress: 0, step: null, error: null,
@@ -234,9 +236,20 @@ export function BatchProvider({ children }) {
         let savedPath = null;
         if (outputFolder && window.voxstudio?.saveRemoteFileToFolder) {
           try {
+            // Đọc token từ localStorage để Electron main fetch có Authorization header.
+            // Backend yêu cầu auth cho tất cả endpoint kể cả download file.
+            let authHeaders = { "ngrok-skip-browser-warning": "true" };
+            try {
+              const raw = localStorage.getItem("voxstudio:auth");
+              if (raw) {
+                const { token } = JSON.parse(raw);
+                if (token) authHeaders["Authorization"] = `Bearer ${token}`;
+              }
+            } catch { /* ignore */ }
             savedPath = await window.voxstudio.saveRemoteFileToFolder({
               url,
               folder: outputFolder,
+              headers: authHeaders,
               filename: safeName(next.filename || `${next.projectId}.mp4`),
             });
           } catch (e) {

@@ -2,6 +2,7 @@ import { AnimatePresence } from "motion/react";
 import { Trash2, AlertTriangle } from "lucide-react";
 import ProjectCard from "./ProjectCard";
 import { useBatch } from "../../batch/BatchContext";
+import { useT } from "../../i18n/I18nContext";
 
 /**
  * ProjectGrid — 2 section: "Đang xử lý" và "Hoàn tất hôm nay".
@@ -10,6 +11,7 @@ import { useBatch } from "../../batch/BatchContext";
  * (để DropZone chiếm hết không gian trang).
  */
 export default function ProjectGrid({ queue, onOpen, onRetry }) {
+  const t = useT();
   const { clearByStatus } = useBatch();
   if (!queue?.length) return null;
 
@@ -25,7 +27,7 @@ export default function ProjectGrid({ queue, onOpen, onRetry }) {
   return (
     <div style={{ marginTop: 28 }}>
       {active.length > 0 && (
-        <Section title="Đang xử lý" count={active.length}>
+        <Section title={t("grid.sectionActive")} count={active.length}>
           <Grid>
             <AnimatePresence>
               {active.map((it) => (
@@ -43,7 +45,7 @@ export default function ProjectGrid({ queue, onOpen, onRetry }) {
 
       {finished.length > 0 && (
         <Section
-          title="Đã xử lý gần đây"
+          title={t("grid.sectionRecent")}
           count={finished.length}
           mt={active.length > 0 ? 28 : 0}
           actions={
@@ -52,14 +54,14 @@ export default function ProjectGrid({ queue, onOpen, onRetry }) {
                 <ClearBtn
                   onClick={() => clearByStatus("done")}
                   icon={Trash2}
-                  label={`Xoá ${done.length} đã xong`}
+                  label={t("grid.clearDone", { n: done.length })}
                 />
               )}
               {errored.length > 0 && (
                 <ClearBtn
                   onClick={() => clearByStatus(["error", "canceled"])}
                   icon={AlertTriangle}
-                  label={`Xoá ${errored.length} lỗi`}
+                  label={t("grid.clearErrors", { n: errored.length })}
                   danger
                 />
               )}
