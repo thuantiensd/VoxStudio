@@ -19,6 +19,7 @@ import { ToastProvider } from "./components/ui/Toast";
 import ErrorBoundary from "./components/ui/ErrorBoundary";
 import GlobalErrorHook from "./components/ui/GlobalErrorHook";
 import QuotaMonitor from "./components/QuotaMonitor";
+import { UpgradeProvider } from "./components/UpgradeContext";
 import UpdateBanner from "./components/UpdateBanner";
 
 function Shell() {
@@ -68,11 +69,13 @@ function UserScopedRoot() {
   return (
     <BatchProvider key={user?.id || "guest"}>
       <HashRouter>
-        <Routes>
-          <Route path="/login"  element={<PublicOnlyRoute><LoginPage  /></PublicOnlyRoute>} />
-          <Route path="/signup" element={<PublicOnlyRoute><SignupPage /></PublicOnlyRoute>} />
-          <Route path="/*" element={<ProtectedRoute><Shell /></ProtectedRoute>} />
-        </Routes>
+        <UpgradeProvider>
+          <Routes>
+            <Route path="/login"  element={<PublicOnlyRoute><LoginPage  /></PublicOnlyRoute>} />
+            <Route path="/signup" element={<PublicOnlyRoute><SignupPage /></PublicOnlyRoute>} />
+            <Route path="/*" element={<ProtectedRoute><Shell /></ProtectedRoute>} />
+          </Routes>
+        </UpgradeProvider>
       </HashRouter>
     </BatchProvider>
   );

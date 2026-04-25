@@ -1002,4 +1002,14 @@ export default {
     upgrade: "Nâng cấp",
     upgradeTip: "Nâng cấp gói",
   },
+  upgradeModal: {
+    title: "Bạn đã hết lượt miễn phí hôm nay",
+    body: "Hôm nay bạn đã dùng hết hạn mức của gói miễn phí. Nâng cấp lên gói trả phí để tiếp tục dùng không giới hạn — mọi project, voice clone và preset của bạn vẫn được giữ nguyên.",
+    bodyGeneric: "Bạn đã chạm hạn mức của gói hiện tại. Nâng cấp để tiếp tục mà không bị gián đoạn.",
+    perks1: "Lượt tạo giọng / dịch / phụ đề thoải mái",
+    perks2: "Ưu tiên hàng đợi GPU — kết quả nhanh hơn",
+    perks3: "Xuất 4K · không watermark · API cho dev",
+    upgrade: "Nâng cấp ngay",
+    later: "Để sau",
+  },
 };

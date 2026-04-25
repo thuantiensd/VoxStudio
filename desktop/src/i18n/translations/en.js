@@ -1002,4 +1002,14 @@ export default {
     upgrade: "Upgrade",
     upgradeTip: "Upgrade plan",
   },
+  upgradeModal: {
+    title: "You've used today's free quota",
+    body: "You've reached the free plan's limit for today. Upgrade to a paid plan to keep going without limits — all your projects, voice clones, and presets stay intact.",
+    bodyGeneric: "You've hit the limit on your current plan. Upgrade to keep going without interruption.",
+    perks1: "Generous TTS / translate / subtitle quotas",
+    perks2: "Priority GPU queue — faster results",
+    perks3: "4K export · no watermark · developer API",
+    upgrade: "Upgrade now",
+    later: "Later",
+  },
 };

@@ -6,6 +6,7 @@ import {
 import { showError } from "../services/errors";
 import { useToast } from "../components/ui/Toast";
 import { userStorage } from "../services/userScope";
+import { isQuotaError, showError as showErrorBus } from "../services/errors";
 import { useAuth } from "../auth/AuthContext";
 
 const STORAGE_KEY = "voxstudio:batch:outputFolder";
@@ -277,6 +278,11 @@ export function BatchProvider({ children }) {
           || controller.signal.aborted
           || e?.name === "AbortError";
         canceledRef.current.delete(next.projectId);
+        // Quota → bật paywall qua opener đã đăng ký từ UpgradeProvider.
+        // Không cần Context vì BatchProvider chạy ngoài tree (HashRouter).
+        if (!wasCanceled && isQuotaError(e)) {
+          try { showErrorBus({ error: () => {}, warn: () => {}, info: () => {}, success: () => {} }, e); } catch {}
+        }
         setQueue((q) =>
           q.map((it) =>
             it.projectId === next.projectId

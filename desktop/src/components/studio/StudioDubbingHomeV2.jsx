@@ -9,6 +9,8 @@ import {
 } from "lucide-react";
 import { useToast } from "../ui/Toast";
 import { useT } from "../../i18n/I18nContext";
+import { useUpgrade } from "../UpgradeContext";
+import { isQuotaError } from "../../services/errors";
 import { useBatch } from "../../batch/BatchContext";
 import ProjectGrid from "./ProjectGrid";
 import ProjectDrawer from "./ProjectDrawer";
@@ -107,6 +109,7 @@ function buildSubtitleStylePayload(cfg) {
 export default function StudioDubbingHomeV2() {
   const t = useT();
   const toast = useToast();
+  const upgrade = useUpgrade();
   const location = useLocation();
   const nav = useNavigate();
   const { enqueue, outputFolder, setOutputFolder, queue } = useBatch();
@@ -274,14 +277,17 @@ export default function StudioDubbingHomeV2() {
         }
         created.push({ projectId: proj.id, filename: f.name });
       } catch (e) {
-        errors.push(`${f.name}: ${e?.message || e}`);
+        errors.push({ name: f.name, err: e });
       }
     }));
 
     setBusy(false);
-    if (errors.length) {
+    const quotaErr = errors.find(({ err }) => isQuotaError(err));
+    if (quotaErr) {
+      upgrade.open(quotaErr.err?.message || null);
+    } else if (errors.length) {
       toast.warn(t("dub.toastErrorsCount", { e: errors.length, n: files.length }));
-      console.warn("[dubbing v2]", errors);
+      console.warn("[dubbing v2]", errors.map((e) => `${e.name}: ${e.err?.message || e.err}`));
     }
     if (created.length) {
       enqueue(created);

@@ -152,8 +152,19 @@ function renderAppError(err, ctx, T) {
   }
 }
 
+// ── Upgrade modal opener — đăng ký từ UpgradeProvider lúc mount ─────
+let _upgradeOpener = null;
+export function setUpgradeOpener(fn) { _upgradeOpener = fn; }
+
 // ── Helper: show via toast ────────────────────────────────────
 export function showError(toast, err, ctx = {}, t = null) {
+  // Lỗi quota → bật paywall modal thay vì toast inline.
+  if (isQuotaError(err) && _upgradeOpener) {
+    _upgradeOpener(err?.message || null);
+    // eslint-disable-next-line no-console
+    console.warn("[VoxStudio] quota exceeded:", err?.message);
+    return;
+  }
   const info = classifyError(err, ctx, t);
   if (!info) return; // silent (abort)
   const body = info.hint
@@ -168,6 +179,7 @@ export function showError(toast, err, ctx = {}, t = null) {
 export function fromResponse(res, detail) {
   const kind =
     res.status === 401 || res.status === 403 ? "auth"
+  : res.status === 402 || res.status === 429 ? "quota"
   : res.status === 404                        ? "not_found"
   : res.status === 408 || res.status === 504  ? "timeout"
   : res.status === 422 || res.status === 400  ? "validation"
@@ -176,6 +188,19 @@ export function fromResponse(res, detail) {
   return new AppError(detail || res.statusText || `HTTP ${res.status}`, {
     kind, status: res.status,
   });
+}
+
+/**
+ * Heuristic: lỗi có phải quota/paywall không. Backend chưa nhất quán status
+ * code → fallback match keyword trong message. Dùng để bật UpgradeModal
+ * thay vì hiện toast/inline.
+ */
+export function isQuotaError(err) {
+  if (!err) return false;
+  if (err.kind === "quota") return true;
+  if (err.status === 402 || err.status === 429) return true;
+  const m = String(err.message || "").toLowerCase();
+  return /lượt|hết\s*hạn|đã dùng \d+\/\d+|quota.*exceed|rate.?limit|usage.*limit/i.test(m);
 }
 
 // ── Fallback messages (VI) — dùng khi i18n chưa init ─────────

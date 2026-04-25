@@ -6,6 +6,9 @@ import SpeedKnob from '../components/SpeedKnob';
 import PageHeader, { Page, PageContent } from '../components/ui/PageHeader';
 import Segmented from '../components/ui/Segmented';
 import { useT } from '../i18n/I18nContext';
+import { isQuotaError, showError } from '../services/errors';
+import { useToast } from '../components/ui/Toast';
+import { useUpgrade } from '../components/UpgradeContext';
 
 // value khớp locale backend — label dịch qua useT() + useLanguages()
 const LANGUAGE_VALUES = [
@@ -305,6 +308,7 @@ export default function TTSPage() {
 // ══════════════════════════════════════════════════════
 function SingleMode({ s }) {
   const t = useT();
+  const upgrade = useUpgrade();
   const [text, setText] = useState('');
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
@@ -325,7 +329,10 @@ function SingleMode({ s }) {
         r = await generateTTS({ text, ...s.ttsParams() });
       }
       setResult(r);
-    } catch (e) { setError(e.message); }
+    } catch (e) {
+      if (isQuotaError(e)) upgrade.open(e.message);
+      else setError(e.message);
+    }
     setLoading(false);
   };
 
@@ -382,6 +389,7 @@ function SingleMode({ s }) {
 // Batch mode
 // ══════════════════════════════════════════════════════
 function BatchMode({ s }) {
+  const upgrade = useUpgrade();
   const fileRef = useRef(null);
   const [files, setFiles] = useState([]); // { id, name, text, status, result, error }
   const [processing, setProcessing] = useState(false);
@@ -521,6 +529,12 @@ function BatchMode({ s }) {
         }
         setFiles(prev => prev.map(x => x.id === f.id ? { ...x, status: 'done', result: r } : x));
       } catch (e) {
+        if (isQuotaError(e)) {
+          upgrade.open(e.message);
+          setFiles(prev => prev.map(x => x.id === f.id ? { ...x, status: 'pending', error: null } : x));
+          cancelRef.current = true;
+          break;
+        }
         setFiles(prev => prev.map(x => x.id === f.id ? { ...x, status: 'error', error: e.message } : x));
       }
     }
