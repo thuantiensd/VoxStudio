@@ -190,7 +190,13 @@ def _parse_response(response: str, count: int) -> list[dict]:
     return results
 
 
-def _build_translate_prompt(segments: list[dict], target_lang: str, source_lang: str = None) -> list[dict]:
+def _build_translate_prompt(
+    segments: list[dict],
+    target_lang: str,
+    source_lang: str = None,
+    topic_hint: str | None = None,
+    glossary: list[tuple[str, str]] | None = None,
+) -> list[dict]:
     """Build prompt for Qwen to do FULL translation with emotion tags.
 
     Similar to gemini_translate_svc but optimized for smaller local LLM.
@@ -202,6 +208,17 @@ def _build_translate_prompt(segments: list[dict], target_lang: str, source_lang:
         f"{i+1}. {seg.get('original_text', seg.get('text', ''))}"
         for i, seg in enumerate(segments)
     )
+
+    # Render topic hint + glossary từ glossary_svc — share format với engines khác
+    from app.services import glossary_svc
+    extras = []
+    if topic_hint:
+        s = glossary_svc.format_topic_hint_for_prompt(topic_hint)
+        if s: extras.append(s)
+    if glossary:
+        s = glossary_svc.format_for_prompt(glossary)
+        if s: extras.append(s)
+    extra_block = ("\n\n" + "\n\n".join(extras)) if extras else ""
 
     system = f"""You are a professional film dialogue translator.
 Translate from {src_name} to {tgt_name}.
@@ -217,7 +234,7 @@ Rules:
 - Add '...' for pauses, ',' for breath pauses
 - Keep the meaning accurate
 - Output MUST have exactly the same number of lines as input
-- Output ONLY in {tgt_name}"""
+- Output ONLY in {tgt_name}{extra_block}"""
 
     user = f"Translate this dialogue:\n\n{numbered}"
 
@@ -245,6 +262,8 @@ def translate_segments(
     segments: list[dict],
     target_language: str,
     source_language: str = None,
+    topic_hint: str | None = None,
+    glossary: list[tuple[str, str]] | None = None,
 ) -> list[dict]:
     """Full translation using Qwen LLM — translates + adds emotion tags.
 
@@ -268,7 +287,10 @@ def translate_segments(
         if not any((s.get("original_text") or "").strip() for s in batch):
             continue
 
-        messages = _build_translate_prompt(batch, target_language, source_language)
+        messages = _build_translate_prompt(
+            batch, target_language, source_language,
+            topic_hint=topic_hint, glossary=glossary,
+        )
 
         try:
             response = gpu.llm_generate(messages, max_new_tokens=2048, temperature=0.3)

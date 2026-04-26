@@ -335,6 +335,42 @@ async def logout(
     return {"ok": True}
 
 
+class ChangePasswordRequest(BaseModel):
+    current_password: str = Field(min_length=1, max_length=128)
+    new_password: str = Field(min_length=8, max_length=128)
+
+
+@router.post("/change-password")
+async def change_password(
+    body: ChangePasswordRequest,
+    request: Request,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_session),
+):
+    """Đổi mật khẩu user đang đăng nhập. Verify mật khẩu hiện tại,
+    sau đó hash + update mật khẩu mới."""
+    if not user.password_hash:
+        # Tài khoản OAuth (Google) — chưa có mật khẩu local
+        raise HTTPException(
+            400,
+            "Tài khoản này dùng đăng nhập Google. Hãy đặt lại mật khẩu qua "
+            "'Quên mật khẩu' nếu muốn đăng nhập bằng email/password.",
+        )
+    if not verify_password(body.current_password, user.password_hash):
+        raise HTTPException(403, "Mật khẩu hiện tại không đúng.")
+    if body.current_password == body.new_password:
+        raise HTTPException(400, "Mật khẩu mới phải khác mật khẩu hiện tại.")
+
+    user.password_hash = hash_password(body.new_password)
+    await db.commit()
+    await audit_svc.log(
+        db, user_id=user.id, action="change_password",
+        ip=_client_ip(request),
+    )
+    logger.info("Password changed for user %d", user.id)
+    return {"ok": True}
+
+
 class DeleteAccountRequest(BaseModel):
     password: str = Field(min_length=1, max_length=128,
                           description="Mật khẩu hiện tại để xác nhận")

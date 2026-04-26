@@ -78,12 +78,14 @@ DEFAULT_PLANS = [
         "features": {
             "dubbing": True, "stt": True, "tts": True,
             "translate": True, "download": True, "voice_clone": True,
+            "video_download": True,
             "batch": False, "api": False, "priority_queue": False,
             "export_4k": False, "watermark_free": False,
         },
         "limits": {
             "concurrent_jobs": 1,
             "daily_jobs": 10,
+            "daily_downloads": 15,
             "dubbing_min_month": 10,
             "stt_min_month": 30,
             "tts_chars_month": 5_000,
@@ -93,19 +95,23 @@ DEFAULT_PLANS = [
     },
     {
         "id": "pro", "name": "Pro",
-        "price_vnd": 149_000, "price_usd": 600,  # $6 in cents
-        "ltd_price_vnd": 1_990_000, "ltd_price_usd": 8_500,
+        # Giá USD chuẩn ($20). VND tính live theo tỷ giá USD→VND
+        # (cache 24h). Stored price_vnd là fallback khi API rate fail.
+        "price_vnd": 520_000, "price_usd": 2_000,  # $20 in cents
+        "ltd_price_vnd": 5_200_000, "ltd_price_usd": 20_000,  # $200 LTD
         "ltd_slots_total": 100,
         "sort_order": 2,
         "features": {
             "dubbing": True, "stt": True, "tts": True,
             "translate": True, "download": True, "voice_clone": True,
+            "video_download": True,
             "batch": True, "api": False, "priority_queue": True,
             "export_4k": True, "watermark_free": True,
         },
         "limits": {
             "concurrent_jobs": 2,
             "daily_jobs": 100,
+            "daily_downloads": -1,  # unlimited
             "dubbing_min_month": 300,
             "stt_min_month": 1_000,
             "tts_chars_month": 200_000,
@@ -115,19 +121,21 @@ DEFAULT_PLANS = [
     },
     {
         "id": "studio", "name": "Studio",
-        "price_vnd": 349_000, "price_usd": 1_400,
-        "ltd_price_vnd": 4_990_000, "ltd_price_usd": 20_000,
+        "price_vnd": 1_794_000, "price_usd": 6_900,  # $69 in cents
+        "ltd_price_vnd": 17_940_000, "ltd_price_usd": 69_000,  # $690 LTD
         "ltd_slots_total": 100,
         "sort_order": 3,
         "features": {
             "dubbing": True, "stt": True, "tts": True,
             "translate": True, "download": True, "voice_clone": True,
+            "video_download": True,
             "batch": True, "api": True, "priority_queue": True,
             "export_4k": True, "watermark_free": True,
         },
         "limits": {
             "concurrent_jobs": 5,
             "daily_jobs": -1,
+            "daily_downloads": -1,
             "dubbing_min_month": 1_500,
             "stt_min_month": -1,
             "tts_chars_month": -1,
@@ -139,12 +147,63 @@ DEFAULT_PLANS = [
 
 
 async def _seed_plans(db: AsyncSession):
-    """Upsert default plans (chỉ insert nếu chưa có, không override giá
-    nếu admin đã edit)."""
+    """Upsert default plans. Insert nếu chưa có; nếu plan đã tồn tại với
+    giá CŨ (legacy mặc định) thì auto force-update sang spec hiện tại.
+    Admin đã chỉnh giá thủ công thì giữ nguyên — phát hiện qua so sánh
+    price_usd với các giá legacy known."""
+    # Giá USD legacy của lần seed trước — nếu match → force update
+    LEGACY_USD = {
+        "free":   [0],
+        "pro":    [600, 100],     # $6 (legacy) / $1 (very early)
+        "studio": [1_400, 200],   # $14 / $2
+    }
     for spec in DEFAULT_PLANS:
         existing = await db.get(Plan, spec["id"])
+        force_update = False
         if existing:
+            legacy_usds = LEGACY_USD.get(spec["id"], [])
+            if existing.price_usd in legacy_usds:
+                force_update = True
+            else:
+                # Admin đã đổi giá → giữ nguyên, chỉ merge features/limits
+                # mới (vd thêm daily_downloads cho gói cũ).
+                try:
+                    cur_limits = json.loads(existing.limits_json or "{}")
+                    cur_features = json.loads(existing.features_json or "{}")
+                except Exception:
+                    cur_limits, cur_features = {}, {}
+                merged_limits = {**spec["limits"], **cur_limits}
+                merged_features = {**spec["features"], **cur_features}
+                # Nếu key mới (daily_downloads, video_download) chưa có
+                # trong existing → bổ sung
+                changed = False
+                if "daily_downloads" not in cur_limits:
+                    merged_limits["daily_downloads"] = spec["limits"]["daily_downloads"]
+                    changed = True
+                if "video_download" not in cur_features:
+                    merged_features["video_download"] = spec["features"]["video_download"]
+                    changed = True
+                if changed:
+                    existing.limits_json = json.dumps(merged_limits, ensure_ascii=False)
+                    existing.features_json = json.dumps(merged_features, ensure_ascii=False)
+                    logger.info("Patched %s plan with new fields", spec["id"])
+                continue
+
+        if force_update and existing:
+            existing.name = spec["name"]
+            existing.price_vnd = spec["price_vnd"]
+            existing.price_usd = spec["price_usd"]
+            existing.ltd_price_vnd = spec["ltd_price_vnd"]
+            existing.ltd_price_usd = spec["ltd_price_usd"]
+            existing.ltd_slots_total = spec["ltd_slots_total"]
+            existing.features_json = json.dumps(spec["features"], ensure_ascii=False)
+            existing.limits_json = json.dumps(spec["limits"], ensure_ascii=False)
+            existing.sort_order = spec["sort_order"]
+            existing.is_active = True
+            logger.info("Force-updated plan %s to new pricing/limits", spec["id"])
             continue
+
+        # Insert mới
         plan = Plan(
             id=spec["id"],
             name=spec["name"],

@@ -162,16 +162,23 @@ def _deepl(texts: list[str], target: str, source: str, api_key: str) -> list[str
 # ── Gemini ─────────────────────────────────────────────────
 
 def _gemini(texts: list[str], target: str, source: str, api_key: str,
-            model: str | None = None) -> list[str]:
+            model: str | None = None,
+            topic_hint: str | None = None,
+            glossary_block: str | None = None) -> list[str]:
     model = model or DEFAULT_MODELS["gemini"]
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
     tgt_name = _lang_display(target)
     src_name = _lang_display(source) if source and source.lower() != "auto" else "auto-detected source"
     numbered = "\n".join(f"{i+1}. {t}" for i, t in enumerate(texts))
+    extras = []
+    if topic_hint: extras.append(topic_hint)
+    if glossary_block: extras.append(glossary_block)
+    extra_block = ("\n\n" + "\n\n".join(extras)) if extras else ""
     prompt = (
         f"Translate the following numbered lines from {src_name} into {tgt_name}. "
         f"Preserve the exact number of lines and numbering. Output ONLY the translated "
-        f"lines in format 'N. <translated>' — no explanations, no code fences.\n\n{numbered}"
+        f"lines in format 'N. <translated>' — no explanations, no code fences."
+        f"{extra_block}\n\n{numbered}"
     )
     payload = {
         "contents": [{"parts": [{"text": prompt}]}],
@@ -192,15 +199,22 @@ def _gemini(texts: list[str], target: str, source: str, api_key: str,
 # ── OpenAI ─────────────────────────────────────────────────
 
 def _openai(texts: list[str], target: str, source: str, api_key: str,
-            model: str | None = None) -> list[str]:
+            model: str | None = None,
+            topic_hint: str | None = None,
+            glossary_block: str | None = None) -> list[str]:
     model = model or DEFAULT_MODELS["openai"]
     tgt_name = _lang_display(target)
     src_name = _lang_display(source) if source and source.lower() != "auto" else "auto-detected source"
     numbered = "\n".join(f"{i+1}. {t}" for i, t in enumerate(texts))
+    sys_extras = []
+    if topic_hint: sys_extras.append(topic_hint)
+    if glossary_block: sys_extras.append(glossary_block)
+    extra_block = ("\n\n" + "\n\n".join(sys_extras)) if sys_extras else ""
     system = (
         f"You are a precise {tgt_name} translator. Input is numbered lines in {src_name}. "
         f"Translate each line into natural, idiomatic {tgt_name}. "
         f"Output ONLY the translated lines in format 'N. <text>'. No preamble, no code fences."
+        f"{extra_block}"
     )
     payload = {
         "model": model,
@@ -223,15 +237,22 @@ def _openai(texts: list[str], target: str, source: str, api_key: str,
 # ── Anthropic Claude ───────────────────────────────────────
 
 def _claude(texts: list[str], target: str, source: str, api_key: str,
-            model: str | None = None) -> list[str]:
+            model: str | None = None,
+            topic_hint: str | None = None,
+            glossary_block: str | None = None) -> list[str]:
     model = model or DEFAULT_MODELS["claude"]
     tgt_name = _lang_display(target)
     src_name = _lang_display(source) if source and source.lower() != "auto" else "auto-detected source"
     numbered = "\n".join(f"{i+1}. {t}" for i, t in enumerate(texts))
+    sys_extras = []
+    if topic_hint: sys_extras.append(topic_hint)
+    if glossary_block: sys_extras.append(glossary_block)
+    extra_block = ("\n\n" + "\n\n".join(sys_extras)) if sys_extras else ""
     system = (
         f"You are a precise {tgt_name} translator. Translate numbered {src_name} lines "
         f"into natural, idiomatic {tgt_name}. Output ONLY the translated lines in format "
         f"'N. <text>'. No preamble."
+        f"{extra_block}"
     )
     payload = {
         "model": model,
@@ -296,11 +317,18 @@ def translate_texts(
     engine: str = "google_free",
     api_key: str | None = None,
     model: str | None = None,
+    topic_hint: str | None = None,
+    glossary: list[tuple[str, str]] | None = None,
 ) -> list[str]:
     """Translate list of strings with chosen engine.
 
     Raises ValueError with user-facing Vietnamese messages on config errors.
     Empty strings in input are passed through (skip API call) for efficiency.
+
+    topic_hint, glossary: cải thiện chất lượng dịch.
+      · LLM engines (gemini/openai/claude): inject vào prompt
+      · Non-LLM (google_free/google_cloud/deepl): post-process replacement
+        cho glossary (topic_hint không áp dụng được).
     """
     if not texts:
         return []
@@ -312,6 +340,12 @@ def translate_texts(
 
     sub = [texts[i] for i in non_empty_idx]
 
+    # Render glossary block 1 lần (dùng cho LLM prompt)
+    from app.services import glossary_svc
+    glossary = glossary or []
+    glossary_block = glossary_svc.format_for_prompt(glossary) if glossary else ""
+    topic_block = glossary_svc.format_topic_hint_for_prompt(topic_hint) if topic_hint else ""
+
     if engine == "google_free":
         translated = google_free_batch(sub, target, source)
     else:
@@ -322,7 +356,9 @@ def translate_texts(
             raise ValueError(f"Thiếu API key cho {engine}. Vào Cài đặt → AI & API keys để thêm.")
         try:
             if engine in ("gemini", "openai", "claude"):
-                translated = fn(sub, target, source, api_key, model=model)
+                translated = fn(sub, target, source, api_key, model=model,
+                                topic_hint=topic_block or None,
+                                glossary_block=glossary_block or None)
             else:
                 translated = fn(sub, target, source, api_key)
         except httpx.RequestError:
@@ -338,6 +374,10 @@ def translate_texts(
                 f"Dịch vụ {PROVIDER_DISPLAY.get(engine, engine)} đang gặp sự cố. "
                 f"Vui lòng thử lại hoặc đổi sang engine khác."
             )
+
+    # Post-process glossary cho NON-LLM engines (LLM đã tự áp dụng qua prompt)
+    if glossary and engine in ("google_free", "google_cloud", "deepl"):
+        translated = glossary_svc.apply_post_process(translated, glossary, sources=sub)
 
     out = [""] * len(texts)
     for pos, v in zip(non_empty_idx, translated):

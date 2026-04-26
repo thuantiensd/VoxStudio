@@ -6,10 +6,14 @@ import logging
 import threading
 from pathlib import Path
 
-from fastapi import APIRouter, Body, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException
 from fastapi.responses import StreamingResponse
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.services import social_download_svc
+from app.auth.rate_limit import require_download_quota
+from app.db.models import User
+from app.db.session import AsyncSessionLocal
+from app.services import social_download_svc, usage_svc
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/download", tags=["Download"])
@@ -44,15 +48,19 @@ async def download_to_project(
     use_watermark: bool = Body(False, embed=True),
     engine: str = Body("auto", embed=True),
     max_height: int = Body(1080, embed=True),
+    ctx: dict = Depends(require_download_quota()),
 ):
     """Tải URL về → tạo dubbing project luôn. SSE stream progress.
 
     Khi step=='done' payload có project_id để frontend navigate /studio/{id}.
     """
+    user: User = ctx["user"]
+
     async def event_generator():
         loop = asyncio.get_running_loop()
         q: asyncio.Queue = asyncio.Queue()
         SENTINEL = object()
+        recorded = {"done": False}
 
         def producer():
             try:
@@ -77,6 +85,17 @@ async def download_to_project(
         while True:
             item = await q.get()
             if item is SENTINEL: break
+            # Record usage 1 lần khi có project_id (download thành công)
+            if not recorded["done"] and item.get("project_id"):
+                recorded["done"] = True
+                try:
+                    async with AsyncSessionLocal() as db:
+                        await usage_svc.record(
+                            db, user_id=user.id, feature="download",
+                            project_id=item.get("project_id"),
+                        )
+                except Exception as e:
+                    logger.warning("record download usage failed: %s", e)
             yield f"data: {json.dumps(item, ensure_ascii=False)}\n\n"
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")

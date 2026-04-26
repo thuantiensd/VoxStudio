@@ -65,6 +65,10 @@ function buildSettingsPayload(cfg, ttsEngine, omniVoiceId) {
     auto_pace: !!cfg.autoPace,
     smart_chunk: !!cfg.smartChunk,
     highlight_keywords: (cfg.highlightKeywords || "").trim(),
+    // Translate engine — server không lưu api_key, chỉ engine.
+    translate_engine: cfg.translateEngine || "google_free",
+    topic_hint: (cfg.topicHint || "").trim(),
+    glossary: (cfg.glossary || "").trim(),
   };
 }
 
@@ -162,6 +166,13 @@ export default function StudioDubbingHomeV2() {
       smartChunk: true,
       highlightKeywords: "",  // chuỗi từ khoá cách nhau bởi dấu phẩy. Rỗng = tắt.
       outputDir: "",
+      // Translate engine — Google Free mặc định (no key, OK ngay).
+      translateEngine: p.translateEngine || "google_free",
+      // Cải thiện chất lượng dịch: topic hint + glossary (free-form text).
+      // LLM engines tận dụng được nhất; Google Free chỉ áp dụng glossary
+      // qua post-process replacement.
+      topicHint: p.topicHint || "",
+      glossary: p.glossary || "",
     };
   });
 
@@ -459,6 +470,7 @@ function BatchView({ files, cfg, set, busy, isDirty, voicesOmni, voicesEdge, out
             }
           >
             <LangGroup cfg={cfg} set={set} />
+            <TranslateEngineGroup cfg={cfg} set={set} />
             <DubbingGroup cfg={cfg} set={set} voicesOmni={voicesOmni} voicesEdge={voicesEdge} />
             <SubtitleGroup cfg={cfg} set={set} />
             <OriginalMixGroup cfg={cfg} set={set} />
@@ -890,6 +902,131 @@ function LangSelect({ label, value, onChange, sourceMode }) {
         ))}
       </select>
     </div>
+  );
+}
+
+// ── Translate engine picker ─────────────────────────
+const TRANSLATE_ENGINES = [
+  { id: "google_free",  needsKey: false },
+  { id: "google_cloud", needsKey: true  },
+  { id: "deepl",        needsKey: true  },
+  { id: "gemini",       needsKey: true  },
+  { id: "openai",       needsKey: true  },
+  { id: "claude",       needsKey: true  },
+];
+
+function TranslateEngineGroup({ cfg, set }) {
+  const t = useT();
+  const nav = useNavigate();
+  const [savedKeys, setSavedKeys] = useState({});
+  // Load danh sách key đã có sẵn → biết engine nào ready, engine nào cần thêm key
+  useEffect(() => {
+    let stopped = false;
+    import("../../services/keyvault").then(({ listKeys }) => {
+      listKeys().then((r) => { if (!stopped) setSavedKeys(r?.ids || {}); })
+                .catch(() => {});
+    });
+    return () => { stopped = true; };
+  }, []);
+
+  const sel = cfg.translateEngine || "google_free";
+  const selMeta = TRANSLATE_ENGINES.find((e) => e.id === sel) || TRANSLATE_ENGINES[0];
+  const missingKey = selMeta.needsKey && !savedKeys[sel];
+
+  return (
+    <Section icon={Wand2} title={t("dubTrans.title")} sub={t("dubTrans.sub")}>
+      <div>
+        <Label>{t("dubTrans.engine")}</Label>
+        <select
+          value={sel}
+          onChange={(e) => set({ translateEngine: e.target.value })}
+          style={selectStyle}
+        >
+          {TRANSLATE_ENGINES.map((e) => (
+            <option key={e.id} value={e.id}>
+              {t(`dubTrans.engineLabel.${e.id}`)}
+              {e.needsKey
+                ? (savedKeys[e.id] ? " ✓" : t("dubTrans.needsKeySuffix"))
+                : ""}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      {missingKey && (
+        <div style={{
+          marginTop: 8, padding: "10px 12px", borderRadius: 7,
+          background: "rgba(251,191,36,0.10)",
+          border: "1px solid rgba(251,191,36,0.30)",
+          fontSize: 12, color: "var(--n-9)", lineHeight: 1.5,
+        }}>
+          {t("dubTrans.missingKeyWarn", { engine: t(`dubTrans.engineLabel.${sel}`) })}{" "}
+          <a
+            onClick={() => nav("/settings", { state: { tab: "integrations" } })}
+            style={{
+              color: "var(--accent)", cursor: "pointer", fontWeight: 500,
+              textDecoration: "underline", textUnderlineOffset: 2,
+            }}
+          >
+            {t("dubTrans.addKey")}
+          </a>
+        </div>
+      )}
+
+      <p style={{
+        marginTop: 6, fontSize: 11.5, color: "var(--n-7)", lineHeight: 1.5,
+      }}>
+        {t(`dubTrans.hint.${sel}`)}
+      </p>
+
+      {/* Topic hint — context giúp LLM dịch chính xác hơn */}
+      <div style={{ marginTop: 12 }}>
+        <Label flex>
+          <span>{t("dubTrans.topicHintLabel")}</span>
+          <span style={{ fontSize: 10, color: "var(--n-7)", fontWeight: 400 }}>
+            {(cfg.topicHint || "").length}/500
+          </span>
+        </Label>
+        <input
+          type="text"
+          maxLength={500}
+          placeholder={t("dubTrans.topicHintPlaceholder")}
+          value={cfg.topicHint || ""}
+          onChange={(e) => set({ topicHint: e.target.value })}
+          style={{
+            width: "100%", padding: "8px 10px", borderRadius: 6,
+            background: "var(--n-1)", border: "1px solid var(--n-3)",
+            color: "var(--n-10)", fontSize: 12.5, fontFamily: "inherit",
+            outline: "none",
+          }}
+        />
+        <p style={{ marginTop: 4, fontSize: 11, color: "var(--n-7)", lineHeight: 1.4 }}>
+          {t("dubTrans.topicHintHelp")}
+        </p>
+      </div>
+
+      {/* Glossary — terms cần giữ nguyên hoặc dịch theo cách user chỉ định */}
+      <div style={{ marginTop: 12 }}>
+        <Label>{t("dubTrans.glossaryLabel")}</Label>
+        <textarea
+          rows={4}
+          placeholder={t("dubTrans.glossaryPlaceholder")}
+          value={cfg.glossary || ""}
+          onChange={(e) => set({ glossary: e.target.value })}
+          spellCheck={false}
+          style={{
+            width: "100%", padding: "8px 10px", borderRadius: 6,
+            background: "var(--n-1)", border: "1px solid var(--n-3)",
+            color: "var(--n-10)", fontSize: 12,
+            fontFamily: "var(--font-mono, 'SF Mono', monospace)",
+            outline: "none", resize: "vertical", minHeight: 70,
+          }}
+        />
+        <p style={{ marginTop: 4, fontSize: 11, color: "var(--n-7)", lineHeight: 1.4 }}>
+          {t("dubTrans.glossaryHelp")}
+        </p>
+      </div>
+    </Section>
   );
 }
 

@@ -112,3 +112,17 @@ async def count_concurrent_jobs(db: AsyncSession, user_id: int) -> int:
     )
     res = await db.execute(q)
     return int(res.scalar() or 0)
+
+
+async def count_downloads_today(db: AsyncSession, user_id: int) -> int:
+    """Đếm số lần download (UsageEvent feature='download') trong 24h qua."""
+    from app.db.models import UsageEvent
+    since = _day_start()
+    q = (
+        select(func.count(UsageEvent.id))
+        .where(UsageEvent.user_id == user_id,
+                UsageEvent.feature == "download",
+                UsageEvent.created_at >= since)
+    )
+    res = await db.execute(q)
+    return int(res.scalar() or 0)

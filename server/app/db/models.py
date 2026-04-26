@@ -187,3 +187,28 @@ class Voice(Base):
 
     created_at: Mapped[datetime] = mapped_column(
                   DateTime, default=datetime.utcnow, index=True)
+
+
+# ── Payment (manual bank transfer) ─────────────────────────────
+class Payment(Base):
+    __tablename__ = "payments"
+
+    id:         Mapped[str] = mapped_column(String(16), primary_key=True)  # = ref_code, unique
+    user_id:    Mapped[int] = mapped_column(
+                  ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    plan_id:    Mapped[str] = mapped_column(String(16), index=True)
+    amount_vnd: Mapped[int] = mapped_column(default=0)
+    amount_usd: Mapped[int] = mapped_column(default=0)  # cents
+    is_ltd:     Mapped[bool] = mapped_column(Boolean, default=False)
+    # status: pending | paid | cancelled | expired
+    status:     Mapped[str] = mapped_column(String(16), default="pending", index=True)
+    note:       Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(
+                  DateTime, default=datetime.utcnow, index=True)
+    paid_at:    Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    confirmed_by: Mapped[int | None] = mapped_column(
+                    ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+
+
+Index("idx_payment_user_status", Payment.user_id, Payment.status)

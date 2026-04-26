@@ -9,8 +9,9 @@ import { useToast } from "../components/ui/Toast";
 import { useT, useI18n } from "../i18n/I18nContext";
 import { useAuth } from "../auth/AuthContext";
 import { useTheme } from "../theme/ThemeContext";
-import { checkHealth, listPlans, fetchMe, deleteAccount } from "../services/api";
+import { checkHealth, listPlans, fetchMe, deleteAccount, changePassword, listMyPayments } from "../services/api";
 import Modal from "../components/ui/Modal";
+import PaymentModal from "../components/PaymentModal";
 import { AlertTriangle } from "lucide-react";
 
 /**
@@ -254,6 +255,29 @@ function AccountTab() {
   const [deleteAck, setDeleteAck] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
+  // Change password state
+  const [curPw, setCurPw] = useState("");
+  const [newPw, setNewPw] = useState("");
+  const [newPw2, setNewPw2] = useState("");
+  const [pwBusy, setPwBusy] = useState(false);
+  const [pwErr, setPwErr] = useState("");
+
+  const onChangePassword = async () => {
+    setPwErr("");
+    if (newPw.length < 8) { setPwErr(t("settings.account.errPwShort")); return; }
+    if (newPw !== newPw2) { setPwErr(t("settings.account.errPwMismatch")); return; }
+    if (newPw === curPw) { setPwErr(t("settings.account.errPwSame")); return; }
+    setPwBusy(true);
+    try {
+      await changePassword({ currentPassword: curPw, newPassword: newPw });
+      toast.success(t("settings.account.pwChanged"));
+      setCurPw(""); setNewPw(""); setNewPw2("");
+    } catch (e) {
+      setPwErr(e?.message || "Error");
+    }
+    setPwBusy(false);
+  };
+
   const onDelete = async () => {
     if (!deleteAck || !deletePassword.trim() || deleting) return;
     setDeleting(true);
@@ -297,13 +321,41 @@ function AccountTab() {
         <Card>
           <div className="space-y-4">
             <Field label={t("settings.account.currentPassword")}>
-              <TextInput type="password" placeholder="••••••••" />
+              <TextInput type="password" placeholder="••••••••"
+                value={curPw}
+                onChange={(e) => { setCurPw(e.target.value); setPwErr(""); }}
+                disabled={pwBusy} />
             </Field>
-            <Field label={t("settings.account.newPassword")}>
-              <TextInput type="password" placeholder="••••••••" />
+            <Field label={t("settings.account.newPassword")}
+                   helper={t("settings.account.newPwHint")}>
+              <TextInput type="password" placeholder="••••••••"
+                value={newPw}
+                onChange={(e) => { setNewPw(e.target.value); setPwErr(""); }}
+                disabled={pwBusy} />
             </Field>
+            <Field label={t("settings.account.confirmPassword")}>
+              <TextInput type="password" placeholder="••••••••"
+                value={newPw2}
+                onChange={(e) => { setNewPw2(e.target.value); setPwErr(""); }}
+                disabled={pwBusy} />
+            </Field>
+            {pwErr && (
+              <div style={{ fontSize: 12.5, color: "var(--err)" }}>
+                {pwErr}
+              </div>
+            )}
             <div className="flex justify-end pt-2">
-              <PrimaryButton>{t("settings.account.changePassword")}</PrimaryButton>
+              <PrimaryButton
+                onClick={onChangePassword}
+                disabled={pwBusy || !curPw || !newPw || !newPw2}
+              >
+                {pwBusy
+                  ? <span className="inline-flex items-center gap-2">
+                      <Loader2 size={14} className="animate-spin" />
+                      {t("common.saving")}
+                    </span>
+                  : t("settings.account.changePassword")}
+              </PrimaryButton>
             </div>
           </div>
         </Card>
@@ -482,6 +534,19 @@ function formatVND(n) {
   return (n || 0).toLocaleString("vi-VN") + "đ";
 }
 
+/** Format USD từ cents → "$X" (làm tròn) hoặc "$X.YY" (giữ cents nếu lẻ). */
+function formatUSD(cents) {
+  if (!cents) return "$0";
+  const dollars = cents / 100;
+  return Number.isInteger(dollars) ? `$${dollars}` : `$${dollars.toFixed(2)}`;
+}
+
+/** Format giá theo locale: en → USD, vi (default) → VND. */
+function formatPriceByLocale(locale, priceVnd, priceUsd) {
+  if (locale === "en") return formatUSD(priceUsd);
+  return formatVND(priceVnd);
+}
+
 function FeatureItem({ ok, label }) {
   return (
     <div className="flex items-start gap-1.5 text-[12.5px] mb-1"
@@ -498,16 +563,18 @@ function FeatureItem({ ok, label }) {
 
 function PlanCard({ plan, isCurrent, highlighted, onUpgrade }) {
   const t = useT();
+  const { locale } = useI18n();
   const { features = {}, limits = {} } = plan;
   const unlimited = (v) => v === -1 ? "∞" : v;
   const fmtMin = (v) => v === -1 ? "∞" : t("settings.plans.stat.unitMin", { n: v });
   const fmtChars = (v) => v === -1 ? "∞" : `${(v / 1000).toLocaleString()}k`;
 
   const quickStats = [
-    { label: t("settings.plans.stat.dubbing"),    val: fmtMin(limits.dubbing_min_month),  suffix: t("settings.plans.stat.suffixMonth") },
-    { label: t("settings.plans.stat.stt"),        val: fmtMin(limits.stt_min_month),      suffix: t("settings.plans.stat.suffixMonth") },
-    { label: t("settings.plans.stat.tts"),        val: fmtChars(limits.tts_chars_month),  suffix: t("settings.plans.stat.suffixCharsMonth") },
-    { label: t("settings.plans.stat.voiceClone"), val: unlimited(limits.voice_clone_max), suffix: t("settings.plans.stat.suffixVoices") },
+    { label: t("settings.plans.stat.dubbing"),     val: fmtMin(limits.dubbing_min_month),  suffix: t("settings.plans.stat.suffixMonth") },
+    { label: t("settings.plans.stat.stt"),         val: fmtMin(limits.stt_min_month),      suffix: t("settings.plans.stat.suffixMonth") },
+    { label: t("settings.plans.stat.tts"),         val: fmtChars(limits.tts_chars_month),  suffix: t("settings.plans.stat.suffixCharsMonth") },
+    { label: t("settings.plans.stat.download"),    val: unlimited(limits.daily_downloads), suffix: t("settings.plans.stat.suffixDay") },
+    { label: t("settings.plans.stat.voiceClone"),  val: unlimited(limits.voice_clone_max), suffix: t("settings.plans.stat.suffixVoices") },
   ];
 
   const perks = [
@@ -520,9 +587,21 @@ function PlanCard({ plan, isCurrent, highlighted, onUpgrade }) {
     { k: "api",            l: t("settings.plans.perks.api") },
   ];
 
-  const priceDisplay = plan.price_vnd === 0
-    ? { big: "0đ", small: t("settings.plans.free") }
-    : { big: `${(plan.price_vnd / 1000).toFixed(0)}k`, small: t("settings.plans.perMonth") };
+  // Hiển thị giá theo locale: en → USD ($20), vi → VND
+  // VND format: < 1tr → "520k" (gọn). ≥ 1tr → "1.794.000đ" (đầy đủ).
+  const priceDisplay = (() => {
+    if (plan.price_vnd === 0 && plan.price_usd === 0) {
+      return { big: locale === "en" ? "$0" : "0đ", small: t("settings.plans.free") };
+    }
+    if (locale === "en") {
+      return { big: formatUSD(plan.price_usd), small: t("settings.plans.perMonth") };
+    }
+    const vnd = plan.price_vnd;
+    const big = vnd >= 1_000_000
+      ? vnd.toLocaleString("vi-VN") + "đ"
+      : `${(vnd / 1000).toFixed(0)}k`;
+    return { big, small: t("settings.plans.perMonth") };
+  })();
 
   return (
     <div
@@ -576,7 +655,7 @@ function PlanCard({ plan, isCurrent, highlighted, onUpgrade }) {
         }}>
           <div style={{ color: "#f59e0b", fontWeight: 700 }}>{t("settings.plans.ltdTitle")}</div>
           <div style={{ color: "var(--n-9)", marginTop: 1 }}>
-            <b>{formatVND(plan.ltd.price_vnd)}</b> · {t("settings.plans.ltdSlots", { n: plan.ltd.slots_available })}
+            <b>{formatPriceByLocale(locale, plan.ltd.price_vnd, plan.ltd.price_usd)}</b> · {t("settings.plans.ltdSlots", { n: plan.ltd.slots_available })}
           </div>
         </div>
       )}
@@ -668,6 +747,7 @@ function PlansTab() {
   const toast = useToast();
   const [plans, setPlans] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [checkoutPlan, setCheckoutPlan] = useState(null); // { plan, isLtd } | null
 
   useEffect(() => {
     listPlans().then((res) => {
@@ -676,11 +756,7 @@ function PlansTab() {
   }, []);
 
   const onUpgrade = (plan) => {
-    // Chưa tích hợp payment gateway → toast thông báo
-    toast?.info?.(
-      t("settings.plans.paymentSoon", { name: planLabel(t, plan) }),
-      { title: t("settings.plans.paymentSoonTitle") }
-    );
+    setCheckoutPlan({ plan, isLtd: false });
   };
 
   if (loading) {
@@ -739,6 +815,13 @@ function PlansTab() {
         <b style={{ color: "var(--n-10)" }}>{t("settings.plans.ltdHeading")}</b>{" "}
         {t("settings.plans.ltdInfo")}
       </div>
+
+      <PaymentModal
+        open={!!checkoutPlan}
+        onClose={() => setCheckoutPlan(null)}
+        plan={checkoutPlan?.plan}
+        isLtd={!!checkoutPlan?.isLtd}
+      />
     </>
   );
 }
@@ -753,12 +836,15 @@ function PlansTab() {
    ───────────────────────────────────────────────────────── */
 function BillingTab() {
   const t = useT();
+  const { locale } = useI18n();
   const { user } = useAuth();
   const [me, setMe] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [payments, setPayments] = useState([]);
 
   useEffect(() => {
     fetchMe().then(setMe).catch(() => {}).finally(() => setLoading(false));
+    listMyPayments().then((r) => setPayments(r?.payments || [])).catch(() => {});
   }, []);
 
   if (loading) {
@@ -801,9 +887,11 @@ function BillingTab() {
                            letterSpacing: "-0.02em" }}>
               {planName}
             </div>
-            {!isFree && plan?.price_vnd > 0 && (
+            {!isFree && (plan?.price_vnd > 0 || plan?.price_usd > 0) && (
               <div style={{ fontSize: 13, color: "var(--n-8)", marginTop: 4 }}>
-                {t("settings.billingFull.pricePerMonth", { vnd: (plan.price_vnd || 0).toLocaleString("vi-VN") })}
+                {locale === "en"
+                  ? t("settings.billingFull.pricePerMonthUsd", { usd: formatUSD(plan.price_usd) })
+                  : t("settings.billingFull.pricePerMonth", { vnd: (plan.price_vnd || 0).toLocaleString("vi-VN") })}
               </div>
             )}
             <div style={{ fontSize: 12, color: "var(--n-7)", marginTop: 8 }}>
@@ -850,17 +938,25 @@ function BillingTab() {
         </Card>
       </Section>
 
-      {/* Invoices */}
+      {/* Invoices / Payments */}
       <Section title={t("settings.billingFull.invoiceHistory")}>
         <Card>
-          <div style={{ padding: "20px 0", textAlign: "center" }}>
-            <div style={{ fontSize: 13, color: "var(--n-7)" }}>
-              {t("settings.billingFull.noInvoices")}
+          {payments.length === 0 ? (
+            <div style={{ padding: "20px 0", textAlign: "center" }}>
+              <div style={{ fontSize: 13, color: "var(--n-7)" }}>
+                {t("settings.billingFull.noInvoices")}
+              </div>
+              <div style={{ fontSize: 11, color: "var(--n-7)", marginTop: 4 }}>
+                {t("settings.billingFull.noInvoicesHint")}
+              </div>
             </div>
-            <div style={{ fontSize: 11, color: "var(--n-7)", marginTop: 4 }}>
-              {t("settings.billingFull.noInvoicesHint")}
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {payments.map((p) => (
+                <PaymentRow key={p.ref_code} payment={p} locale={locale} />
+              ))}
             </div>
-          </div>
+          )}
         </Card>
       </Section>
 
@@ -1112,6 +1208,52 @@ function Row({ label, value }) {
     <div className="flex items-center justify-between">
       <span style={{ color: "var(--text-secondary)" }}>{label}</span>
       <span style={{ color: "var(--text-primary)" }}>{value}</span>
+    </div>
+  );
+}
+
+function PaymentRow({ payment, locale }) {
+  const t = useT();
+  const STATUS_STYLE = {
+    pending:   { bg: "rgba(251,191,36,0.15)",  color: "#f59e0b", label: t("billing.statusPending") },
+    paid:      { bg: "rgba(34,197,94,0.15)",   color: "#22c55e", label: t("billing.statusPaid") },
+    cancelled: { bg: "rgba(148,163,184,0.15)", color: "#94a3b8", label: t("billing.statusCancelled") },
+  };
+  const s = STATUS_STYLE[payment.status] || STATUS_STYLE.cancelled;
+  const created = payment.created_at
+    ? new Date(payment.created_at).toLocaleString(locale === "en" ? "en-US" : "vi-VN")
+    : "—";
+  const amount = locale === "en" && payment.amount_usd
+    ? `$${(payment.amount_usd / 100).toFixed(2)}`
+    : `${(payment.amount_vnd || 0).toLocaleString("vi-VN")}đ`;
+
+  return (
+    <div style={{
+      display: "flex", alignItems: "center", gap: 12,
+      padding: "10px 12px", borderRadius: 8,
+      background: "var(--n-1)", border: "1px solid var(--n-3)",
+      fontSize: 12.5,
+    }}>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontWeight: 600, color: "var(--n-10)" }}>
+          {payment.plan_id?.toUpperCase()}
+          {payment.is_ltd ? " · " + t("billing.ltdLabel") : ""}
+          <span style={{ marginLeft: 8, fontWeight: 500, color: "var(--n-8)" }}>
+            {amount}
+          </span>
+        </div>
+        <div style={{ fontSize: 11, color: "var(--n-7)", marginTop: 2,
+                       fontFamily: "var(--font-mono, monospace)" }}>
+          {payment.ref_code} · {created}
+        </div>
+      </div>
+      <span style={{
+        padding: "3px 8px", borderRadius: 4,
+        background: s.bg, color: s.color,
+        fontSize: 11, fontWeight: 600,
+      }}>
+        {s.label}
+      </span>
     </div>
   );
 }

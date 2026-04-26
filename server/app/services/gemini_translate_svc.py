@@ -27,10 +27,28 @@ def _configure():
     genai.configure(api_key=GEMINI_API_KEY)
 
 
+def _extra_block(topic_hint: str | None,
+                 glossary: list[tuple[str, str]] | None) -> str:
+    """Render topic hint + glossary thành block prompt phía trên context."""
+    from app.services import glossary_svc
+    parts = []
+    if topic_hint:
+        s = glossary_svc.format_topic_hint_for_prompt(topic_hint)
+        if s: parts.append(s)
+    if glossary:
+        s = glossary_svc.format_for_prompt(glossary)
+        if s: parts.append(s)
+    if not parts:
+        return ""
+    return "\n\n" + "\n\n".join(parts) + "\n"
+
+
 def translate_segments(
     segments: list[dict],
     target_language: str,
     source_language: str = "auto",
+    topic_hint: str | None = None,
+    glossary: list[tuple[str, str]] | None = None,
 ) -> list[dict]:
     """Translate film dialogue segments with full context awareness.
 
@@ -69,7 +87,10 @@ def translate_segments(
                         "translated": prev_result["translated_text"],
                     })
 
-        prompt = _build_prompt(batch, target_language, source_language, context_before)
+        prompt = _build_prompt(
+            batch, target_language, source_language, context_before,
+            topic_hint=topic_hint, glossary=glossary,
+        )
 
         try:
             response = model.generate_content(prompt)
@@ -95,6 +116,8 @@ def _build_prompt(
     target_lang: str,
     source_lang: str,
     context_before: list[dict],
+    topic_hint: str | None = None,
+    glossary: list[tuple[str, str]] | None = None,
 ) -> str:
     """Build a detailed prompt for context-aware film translation."""
 
@@ -146,7 +169,7 @@ CRITICAL RULES for {tgt_name} translation:
 
 5. **Film Context**: These are consecutive dialogue lines from a film scene.
    Use the flow of conversation to understand relationships and context.
-{context_section}
+{_extra_block(topic_hint, glossary)}{context_section}
 
 DIALOGUE TO TRANSLATE:
 {chr(10).join(seg_lines)}

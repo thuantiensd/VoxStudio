@@ -162,3 +162,22 @@ export async function updatePlan(id: string, body: any) {
     body: JSON.stringify(body),
   });
 }
+
+export async function fetchPayments(status: string = "pending", limit: number = 100) {
+  const qs = new URLSearchParams({ status, limit: String(limit) });
+  return api<{ payments: any[] }>(`/admin/payments?${qs.toString()}`);
+}
+
+export async function confirmPayment(refCode: string, note?: string) {
+  return api<any>(`/admin/payments/${refCode}/confirm`, {
+    method: "POST",
+    body: JSON.stringify({ note: note || null }),
+  });
+}
+
+export async function rejectPayment(refCode: string, note?: string) {
+  return api<any>(`/admin/payments/${refCode}/reject`, {
+    method: "POST",
+    body: JSON.stringify({ note: note || null }),
+  });
+}

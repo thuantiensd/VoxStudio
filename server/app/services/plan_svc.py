@@ -26,13 +26,25 @@ class PlanInfo:
     sort_order: int
 
     def to_dict(self) -> dict:
+        # VND tính LIVE từ USD theo tỷ giá thị trường (cache 24h). Fallback
+        # về price_vnd lưu DB nếu API rate fail. Đảm bảo Vietnamese user
+        # luôn thấy giá hợp lý kể cả khi USD/VND biến động.
+        from app.services import fx_rate_svc
+        live_vnd = (
+            fx_rate_svc.usd_cents_to_vnd(self.price_usd)
+            if self.price_usd > 0 else self.price_vnd
+        ) or self.price_vnd
+        live_ltd_vnd = (
+            fx_rate_svc.usd_cents_to_vnd(self.ltd_price_usd)
+            if self.ltd_price_usd > 0 else self.ltd_price_vnd
+        ) or self.ltd_price_vnd
         return {
             "id": self.id,
             "name": self.name,
-            "price_vnd": self.price_vnd,
+            "price_vnd": live_vnd,
             "price_usd": self.price_usd,
             "ltd": {
-                "price_vnd": self.ltd_price_vnd,
+                "price_vnd": live_ltd_vnd,
                 "price_usd": self.ltd_price_usd,
                 "slots_available": self.ltd_slots_available,
             } if self.ltd_price_vnd > 0 else None,

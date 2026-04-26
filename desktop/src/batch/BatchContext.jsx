@@ -181,13 +181,32 @@ export function BatchProvider({ children }) {
 
     (async () => {
       try {
+        // Đọc translate_engine từ project settings; nếu cần key, lấy từ
+        // KeyVault (per-user). Cloud engines: deepl/openai/claude/gemini/
+        // google_cloud → BYOK, lookup key. Google Free / Qwen → no key.
+        let translateEngine = "google_free";
+        let translateApiKey = null;
+        try {
+          const proj = await getDubbingProject(next.projectId);
+          translateEngine = proj?.translate_engine || "google_free";
+        } catch { /* fall back to default */ }
+        const needsKey = ["deepl", "openai", "claude", "gemini", "google_cloud"]
+          .includes(translateEngine);
+        if (needsKey) {
+          try {
+            const { getKey } = await import("../services/keyvault");
+            translateApiKey = await getKey(translateEngine);
+          } catch { /* user chưa có key — server sẽ trả error rõ ràng */ }
+        }
+
         await new Promise((resolve, reject) => {
           let settled = false;
           const settle = (fn) => (v) => { if (!settled) { settled = true; fn(v); } };
           const safeResolve = settle(resolve);
           const safeReject = settle(reject);
           autoDub(next.projectId, {
-            engine: "google",
+            engine: translateEngine,
+            translateApiKey,
             signal: controller.signal,
             onProgress: (d) => {
               // SSE payload: {step, label, progress, detail}

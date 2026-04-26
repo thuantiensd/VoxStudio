@@ -9,7 +9,7 @@ import logging
 from datetime import datetime, timedelta
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import func, or_, select, desc
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -19,7 +19,7 @@ from app.db.models import (
     AuditLog, FeatureFlag, Job, Plan, UsageEvent, User,
 )
 from app.db.session import get_session
-from app.services import audit_svc, job_svc, plan_svc, usage_svc
+from app.services import audit_svc, job_svc, plan_svc, usage_svc, billing_svc
 
 logger = logging.getLogger(__name__)
 
@@ -556,3 +556,82 @@ async def admin_cancel_job(
         metadata={"target_user_id": job.user_id, "kind": job.kind},
     )
     return {"ok": True}
+
+
+# ── Billing / Payments ────────────────────────────────────
+
+@router.get("/payments")
+async def admin_list_payments(
+    status: str = Query("pending", description="pending | paid | cancelled | all"),
+    limit: int = Query(100, ge=1, le=500),
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_session),
+):
+    """List payments cho admin review. Default: pending để confirm."""
+    if status == "pending":
+        items = await billing_svc.list_pending_for_admin(db, limit=limit)
+    else:
+        from app.db.models import Payment
+        from sqlalchemy import select, desc
+        q = select(Payment, User).join(User, User.id == Payment.user_id)
+        if status != "all":
+            q = q.where(Payment.status == status)
+        q = q.order_by(desc(Payment.created_at)).limit(limit)
+        rows = (await db.execute(q)).all()
+        items = []
+        for p, u in rows:
+            d = billing_svc._to_dict(p)
+            d["user_id"] = u.id
+            d["user_email"] = u.email
+            d["user_name"] = u.name
+            items.append(d)
+    return {"payments": items}
+
+
+class ConfirmPaymentRequest(BaseModel):
+    note: str | None = None
+
+
+@router.post("/payments/{ref_code}/confirm")
+async def admin_confirm_payment(
+    ref_code: str,
+    body: ConfirmPaymentRequest = Body(default=ConfirmPaymentRequest()),
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_session),
+):
+    """Confirm payment → kích hoạt plan trên user."""
+    try:
+        payment = await billing_svc.confirm_payment(
+            db, ref_code=ref_code, admin_id=admin.id, note=body.note,
+        )
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    await audit_svc.log(
+        db, user_id=admin.id, action="admin_confirm_payment",
+        target_type="payment", target_id=ref_code,
+        metadata={"plan_id": payment["plan_id"],
+                  "amount_vnd": payment["amount_vnd"]},
+    )
+    return {"ok": True, "payment": payment}
+
+
+@router.post("/payments/{ref_code}/reject")
+async def admin_reject_payment_route(
+    ref_code: str,
+    body: ConfirmPaymentRequest = Body(default=ConfirmPaymentRequest()),
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_session),
+):
+    """Admin từ chối payment pending."""
+    try:
+        payment = await billing_svc.admin_reject_payment(
+            db, ref_code=ref_code, note=body.note,
+        )
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    await audit_svc.log(
+        db, user_id=admin.id, action="admin_reject_payment",
+        target_type="payment", target_id=ref_code,
+        metadata={"note": body.note or ""},
+    )
+    return {"ok": True, "payment": payment}

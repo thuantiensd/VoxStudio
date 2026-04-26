@@ -61,16 +61,19 @@ async def _run_sync_generator(gen_factory, progress_cb):
 # ── Dubbing handler ────────────────────────────────────────
 
 async def dubbing_handler(payload: dict, *, job_id: str, progress_cb) -> dict:
-    """Payload: { project_id, engine }"""
+    """Payload: { project_id, engine, translate_api_key? }"""
     project_id = payload.get("project_id")
     engine = payload.get("engine", "google")
+    translate_api_key = payload.get("translate_api_key")
     if not project_id:
         raise ValueError("Thiếu project_id")
 
     logger.info("[dubbing] start project=%s engine=%s", project_id, engine)
 
     def gen_factory():
-        return dubbing_svc.auto_dub(project_id, engine=engine)
+        return dubbing_svc.auto_dub(
+            project_id, engine=engine, api_key=translate_api_key,
+        )
 
     last = await _run_sync_generator(gen_factory, progress_cb)
 

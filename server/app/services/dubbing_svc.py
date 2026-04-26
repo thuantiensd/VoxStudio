@@ -610,12 +610,27 @@ def transcribe_project(project_id: str) -> dict:
 
 # ── Translate ──────────────────────────────────────
 
-def translate_project(project_id: str, use_llm: bool = False, engine: str = "google") -> dict:
+def translate_project(
+    project_id: str,
+    use_llm: bool = False,
+    engine: str = "google",
+    api_key: str | None = None,
+    topic_hint: str | None = None,
+    glossary: list[tuple[str, str]] | None = None,
+) -> dict:
     """Auto-translate all segments to target language.
 
-    Args:
-        engine: "google" (default) or "gemini" (context-aware film translation)
-        use_llm: if True and engine="google", polish with Qwen LLM
+    Engines:
+      · google           — Google Free (legacy alias, no key)
+      · google_free      — Google Free (no key)
+      · google_cloud     — Google Cloud Translate (BYOK)
+      · deepl            — DeepL (BYOK)
+      · gemini           — Gemini (BYOK; fallback env key nếu không truyền)
+      · openai           — OpenAI GPT (BYOK)
+      · claude           — Anthropic Claude (BYOK)
+      · qwen             — Qwen local LLM (no key, GPU)
+
+    use_llm: với google_free, có polish bằng Qwen local nếu CUDA có.
     """
     project = _load_meta(project_id)
     if not project:
@@ -624,60 +639,108 @@ def translate_project(project_id: str, use_llm: bool = False, engine: str = "goo
     target_lang = project["target_language"]
     source_lang = project.get("source_language") or "auto"
 
-    if engine == "gemini" and gemini_translate_svc.is_available():
-        # Gemini: context-aware film translation with pronouns + emotion
-        logger.info("Translating %d segments with Gemini (context-aware)...", len(project["segments"]))
+    # Normalize engine alias (legacy "google" == "google_free")
+    eng = (engine or "google_free").lower()
+    if eng == "google":
+        eng = "google_free"
+
+    # Fallback: nếu caller không pass, đọc topic_hint + glossary từ project
+    if topic_hint is None:
+        topic_hint = project.get("topic_hint") or None
+    if glossary is None:
+        from app.services import glossary_svc
+        glossary = glossary_svc.parse_glossary(project.get("glossary") or "")
+
+    # ── Path A: Gemini — server-side context-aware (env key) ──
+    # Giữ path cũ để backward-compat khi user KHÔNG truyền api_key (admin
+    # set env GEMINI_API_KEY). Nếu user truyền key → đi path BYOK chung.
+    if eng == "gemini" and not api_key and gemini_translate_svc.is_available():
+        logger.info("Translating %d segments with Gemini (env key, context-aware)…",
+                    len(project["segments"]))
         results = gemini_translate_svc.translate_segments(
             project["segments"], target_lang, source_lang,
+            topic_hint=topic_hint, glossary=glossary,
         )
         for seg, result in zip(project["segments"], results):
-            if result["translated_text"]:
+            if result.get("translated_text"):
                 seg["translated_text"] = result["translated_text"]
                 seg["speech_text"] = result["speech_text"] or result["translated_text"]
                 seg["emotion"] = result.get("emotion", "neutral")
-        method = "Gemini"
-    elif engine == "qwen":
-        # Qwen: full local translation + emotion (no internet needed)
-        logger.info("Translating %d segments with Qwen (local LLM)...", len(project["segments"]))
+        method = "Gemini (env)"
+        _save_meta(project)
+        logger.info("Translated %d segs → %s (%s)",
+                    len(project["segments"]), target_lang, method)
+        return project
+
+    # ── Path B: Qwen local ──
+    if eng == "qwen":
+        logger.info("Translating %d segments with Qwen (local LLM)…",
+                    len(project["segments"]))
         results = llm_translate_svc.translate_segments(
             project["segments"], target_lang, source_lang,
+            topic_hint=topic_hint, glossary=glossary,
         )
         for seg, result in zip(project["segments"], results):
-            if result["translated_text"]:
+            if result.get("translated_text"):
                 seg["translated_text"] = result["translated_text"]
                 seg["speech_text"] = result["speech_text"] or result["translated_text"]
                 seg["emotion"] = result.get("emotion", "neutral")
         method = "Qwen"
-    else:
-        # Google Translate + optional Qwen LLM polish
-        texts = [seg["original_text"] for seg in project["segments"]]
-        logger.info("Step 1: Google Translate %d segments...", len(texts))
-        translated = translate_svc.translate_batch(texts, target_lang, source_lang)
+        _save_meta(project)
+        logger.info("Translated %d segs → %s (%s)",
+                    len(project["segments"]), target_lang, method)
+        return project
 
-        for seg, trans in zip(project["segments"], translated):
-            if trans:
-                seg["translated_text"] = trans
-                seg["speech_text"] = trans
-                seg["emotion"] = "neutral"
+    # ── Path C: BYOK / Google Free qua cloud_translate_svc ──
+    # 1 endpoint chung: Google Free / Google Cloud / DeepL / Gemini (BYOK) /
+    # OpenAI / Claude. Validate key trước khi đổ batch để fail nhanh.
+    needs_key = eng in ("google_cloud", "deepl", "gemini", "openai", "claude")
+    if needs_key and not api_key:
+        raise ValueError(
+            f"Engine '{eng}' yêu cầu API key. Vui lòng thêm key trong "
+            f"Cài đặt → AI & API keys, hoặc đổi sang Google miễn phí."
+        )
 
-        if use_llm and IS_CUDA:
-            logger.info("Step 2: Qwen polish (emotion + pauses) with duration hints...")
-            try:
-                durations = [seg["end"] - seg["start"] for seg in project["segments"]]
-                polished = llm_translate_svc.polish_for_speech(translated, target_lang, durations=durations)
-                for seg, result in zip(project["segments"], polished):
-                    if result.get("speech_text"):
-                        seg["speech_text"] = result["speech_text"]
-                        seg["emotion"] = result.get("emotion", "neutral")
-            except Exception as e:
-                logger.warning("Qwen polish failed, using Google Translate only: %s", e)
-        elif use_llm and not IS_CUDA:
-            logger.info("Skipping Qwen polish (no CUDA, model too heavy for MPS/CPU)")
-        method = "Google + Qwen" if (use_llm and IS_CUDA) else "Google"
+    from app.services import cloud_translate_svc
+    texts = [seg["original_text"] for seg in project["segments"]]
+    logger.info("Translating %d segs via %s…", len(texts), eng)
+    try:
+        translated = cloud_translate_svc.translate_texts(
+            texts=texts, target=target_lang, source=source_lang,
+            engine=eng, api_key=api_key,
+            topic_hint=topic_hint, glossary=glossary,
+        )
+    except Exception as e:
+        # Surface lỗi cho worker → user thấy cụ thể (sai key / quota / mạng)
+        raise ValueError(f"Lỗi engine dịch '{eng}': {e}") from e
+
+    for seg, trans in zip(project["segments"], translated):
+        if trans:
+            seg["translated_text"] = trans
+            seg["speech_text"] = trans
+            seg["emotion"] = "neutral"
+
+    method = eng
+    # Polish bằng Qwen — chỉ áp dụng khi engine là Google Free + CUDA có
+    # (LLM-based engines như openai/claude/gemini đã polish sẵn).
+    if eng == "google_free" and use_llm and IS_CUDA:
+        logger.info("Step 2: Qwen polish for emotion + pacing…")
+        try:
+            durations = [seg["end"] - seg["start"] for seg in project["segments"]]
+            polished = llm_translate_svc.polish_for_speech(
+                translated, target_lang, durations=durations
+            )
+            for seg, result in zip(project["segments"], polished):
+                if result.get("speech_text"):
+                    seg["speech_text"] = result["speech_text"]
+                    seg["emotion"] = result.get("emotion", "neutral")
+            method = "Google Free + Qwen polish"
+        except Exception as e:
+            logger.warning("Qwen polish failed, giữ kết quả Google: %s", e)
 
     _save_meta(project)
-    logger.info("Translated %d segments for project %s → %s (%s)",
-                len(project["segments"]), project_id, target_lang, method)
+    logger.info("Translated %d segs → %s (%s)",
+                len(project["segments"]), target_lang, method)
     return project
 
 
@@ -1740,8 +1803,12 @@ def update_project_settings(project_id: str, settings: dict) -> dict:
         "default_emotion",
         # Auto features
         "auto_font_size", "auto_pace", "smart_chunk", "highlight_keywords",
+        # Translate engine — không lưu api_key (chỉ truyền theo từng job)
+        "translate_engine",
+        # Topic hint + glossary để cải thiện chất lượng dịch
+        "topic_hint", "glossary",
     }
-    nullable = {"edge_voice", "voice_id", "default_emotion"}
+    nullable = {"edge_voice", "voice_id", "default_emotion", "topic_hint", "glossary"}
     for k, v in settings.items():
         if k in allowed and (v is not None or k in nullable):
             project[k] = v
@@ -1917,15 +1984,19 @@ class _Canceled(Exception):
     pass
 
 
-def auto_dub(project_id: str, engine: str = "google"):
+def auto_dub(project_id: str, engine: str = "google", api_key: str | None = None):
     """Full pipeline: Demucs → Faster-Whisper → Translate → TTS → Export.
+
+    Args:
+        engine: translate engine — google_free / google_cloud / deepl /
+                gemini / openai / claude / qwen.
+        api_key: BYOK key cho engine cần (deepl/openai/claude/google_cloud/
+                 gemini-byok). Server không lưu, chỉ dùng cho lần chạy này.
 
     Respects project toggles:
       - enable_dubbing=False → skip TTS step entirely
       - enable_subtitle=False → don't burn subtitle in export
     Yields progress updates as dicts for SSE streaming.
-    Mỗi step chạy trong thread riêng, tick tiến trình mỗi 0.5s để UI thấy
-    thanh progress bò đều, không phải step-jump.
     """
     project = _load_meta(project_id)
     if not project:
@@ -1991,9 +2062,12 @@ def auto_dub(project_id: str, engine: str = "google"):
                 yield {"step": "transcribing", **{k: v for k, v in tick.items() if k != "step"}}
 
         _check_cancel()
-        # Step 2: Translate
+        # Step 2: Translate — engine + key đến từ caller (worker payload).
+        # Engine hợp lệ: google_free / google_cloud / deepl / gemini /
+        # openai / claude / qwen. "google" là alias legacy.
         for tick in _run_step_with_progress(
-            translate_project, [project_id], {"engine": "google"},
+            translate_project, [project_id],
+            {"engine": engine or "google_free", "api_key": api_key},
             start_pct=r_transl[0], end_pct=r_transl[1],
             label="Đang dịch thuật...", estimated_sec=20,
         ):

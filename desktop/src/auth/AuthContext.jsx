@@ -128,14 +128,17 @@ export function AuthProvider({ children }) {
         "ngrok-skip-browser-warning": "true",
       },
     }).catch(() => {});
-    writeStored(null);  // sync clear ngay
-    // Clear sạch data của user trước khi xoá auth (lúc này uid còn đọc được)
+    // Cleanup ORDER QUAN TRỌNG: phải xoá data user TRƯỚC khi xoá auth
+    // key, vì clearUserLocalStorage() đọc user_id từ localStorage AUTH_KEY.
+    // Nếu xoá auth trước → uid = null → bail out → key user-scoped (welcome,
+    // queue, settings v.v.) bị bỏ lại, gây leak cho user mới đăng ký lại.
     try {
       await clearCurrentUser();
       clearUserLocalStorage();
     } catch (e) {
       console.warn("[logout] cleanup error:", e);
     }
+    writeStored(null);  // sync clear AUTH key sau cùng
     setAuth(null);
   }, [auth?.token]);
 

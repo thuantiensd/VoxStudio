@@ -152,8 +152,46 @@ export async function listPlans() {
   return res.json();
 }
 
+// ── Billing (chuyển khoản thủ công) ──────────────────
+export async function getBankInfo() {
+  const res = await request('/billing/bank');
+  return res.json();
+}
+
+export async function checkoutPlan({ planId, isLtd = false }) {
+  const res = await request('/billing/checkout', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ plan_id: planId, is_ltd: isLtd }),
+  });
+  return res.json();
+}
+
+export async function listMyPayments() {
+  const res = await request('/billing/payments');
+  return res.json();
+}
+
+export async function cancelPayment(refCode) {
+  const res = await request(`/billing/payments/${refCode}/cancel`, { method: 'POST' });
+  return res.json();
+}
+
 export async function fetchMe() {
   const res = await request('/auth/me');
+  return res.json();
+}
+
+/** Đổi mật khẩu user đang login. Yêu cầu mật khẩu hiện tại để xác minh. */
+export async function changePassword({ currentPassword, newPassword }) {
+  const res = await request('/auth/change-password', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      current_password: currentPassword,
+      new_password: newPassword,
+    }),
+  });
   return res.json();
 }
 
@@ -427,16 +465,21 @@ export async function generateEdgeTTS({ text, voice, language, speed }) {
 }
 
 // ── Auto-Dub Pipeline ───────────────────────────────
-export function autoDub(projectId, { engine = 'google', onProgress, onDone, onError, signal } = {}) {
-  const params = new URLSearchParams();
-  if (engine !== 'google') params.set('engine', engine);
-  const qs = params.toString();
-  const url = `${API_BASE}/dubbing/projects/${projectId}/auto-dub${qs ? '?' + qs : ''}`;
+export function autoDub(projectId, { engine = 'google', translateApiKey, onProgress, onDone, onError, signal } = {}) {
+  const url = `${API_BASE}/dubbing/projects/${projectId}/auto-dub`;
+  const headers = buildHeaders({ 'Content-Type': 'application/json' });
+  // Body: engine + key (key qua body để KHÔNG bị log vào access log như
+  // query string).
+  const body = JSON.stringify({
+    engine,
+    translate_api_key: translateApiKey || null,
+  });
 
   return fetch(url, {
     method: 'POST',
     signal,
-    headers: buildHeaders(),  // kèm Authorization Bearer + ngrok-skip
+    headers,
+    body,
   }).then(async (res) => {
     if (!res.ok) {
       const body = await res.json().catch(() => ({ detail: res.statusText }));

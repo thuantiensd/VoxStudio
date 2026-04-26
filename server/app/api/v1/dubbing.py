@@ -3,7 +3,8 @@
 import json
 import logging
 
-from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, Request, UploadFile
+from pydantic import BaseModel
 from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -351,17 +352,25 @@ async def set_gemini_key(body: dict):
 
 # ── Auto-Dub Pipeline ─────────────────────────────
 
+class AutoDubRequest(BaseModel):
+    engine: str | None = "google"
+    translate_api_key: str | None = None
+
+
 @router.post("/projects/{project_id}/auto-dub")
 async def auto_dub(
     project_id: str,
-    engine: str = "google",
+    request: Request,
+    engine: str = "google",  # query param — backward compat
     ctx: dict = Depends(require_quota("dubbing")),
 ):
     """Enqueue dubbing job vào GPU queue rồi stream SSE progress luôn
-    trong cùng HTTP response — backward compat với FE cũ đang đọc SSE.
+    trong cùng HTTP response.
 
-    Client POST → enqueue + subscribe worker → SSE format như cũ, có thêm
-    event 'queued' với queue_position + eta_seconds ở đầu.
+    Engine + API key có thể truyền qua:
+      · Query param ?engine=... (backward compat, không nhận api_key)
+      · JSON body {engine, translate_api_key} — KHUYẾN NGHỊ vì api_key
+        không bị log vào access log như query param.
     """
     import asyncio
     from app.db.session import AsyncSessionLocal
@@ -370,12 +379,26 @@ async def auto_dub(
     user: User = ctx["user"]
     db: AsyncSession = ctx["db"]
 
+    # Đọc body nếu có; ngược lại dùng query param. Body có quyền ưu tiên.
+    translate_api_key: str | None = None
+    try:
+        if request.headers.get("content-type", "").startswith("application/json"):
+            body = await request.json()
+            engine = body.get("engine") or engine
+            translate_api_key = body.get("translate_api_key") or None
+    except Exception:
+        pass
+
     # Enqueue ngay — lấy job.id rồi subscribe worker publisher
     job = await job_svc.enqueue(
         db,
         user_id=user.id,
         kind="dubbing",
-        payload={"project_id": project_id, "engine": engine},
+        payload={
+            "project_id": project_id,
+            "engine": engine,
+            "translate_api_key": translate_api_key,
+        },
     )
     job_id = job.id
     position = await job_svc.get_queue_position(db, job_id)

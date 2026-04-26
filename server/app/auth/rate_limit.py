@@ -115,3 +115,34 @@ def require_quota(feature: str):
         info = await check_quota(user, feature, db)
         return {"user": user, "plan": info["plan"], "db": db}
     return dep
+
+
+async def check_download_quota(user: User, db: AsyncSession) -> dict:
+    """Riêng cho download: chỉ check daily_downloads (không tính concurrent
+    vì download nhanh, không enqueue queue như dubbing/STT)."""
+    if user.is_banned:
+        raise HTTPException(403, "Tài khoản của bạn đã bị khoá. Vui lòng liên hệ hỗ trợ.")
+    plan = await plan_svc.get_plan(db, user.plan or "free")
+    if not plan:
+        plan = await plan_svc.get_plan(db, "free")
+    daily_max = plan_svc.get_limit(plan, "daily_downloads", -1)
+    if daily_max != -1:
+        today = await usage_svc.count_downloads_today(db, user.id)
+        if today >= daily_max:
+            raise QuotaExceeded(
+                f"Hôm nay bạn đã tải {today}/{daily_max} video. "
+                f"Vui lòng thử lại vào ngày mai hoặc nâng cấp gói {plan.name}.",
+                code="daily_download_limit",
+            )
+    return {"plan": plan}
+
+
+def require_download_quota():
+    """Dep cho /download/to-project — check daily_downloads."""
+    async def dep(
+        user: User = Depends(get_current_user),
+        db: AsyncSession = Depends(get_session),
+    ) -> dict:
+        info = await check_download_quota(user, db)
+        return {"user": user, "plan": info["plan"], "db": db}
+    return dep

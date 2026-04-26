@@ -5,6 +5,7 @@ import { Upload as UploadIcon } from "lucide-react";
 import Sidebar from "./Sidebar";
 import Titlebar from "./Titlebar";
 import CommandPalette from "./CommandPalette";
+import WelcomeModal from "../WelcomeModal";
 import { useHotkeys } from "./useHotkeys";
 import { useT } from "../../i18n/I18nContext";
 
@@ -80,6 +81,7 @@ export default function AppShell({ children }) {
         </main>
       </div>
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
+      <WelcomeModal />
 
       {/* Drop overlay toàn màn hình */}
       <AnimatePresence>
