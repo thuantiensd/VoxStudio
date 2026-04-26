@@ -67,8 +67,23 @@ async def lifespan(app: FastAPI):
     from app.worker.gpu_worker import start_worker, stop_worker
     start_worker()
     gpu.load_all()
+
+    # Background TTL cleanup cho audio_output/ — chạy 1h/lần. Lần đầu chạy
+    # ngay khi boot để dọn rác từ phiên trước.
+    import asyncio
+    from app.core.storage import cleanup_audio_output
+    async def _cleanup_loop():
+        while True:
+            try:
+                cleanup_audio_output()
+            except Exception as e:
+                logger.warning("audio cleanup loop error: %s", e)
+            await asyncio.sleep(3600)  # 1h
+    cleanup_task = asyncio.create_task(_cleanup_loop())
+
     yield
     logger.info("Shutting down.")
+    cleanup_task.cancel()
     stop_worker()
 
 

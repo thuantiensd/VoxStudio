@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { Loader2, User, ChevronDown, ChevronUp, FolderUp, X, Check, Download, FileText, Cloud, Cpu } from 'lucide-react';
 import { generateTTS, generateEdgeTTS, listVoices, listEdgeVoices, audioURL } from '../services/api';
 import AudioPlayer from '../components/AudioPlayer';
@@ -9,6 +9,9 @@ import { useT } from '../i18n/I18nContext';
 import { isQuotaError, showError } from '../services/errors';
 import { useToast } from '../components/ui/Toast';
 import { useUpgrade } from '../components/UpgradeContext';
+import { userStorage } from '../services/userScope';
+import { FolderOpen } from 'lucide-react';
+import { SERVER_URL } from '../services/api';
 
 // value khớp locale backend — label dịch qua useT() + useLanguages()
 const LANGUAGE_VALUES = [
@@ -80,6 +83,14 @@ function useSharedSettings() {
   const [preprocessPrompt, setPreprocessPrompt] = useState(true);
   const [postprocessOutput, setPostprocessOutput] = useState(true);
   const [audioChunkDuration, setAudioChunkDuration] = useState(15.0);
+  const [outputFolder, setOutputFolder] = useState(() => {
+    try { return userStorage.getItem('voxstudio:tts:outputFolder') || ''; }
+    catch { return ''; }
+  });
+  const setOutputFolderPersist = useCallback((path) => {
+    setOutputFolder(path || '');
+    try { userStorage.setItem('voxstudio:tts:outputFolder', path || ''); } catch {}
+  }, []);
 
   useEffect(() => {
     listVoices().then(r => setVoices(r.voices || [])).catch(() => {});
@@ -115,7 +126,100 @@ function useSharedSettings() {
     denoise, setDenoise, preprocessPrompt, setPreprocessPrompt,
     postprocessOutput, setPostprocessOutput,
     audioChunkDuration, setAudioChunkDuration,
+    outputFolder, setOutputFolder: setOutputFolderPersist,
   };
+}
+
+/**
+ * Auto-save audio file đã generate về folder user chọn (Electron only).
+ * Dùng IPC saveRemoteFileToFolder — backend yêu cầu Authorization Bearer
+ * cho /tts/audio/<id>, nên phải truyền header.
+ */
+async function autoSaveAudio({ audioUrl, folder, baseName, toast, t }) {
+  if (!folder) return null;
+  if (!window.voxstudio?.saveRemoteFileToFolder) {
+    toast.warn(t('tts.desktopOnly'));
+    return null;
+  }
+  try {
+    let authHeaders = { 'ngrok-skip-browser-warning': 'true' };
+    try {
+      const raw = localStorage.getItem('voxstudio:auth');
+      if (raw) {
+        const { token } = JSON.parse(raw);
+        if (token) authHeaders['Authorization'] = `Bearer ${token}`;
+      }
+    } catch { /* ignore */ }
+    const url = audioUrl.startsWith('http') ? audioUrl : `${SERVER_URL}${audioUrl}`;
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    const safe = (baseName || 'tts').replace(/[/\\?%*:|"<>]/g, '_').slice(0, 60) || 'tts';
+    const filename = `${safe}_${stamp}.wav`;
+    const savedPath = await window.voxstudio.saveRemoteFileToFolder({
+      url, folder, filename, headers: authHeaders,
+    });
+    if (savedPath) {
+      toast.success(t('tts.autoSavedAt', { path: savedPath }), { duration: 6000 });
+    }
+    return savedPath;
+  } catch (e) {
+    console.warn('autoSaveAudio failed:', e);
+    toast.error(t('tts.autoSaveFailed'));
+    return null;
+  }
+}
+
+// ── Folder picker for auto-save (Electron only) ──
+function FolderPickerSection({ s }) {
+  const t = useT();
+  const toast = useToast();
+  const isElectron = !!window.voxstudio?.pickFolder;
+
+  const pick = async () => {
+    if (!isElectron) {
+      toast.warn(t('tts.desktopOnly'));
+      return;
+    }
+    try {
+      const f = await window.voxstudio.pickFolder();
+      if (f) s.setOutputFolder(f);
+    } catch { /* user canceled */ }
+  };
+
+  return (
+    <div className="mb-4 p-3 rounded-lg" style={{ background: 'var(--bg-card)', border: '1px solid #2a2a40' }}>
+      <div className="flex items-center gap-2 mb-2">
+        <FolderOpen size={14} style={{ color: 'var(--accent)' }} />
+        <span className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>{t('tts.saveFolder')}</span>
+      </div>
+      <p className="text-xs mb-3" style={{ color: 'var(--text-secondary)' }}>{t('tts.saveFolderHint')}</p>
+      <div className="flex items-center gap-2">
+        <div
+          title={s.outputFolder || t('tts.folderNone')}
+          className="flex-1 px-3 py-2 rounded-md text-xs font-mono"
+          style={{
+            background: 'var(--bg-surface)',
+            border: '1px solid #2a2a40',
+            color: s.outputFolder ? 'var(--text-primary)' : 'var(--text-secondary)',
+            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+          }}
+        >
+          {s.outputFolder || t('tts.folderNone')}
+        </div>
+        <button onClick={pick}
+          className="px-3 py-2 rounded-md text-xs font-medium"
+          style={{ background: 'var(--accent)', color: '#fff' }}>
+          {s.outputFolder ? t('tts.changeFolder') : t('tts.chooseFolder')}
+        </button>
+        {s.outputFolder && (
+          <button onClick={() => s.setOutputFolder('')}
+            className="px-3 py-2 rounded-md text-xs"
+            style={{ background: 'var(--bg-surface)', border: '1px solid #2a2a40', color: 'var(--text-secondary)' }}>
+            {t('tts.clearFolder')}
+          </button>
+        )}
+      </div>
+    </div>
+  );
 }
 
 // ── Shared settings UI ──
@@ -201,6 +305,9 @@ function SettingsPanel({ s }) {
           </div>
         </div>
       )}
+
+      {/* Auto-save folder (Electron only) */}
+      <FolderPickerSection s={s} />
 
       {/* Speed knob */}
       <div className="flex flex-col items-center gap-3 mb-5 p-4 rounded-lg"
@@ -308,6 +415,7 @@ export default function TTSPage() {
 // ══════════════════════════════════════════════════════
 function SingleMode({ s }) {
   const t = useT();
+  const toast = useToast();
   const upgrade = useUpgrade();
   const [text, setText] = useState('');
   const [loading, setLoading] = useState(false);
@@ -329,6 +437,13 @@ function SingleMode({ s }) {
         r = await generateTTS({ text, ...s.ttsParams() });
       }
       setResult(r);
+      // Auto-save về máy nếu user đã đặt outputFolder (Electron only).
+      if (s.outputFolder && r?.audio_url) {
+        autoSaveAudio({
+          audioUrl: r.audio_url, folder: s.outputFolder,
+          baseName: text.trim().slice(0, 40), toast, t,
+        });
+      }
     } catch (e) {
       if (isQuotaError(e)) upgrade.open(e.message);
       else setError(e.message);
@@ -389,6 +504,8 @@ function SingleMode({ s }) {
 // Batch mode
 // ══════════════════════════════════════════════════════
 function BatchMode({ s }) {
+  const t = useT();
+  const toast = useToast();
   const upgrade = useUpgrade();
   const fileRef = useRef(null);
   const [files, setFiles] = useState([]); // { id, name, text, status, result, error }
@@ -528,6 +645,14 @@ function BatchMode({ s }) {
           r = await generateTTS({ text: f.text, ...params });
         }
         setFiles(prev => prev.map(x => x.id === f.id ? { ...x, status: 'done', result: r } : x));
+        // Auto-save từng file batch nếu có outputFolder.
+        if (s.outputFolder && r?.audio_url) {
+          autoSaveAudio({
+            audioUrl: r.audio_url, folder: s.outputFolder,
+            baseName: f.name?.replace(/\.[^.]+$/, '') || `tts_${i + 1}`,
+            toast, t,
+          });
+        }
       } catch (e) {
         if (isQuotaError(e)) {
           upgrade.open(e.message);

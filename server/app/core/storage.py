@@ -1,6 +1,8 @@
 """File storage for voices (.pt) and audio output (.wav)."""
 
 import json
+import logging
+import time
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -10,6 +12,13 @@ import soundfile as sf
 import torch
 
 from app.config import AUDIO_OUTPUT_DIR, VOICES_DIR
+
+logger = logging.getLogger(__name__)
+
+# TTL cho file TTS output: file > N giờ sẽ bị xoá. User được khuyến khích
+# tải về máy ngay sau khi generate. Đặt 24h để vẫn có "lịch sử ngắn" cho
+# user retry / preview lại trong cùng ngày.
+AUDIO_OUTPUT_TTL_SEC = 24 * 60 * 60
 
 
 # ── Audio output ─────────────────────────────────────
@@ -25,6 +34,28 @@ def save_audio(waveform, sample_rate: int) -> tuple[str, str]:
 def get_audio_path(file_id: str) -> Optional[Path]:
     path = AUDIO_OUTPUT_DIR / f"{file_id}.wav"
     return path if path.exists() else None
+
+
+def cleanup_audio_output(ttl_sec: int = AUDIO_OUTPUT_TTL_SEC) -> int:
+    """Xoá các file .wav trong AUDIO_OUTPUT_DIR cũ hơn ttl_sec giây.
+    Trả về số file đã xoá. Lỗi từng file → bỏ qua (không fatal).
+    """
+    now = time.time()
+    deleted = 0
+    try:
+        for f in AUDIO_OUTPUT_DIR.glob("*.wav"):
+            try:
+                age = now - f.stat().st_mtime
+                if age > ttl_sec:
+                    f.unlink()
+                    deleted += 1
+            except Exception as e:
+                logger.warning("cleanup_audio_output skip %s: %s", f.name, e)
+    except Exception as e:
+        logger.warning("cleanup_audio_output scan failed: %s", e)
+    if deleted:
+        logger.info("cleanup_audio_output: deleted %d expired file(s)", deleted)
+    return deleted
 
 
 # ── Voice storage ────────────────────────────────────

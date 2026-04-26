@@ -116,6 +116,7 @@ const DEFAULTS = {
   edgeVoice: "",         // Edge voice short_name
   speed: 1.0,
   emotion: "normal",
+  outputFolder: "",      // Auto-save audio sau khi generate (Electron only). Empty = không tự lưu
 };
 
 export function loadTTSSettings() {
