@@ -69,7 +69,13 @@ async def enqueue_and_wait(
                 continue
             step = event.get("step")
             if step == "done":
-                return event.get("result") or {}
+                # Handler đôi khi gọi progress_cb(step="done") để báo finish nội
+                # bộ, nhưng worker mới là người emit "done" cuối cùng có 'result'.
+                # Bỏ qua done event không có result để tránh trả về {} sớm.
+                result = event.get("result")
+                if result:
+                    return result
+                continue
             if step == "error":
                 raise ValueError(event.get("error") or "Xử lý thất bại.")
             if step == "canceled":

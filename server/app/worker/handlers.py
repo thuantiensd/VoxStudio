@@ -133,7 +133,8 @@ async def stt_handler(payload: dict, *, job_id: str, progress_cb) -> dict:
     except Exception:
         pass
 
-    await progress_cb(step="done", progress=100)
+    # KHÔNG dùng step="done" — worker emit "done" cuối cùng kèm result.
+    await progress_cb(progress=100, step="finalizing")
     # Trả đúng shape mà endpoint /stt/transcribe đang return
     return {
         "text": result.get("text", ""),
@@ -187,7 +188,10 @@ async def tts_handler(payload: dict, *, job_id: str, progress_cb) -> dict:
         payload.get("postprocess_output"),
         payload.get("audio_chunk_duration"),
     )
-    await progress_cb(step="done", progress=100)
+    # KHÔNG gọi progress_cb(step="done") ở đây — worker._process_one sẽ emit
+    # "done" cuối cùng kèm 'result' sau khi handler return. Nếu handler tự emit
+    # "done" thì subscriber sẽ thấy event "done" rỗng trước, trả về {} sớm.
+    await progress_cb(progress=100, step="finalizing")
     # Merge usage vào result (giữ shape cũ: audio_url, duration, sample_rate)
     return {
         **result,
