@@ -30,9 +30,12 @@ async def _ensure_user_columns(db: AsyncSession):
     """Thêm các cột mới vào bảng users nếu chưa có."""
     existing = await _columns_of(db, "users")
     additions = {
-        "role":           "VARCHAR(16) NOT NULL DEFAULT 'user'",
-        "is_banned":      "BOOLEAN NOT NULL DEFAULT 0",
-        "last_active_at": "DATETIME",
+        "role":             "VARCHAR(16) NOT NULL DEFAULT 'user'",
+        "is_banned":        "BOOLEAN NOT NULL DEFAULT 0",
+        "last_active_at":   "DATETIME",
+        "email_verified":   "BOOLEAN NOT NULL DEFAULT 0",
+        "verify_token":     "VARCHAR(64)",
+        "verify_sent_at":   "DATETIME",
     }
     for col, ddl in additions.items():
         if col not in existing:
@@ -41,6 +44,23 @@ async def _ensure_user_columns(db: AsyncSession):
                 logger.info("Added column users.%s", col)
             except Exception as e:
                 logger.warning("Could not add column users.%s: %s", col, e)
+    await db.commit()
+
+
+async def _ensure_voice_columns(db: AsyncSession):
+    """Thêm cột consent vào voices nếu chưa có."""
+    existing = await _columns_of(db, "voices")
+    additions = {
+        "consent_at": "DATETIME",
+        "consent_ip": "VARCHAR(45)",
+    }
+    for col, ddl in additions.items():
+        if col not in existing:
+            try:
+                await db.execute(text(f"ALTER TABLE voices ADD COLUMN {col} {ddl}"))
+                logger.info("Added column voices.%s", col)
+            except Exception as e:
+                logger.warning("Could not add column voices.%s: %s", col, e)
     await db.commit()
 
 
@@ -216,12 +236,65 @@ async def _backfill_voices(db: AsyncSession):
         logger.info("Backfilled %d voices to user id=%d", added, owner.id)
 
 
+# ── Migrate voices từ flat layout sang per-user folder ─────────
+
+async def _migrate_voices_to_user_folders(db: AsyncSession):
+    """Idempotent: file `.pt/.json/.wav` ở `voices/` root → `voices/<user_id>/`.
+    Look up user_id từ DB voices table. Voice không có DB row → để nguyên
+    (sẽ được _backfill_voices tạo row sau, lần migration tới sẽ pick up).
+    """
+    from app.db.models import Voice
+    from app.config import VOICES_DIR
+    from sqlalchemy import select
+
+    if not VOICES_DIR.exists():
+        return
+
+    # Map voice_id → user_id từ DB (1 query)
+    rows = (await db.execute(select(Voice.id, Voice.user_id))).all()
+    owner_map = {vid: uid for vid, uid in rows}
+    if not owner_map:
+        return
+
+    moved = 0
+    for f in list(VOICES_DIR.iterdir()):
+        if not f.is_file():
+            continue
+        # Match <voice_id>.<ext>
+        if "." not in f.name:
+            continue
+        voice_id, _, ext = f.name.partition(".")
+        if ext not in ("pt", "json", "wav"):
+            continue
+        owner = owner_map.get(voice_id)
+        if owner is None:
+            continue  # voice không có owner → bỏ, _backfill_voices xử lý sau
+        dest_dir = VOICES_DIR / str(owner)
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        dest = dest_dir / f.name
+        if dest.exists():
+            # Đã có ở user folder → xoá flat (duplicate)
+            try: f.unlink()
+            except Exception: pass
+            continue
+        try:
+            f.rename(dest)
+            moved += 1
+        except Exception as e:
+            logger.warning("migrate voice file %s failed: %s", f.name, e)
+    if moved:
+        logger.info("Migrated %d voice file(s) to per-user folders", moved)
+
+
 # ── Public entrypoint ─────────────────────────────────────────
 
 async def run_migrations():
     """Gọi từ app.main startup sau init_db()."""
     async with AsyncSessionLocal() as db:
         await _ensure_user_columns(db)
+        await _ensure_voice_columns(db)
         await _seed_plans(db)
         await _promote_admins(db)
         await _backfill_voices(db)
+        # Migrate phải chạy SAU _backfill_voices vì cần DB rows để lookup owner
+        await _migrate_voices_to_user_folders(db)

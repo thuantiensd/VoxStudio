@@ -13,7 +13,9 @@ from app.db.models import User
 from app.auth.passwords import hash_password, verify_password
 from app.auth.jwt_tokens import create_token
 from app.auth.deps import get_current_user
-from app.services import audit_svc, plan_svc, usage_svc, feature_flag_svc
+from app.services import audit_svc, plan_svc, usage_svc, feature_flag_svc, email_svc
+import os
+import secrets
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/auth", tags=["Auth"])
@@ -61,6 +63,8 @@ async def register(
     total_users = await db.scalar(select(User.id).limit(1))
     role = "admin" if total_users is None else "user"
 
+    # Token verify (admin auto-verified)
+    verify_token = None if role == "admin" else secrets.token_urlsafe(32)
     user = User(
         email=body.email.lower().strip(),
         password_hash=hash_password(body.password),
@@ -68,6 +72,9 @@ async def register(
         plan="free",
         role=role,
         last_active_at=datetime.utcnow(),
+        email_verified=(role == "admin"),
+        verify_token=verify_token,
+        verify_sent_at=datetime.utcnow() if verify_token else None,
     )
     db.add(user)
     await db.commit()
@@ -80,6 +87,17 @@ async def register(
         user_agent=request.headers.get("user-agent"),
         metadata={"initial_role": role},
     )
+
+    # Send verification email (non-blocking — không fail register nếu SMTP down)
+    if verify_token:
+        app_url = os.environ.get("APP_BASE_URL", "https://voxstudio.app").rstrip("/")
+        verify_url = f"{app_url}/api/v1/auth/verify?token={verify_token}"
+        subject, html, txt = email_svc.verification_email(user.name, verify_url)
+        try:
+            await email_svc.send_email(user.email, subject, html, txt)
+        except Exception as e:
+            logger.warning("Send verification email failed: %s", e)
+
     return {"token": token, "user": user.public_dict()}
 
 
@@ -151,6 +169,98 @@ async def me(
     }
 
 
+@router.get("/verify")
+async def verify_email(
+    token: str,
+    request: Request,
+    db: AsyncSession = Depends(get_session),
+):
+    """User bấm link trong email → mark verified. Trả HTML đơn giản
+    (không cần frontend vì user mở từ email client)."""
+    if not token:
+        raise HTTPException(400, "Thiếu token.")
+    user = await db.scalar(select(User).where(User.verify_token == token))
+    if not user:
+        return _verify_html_response(False,
+            "Link không hợp lệ hoặc đã hết hạn. Vui lòng yêu cầu gửi lại email xác thực.")
+
+    # Token có hiệu lực 24h
+    if user.verify_sent_at:
+        age = (datetime.utcnow() - user.verify_sent_at).total_seconds()
+        if age > 24 * 3600:
+            return _verify_html_response(False,
+                "Link đã hết hạn (>24 giờ). Vui lòng yêu cầu gửi lại email xác thực.")
+
+    user.email_verified = True
+    user.verify_token = None
+    user.verify_sent_at = None
+    await db.commit()
+    await audit_svc.log(
+        db, user_id=user.id, action="email_verified",
+        ip=_client_ip(request),
+    )
+    logger.info("Email verified: %s", user.email)
+    return _verify_html_response(True,
+        "Xác thực thành công! Bạn có thể quay lại app và bắt đầu dùng.")
+
+
+def _verify_html_response(ok: bool, message: str):
+    """Trả 1 trang HTML tối giản — user mở từ email."""
+    from fastapi.responses import HTMLResponse
+    color = "#22c55e" if ok else "#ef4444"
+    icon = "✓" if ok else "✗"
+    title = "Xác thực email" + (" thành công" if ok else " thất bại")
+    html = f"""<!DOCTYPE html>
+<html lang="vi"><head><meta charset="utf-8"><title>{title}</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  body {{ font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+         display: flex; align-items: center; justify-content: center;
+         min-height: 100vh; margin: 0; background: #f9fafb; padding: 20px; }}
+  .card {{ background: #fff; border-radius: 12px; padding: 40px;
+          box-shadow: 0 4px 24px rgba(0,0,0,0.08); max-width: 420px; text-align: center; }}
+  .icon {{ width: 64px; height: 64px; border-radius: 50%; background: {color}1a;
+          color: {color}; display: inline-flex; align-items: center; justify-content: center;
+          font-size: 32px; font-weight: 700; margin-bottom: 20px; }}
+  h1 {{ margin: 0 0 12px; font-size: 22px; color: #111827; }}
+  p {{ margin: 0; color: #4b5563; line-height: 1.55; }}
+</style></head><body>
+  <div class="card">
+    <div class="icon">{icon}</div>
+    <h1>{title}</h1>
+    <p>{message}</p>
+  </div>
+</body></html>"""
+    return HTMLResponse(html, status_code=200 if ok else 400)
+
+
+@router.post("/resend-verification")
+async def resend_verification(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_session),
+):
+    """User chưa verify → gửi lại email. Rate limit: 1 lần / 60 giây."""
+    if user.email_verified:
+        return {"ok": True, "already_verified": True}
+    if user.verify_sent_at:
+        age = (datetime.utcnow() - user.verify_sent_at).total_seconds()
+        if age < 60:
+            wait = int(60 - age)
+            raise HTTPException(429, f"Vui lòng đợi {wait}s rồi thử lại.")
+
+    user.verify_token = secrets.token_urlsafe(32)
+    user.verify_sent_at = datetime.utcnow()
+    await db.commit()
+
+    app_url = os.environ.get("APP_BASE_URL", "https://voxstudio.app").rstrip("/")
+    verify_url = f"{app_url}/api/v1/auth/verify?token={user.verify_token}"
+    subject, html, txt = email_svc.verification_email(user.name, verify_url)
+    sent = await email_svc.send_email(user.email, subject, html, txt)
+    if not sent:
+        raise HTTPException(503, "Không gửi được email lúc này. Vui lòng thử lại sau.")
+    return {"ok": True}
+
+
 @router.post("/logout")
 async def logout(
     request: Request,
@@ -161,4 +271,52 @@ async def logout(
         db, user_id=user.id, action="logout",
         ip=_client_ip(request),
     )
+    return {"ok": True}
+
+
+class DeleteAccountRequest(BaseModel):
+    password: str = Field(min_length=1, max_length=128,
+                          description="Mật khẩu hiện tại để xác nhận")
+
+
+@router.delete("/me")
+async def delete_account(
+    body: DeleteAccountRequest,
+    request: Request,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_session),
+):
+    """Hard-delete tài khoản user hiện tại + dữ liệu liên quan.
+
+    Cảnh báo: KHÔNG có grace period — xoá ngay lập tức + không recover.
+    Frontend phải confirm 2 lớp + nhập lại password.
+
+    Wipe:
+    - File embedding voice (`voices/<user_id>/`)
+    - DB rows: User, Voice, UsageEvent, Job (cascade qua FK)
+    - AuditLog: user_id → NULL (giữ history nhưng anonymize)
+    """
+    # Xác minh password trước khi xoá (chống CSRF + lỡ tay)
+    if not verify_password(body.password, user.password_hash):
+        raise HTTPException(403, "Mật khẩu không đúng. Hãy thử lại.")
+
+    user_id = user.id
+    await audit_svc.log(
+        db, user_id=user_id, action="delete_account",
+        ip=_client_ip(request),
+    )
+
+    # Wipe voice files trên disk TRƯỚC khi xoá DB row (vì sau khi xoá
+    # user, ta vẫn cần biết folder nào để xoá — folder name là user_id).
+    try:
+        from app.core.storage import delete_user_voices
+        n = delete_user_voices(user_id)
+        logger.info("delete_account user=%d wiped %d voice files", user_id, n)
+    except Exception as e:
+        logger.warning("delete_account: voice file cleanup failed: %s", e)
+
+    # Cascade DELETE qua FK: Voice/UsageEvent/Job sẽ tự xoá. AuditLog SET NULL.
+    await db.delete(user)
+    await db.commit()
+    logger.info("delete_account: user %d deleted", user_id)
     return {"ok": True}

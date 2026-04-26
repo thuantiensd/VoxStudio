@@ -80,6 +80,7 @@ export default function VoiceClonePage() {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [savedName, setSavedName] = useState('');
+  const [consent, setConsent] = useState(false);
 
   const [error, setError] = useState('');
 
@@ -133,7 +134,7 @@ export default function VoiceClonePage() {
     setSaving(true);
     setError('');
     try {
-      await cloneVoice(file, name.trim(), refText);
+      await cloneVoice(file, name.trim(), refText, '', consent);
       setSaved(true);
       setSavedName(name.trim());
       setShowSave(false);
@@ -154,6 +155,7 @@ export default function VoiceClonePage() {
     setName('');
     setSaved(false);
     setSavedName('');
+    setConsent(false);
     setError('');
     setLanguage('');
     setSpeed(1.0);
@@ -365,8 +367,23 @@ export default function VoiceClonePage() {
                 className="w-full p-2.5 rounded-lg text-sm"
                 style={inputStyle}
                 autoFocus />
+
+              {/* Consent attestation — bắt buộc */}
+              <label className="flex items-start gap-2.5 p-3 rounded-lg cursor-pointer"
+                style={{
+                  background: consent ? 'rgba(124,92,255,0.10)' : 'rgba(255,255,255,0.03)',
+                  border: `1px solid ${consent ? 'var(--accent)' : '#2a2a40'}`,
+                }}>
+                <input type="checkbox" checked={consent}
+                  onChange={e => setConsent(e.target.checked)}
+                  style={{ accentColor: 'var(--accent)', marginTop: 3 }} />
+                <span className="text-xs leading-relaxed" style={{ color: 'var(--text-primary)' }}>
+                  {t('clone.consentLabel')}
+                </span>
+              </label>
+
               <div className="flex gap-2">
-                <button onClick={handleSave} disabled={saving || !name.trim()}
+                <button onClick={handleSave} disabled={saving || !name.trim() || !consent}
                   className="flex-1 py-2.5 rounded-lg font-medium text-sm flex items-center justify-center gap-2 disabled:opacity-40"
                   style={{ background: 'var(--accent)', color: '#fff' }}>
                   {saving ? <><Loader2 size={14} className="animate-spin" /> {t('common.saving')}</> : <><Save size={14} /> {t('clone.confirmSave')}</>}

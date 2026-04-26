@@ -330,6 +330,7 @@ export default {
     savedTitle: "Voice \"{name}\" saved!",
     savedReady: "Ready to use in TTS page",
     cloneAnother: "Clone Another",
+    consentLabel: "I confirm I have the right to use the voice in this sample — it's my own voice, or I have explicit permission from the speaker. I take legal responsibility for content generated with this cloned voice.",
   },
   downloader: {
     nav: "Download video",
@@ -487,7 +488,16 @@ export default {
       newPassword: "New password",
       changePassword: "Change password",
       deleteAccount: "Delete account",
-      deleteDesc: "Permanently delete your account and all data after 30 days.",
+      deleteDesc: "Permanently delete your account, voice clones, and all data — this cannot be undone.",
+      deleteConfirmTitle: "Delete this account?",
+      deleteConfirmBody: "This CANNOT be undone. Your voice clones, usage history, and all associated data will be wiped immediately.",
+      deletePasswordLabel: "Enter your password to confirm",
+      deletePasswordPlaceholder: "Current password",
+      deleteConfirmCheckbox: "I understand this cannot be undone",
+      deleteConfirmAction: "Delete forever",
+      deletingAccount: "Deleting account…",
+      deletedToast: "Account deleted. Goodbye.",
+      deleteFailedTitle: "Could not delete account",
     },
     billing: {
       currentPlan: "Current plan",
@@ -936,6 +946,18 @@ export default {
   },
   aria: {
     close: "Close",
+  },
+  verifyBanner: {
+    title: "Email not verified.",
+    body: "We sent a verification link to {email}. Check your inbox (and spam) — voice cloning and a few features require a verified email.",
+    resend: "Resend",
+    sent: "Sent verification to {email}. Check your inbox.",
+    sendFailed: "Could not send email",
+  },
+  legal: {
+    lastUpdated: "Last updated",
+    terms: { title: "Terms of Service" },
+    privacy: { title: "Privacy Policy" },
   },
   stt: {
     title: "Subtitles (STT)",

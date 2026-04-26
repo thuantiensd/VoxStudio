@@ -39,6 +39,21 @@ async def require_admin(
     return user
 
 
+async def require_verified(
+    user: User = Depends(get_current_user),
+) -> User:
+    """Dep: yêu cầu user đã xác thực email. Raise 403 với code 'unverified'
+    để frontend nhận diện + show banner / redirect verify flow."""
+    if user.is_banned:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Tài khoản đã bị khoá")
+    if not user.email_verified and user.role != "admin":
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "Vui lòng xác thực email trước khi dùng tính năng này.",
+        )
+    return user
+
+
 async def get_current_user_optional(
     request: Request,
     db: AsyncSession = Depends(get_session),

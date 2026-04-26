@@ -31,6 +31,11 @@ class User(Base):
     is_banned:       Mapped[bool] = mapped_column(Boolean, default=False)
     last_active_at:  Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
+    # Email verification
+    email_verified:  Mapped[bool] = mapped_column(Boolean, default=False)
+    verify_token:    Mapped[str | None] = mapped_column(String(64), nullable=True)
+    verify_sent_at:  Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
     created_at:    Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     def public_dict(self):
@@ -43,6 +48,7 @@ class User(Base):
             "plan": self.plan,
             "role": self.role,
             "is_banned": self.is_banned,
+            "email_verified": bool(self.email_verified),
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }
 
@@ -168,5 +174,12 @@ class Voice(Base):
     has_prompt: Mapped[bool] = mapped_column(Boolean, default=False)
     is_public:  Mapped[bool] = mapped_column(Boolean, default=False)
     # reserved cho feature "share giọng public" sau này
+
+    # Consent — user xác nhận có quyền dùng giọng nói trong ref audio.
+    # NULL = chưa attest (voice cũ trước migration). Ghi NOT NULL với value
+    # = thời điểm user tick checkbox + IP + user agent.
+    consent_at:    Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    consent_ip:    Mapped[str | None] = mapped_column(String(45), nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(
                   DateTime, default=datetime.utcnow, index=True)

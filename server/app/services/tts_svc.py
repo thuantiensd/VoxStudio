@@ -94,7 +94,7 @@ def generate(
     # ~0.3-0.5s đầu/cuối do voice prompt + padding generation. User cảm
     # giác audio "khởi động chậm" → cắt cho gọn, vẫn chừa 30ms đệm để
     # không bị clip mở miệng đầu câu.
-    waveform = _trim_silence(waveform, gpu.sampling_rate, threshold_db=-40, pad_ms=30)
+    waveform = trim_silence(waveform, gpu.sampling_rate, threshold_db=-40, pad_ms=30)
 
     file_id, file_path = save_audio(waveform, gpu.sampling_rate)
     duration = waveform.shape[-1] / gpu.sampling_rate
@@ -109,7 +109,7 @@ def generate(
     }
 
 
-def _trim_silence(waveform, sample_rate, threshold_db=-40, pad_ms=30):
+def trim_silence(waveform, sample_rate, threshold_db=-40, pad_ms=30):
     """Cắt khoảng lặng đầu + cuối waveform.
 
     waveform: torch.Tensor shape [..., T] (mono hoặc multi-ch). Trả về

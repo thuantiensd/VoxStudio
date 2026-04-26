@@ -140,11 +140,11 @@ export default function SignupPage() {
             <p className="text-xs text-center"
                style={{ color: "var(--text-secondary)" }}>
               {t("auth.signup.termsNotice")}{" "}
-              <a href="#" className="hover:underline" style={{ color: "var(--accent)" }}>
+              <a href="#/terms" className="hover:underline" style={{ color: "var(--accent)" }}>
                 {t("auth.signup.terms")}
               </a>{" "}
               {t("auth.signup.and")}{" "}
-              <a href="#" className="hover:underline" style={{ color: "var(--accent)" }}>
+              <a href="#/privacy" className="hover:underline" style={{ color: "var(--accent)" }}>
                 {t("auth.signup.privacy")}
               </a>
               .

@@ -330,6 +330,7 @@ export default {
     savedTitle: "Đã lưu giọng \"{name}\"",
     savedReady: "Sẵn sàng dùng ở trang TTS",
     cloneAnother: "Clone giọng khác",
+    consentLabel: "Tôi xác nhận có quyền sử dụng giọng nói trong audio mẫu — đây là giọng của tôi, hoặc tôi đã được người nói cho phép. Tôi chịu trách nhiệm pháp lý về nội dung tạo ra từ giọng clone này.",
   },
   downloader: {
     nav: "Tải video",
@@ -487,7 +488,16 @@ export default {
       newPassword: "Mật khẩu mới",
       changePassword: "Đổi mật khẩu",
       deleteAccount: "Xóa tài khoản",
-      deleteDesc: "Xóa vĩnh viễn tài khoản và tất cả dữ liệu sau 30 ngày.",
+      deleteDesc: "Xoá vĩnh viễn tài khoản, voice clone và toàn bộ dữ liệu — không thể hoàn tác.",
+      deleteConfirmTitle: "Xoá tài khoản này?",
+      deleteConfirmBody: "Hành động này KHÔNG thể hoàn tác. Voice clone, lịch sử dùng và toàn bộ dữ liệu của bạn sẽ bị xoá ngay.",
+      deletePasswordLabel: "Nhập mật khẩu để xác nhận",
+      deletePasswordPlaceholder: "Mật khẩu hiện tại",
+      deleteConfirmCheckbox: "Tôi hiểu hành động này không thể hoàn tác",
+      deleteConfirmAction: "Xoá vĩnh viễn",
+      deletingAccount: "Đang xoá tài khoản…",
+      deletedToast: "Đã xoá tài khoản. Hẹn gặp lại bạn.",
+      deleteFailedTitle: "Không xoá được tài khoản",
     },
     billing: {
       currentPlan: "Gói hiện tại",
@@ -936,6 +946,18 @@ export default {
   },
   aria: {
     close: "Đóng",
+  },
+  verifyBanner: {
+    title: "Email chưa xác thực.",
+    body: "Chúng tôi đã gửi link xác thực tới {email}. Vui lòng kiểm tra hộp thư (cả Spam) — clone giọng và một số tính năng cần xác thực email.",
+    resend: "Gửi lại",
+    sent: "Đã gửi email tới {email}. Kiểm tra hộp thư.",
+    sendFailed: "Không gửi được email",
+  },
+  legal: {
+    lastUpdated: "Cập nhật lần cuối",
+    terms: { title: "Điều khoản dịch vụ" },
+    privacy: { title: "Chính sách bảo mật" },
   },
   stt: {
     title: "Phụ đề (STT)",

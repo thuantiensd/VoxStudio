@@ -63,14 +63,17 @@ async def clone(
     name: str,
     ref_text: str | None = None,
     tags: list | None = None,
+    consent_ip: str | None = None,
 ) -> dict:
     """Clone voice, gắn với user_id."""
     voice_id = uuid.uuid4().hex[:12]
     logger.info("Cloning voice '%s' (id=%s, user=%d) from %s",
                 name, voice_id, user_id, audio_path)
 
-    # 1) Save raw WAV (cho XTTS fallback)
-    ref_wav_path = VOICES_DIR / f"{voice_id}.wav"
+    # 1) Save raw WAV (cho XTTS fallback) — vào folder của user
+    user_voice_dir = VOICES_DIR / str(user_id)
+    user_voice_dir.mkdir(parents=True, exist_ok=True)
+    ref_wav_path = user_voice_dir / f"{voice_id}.wav"
     try:
         _copy_as_wav(audio_path, str(ref_wav_path))
     except Exception as e:
@@ -91,21 +94,32 @@ async def clone(
             ref_text = ""
 
     # 3) OmniVoice prompt (optional)
+    # Pre-process ref audio: trim silence + normalize → embedding học từ
+    # audio sạch, tránh giọng clone delay đầu câu khi sinh.
+    from app.services.audio_preprocess_svc import preprocess_ref_audio
+    import os as _os
+    clean_path = preprocess_ref_audio(audio_path)
     prompt = None
     try:
-        prompt = gpu.create_voice_prompt(ref_audio=audio_path, ref_text=ref_text or None)
+        prompt = gpu.create_voice_prompt(ref_audio=clean_path, ref_text=ref_text or None)
     except Exception as e:
         logger.warning("OmniVoice create_voice_prompt failed for %s: %s", voice_id, e)
+    finally:
+        if clean_path != audio_path:
+            try: _os.remove(clean_path)
+            except Exception: pass
 
-    # 4) Save files (giữ .json + .pt để tương thích code cũ đọc file)
+    # 4) Save files vào folder của user (.pt + .json)
     _save_voice_files(
         voice_id=voice_id, name=name,
         prompt=prompt,
         ref_text=ref_text or (prompt.ref_text if prompt and hasattr(prompt, "ref_text") else None),
         tags=tags,
+        owner_id=user_id,
     )
 
-    # 5) Insert DB row
+    # 5) Insert DB row — kèm consent metadata (timestamp + IP) làm proof
+    from datetime import datetime
     v = Voice(
         id=voice_id,
         user_id=user_id,
@@ -113,6 +127,8 @@ async def clone(
         ref_text=ref_text,
         tags_json=json.dumps(tags or [], ensure_ascii=False),
         has_prompt=prompt is not None,
+        consent_at=datetime.utcnow(),
+        consent_ip=consent_ip,
     )
     db.add(v)
     await db.commit()
@@ -149,13 +165,10 @@ async def remove(db: AsyncSession, voice_id: str, user_id: int,
         return False
     if not is_admin and v.user_id != user_id:
         raise ValueError("Bạn không có quyền xoá giọng này.")
-    # Xoá file (không raise nếu file không tồn tại)
+    # Xoá file (không raise nếu file không tồn tại). delete_voice mới đã
+    # tự xoá .pt + .json + .wav ở mọi vị trí (user folder + legacy flat).
     try:
-        _delete_voice_files(voice_id)
-        # Xoá thêm .wav (storage.delete_voice chỉ xoá .pt + .json)
-        wav_path = VOICES_DIR / f"{voice_id}.wav"
-        if wav_path.exists():
-            wav_path.unlink()
+        _delete_voice_files(voice_id, owner_id=v.user_id)
     except Exception as e:
         logger.warning("Delete files failed for %s: %s", voice_id, e)
     # Xoá DB row

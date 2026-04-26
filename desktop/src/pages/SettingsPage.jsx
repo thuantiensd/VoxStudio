@@ -9,7 +9,9 @@ import { useToast } from "../components/ui/Toast";
 import { useT, useI18n } from "../i18n/I18nContext";
 import { useAuth } from "../auth/AuthContext";
 import { useTheme } from "../theme/ThemeContext";
-import { checkHealth, listPlans, fetchMe } from "../services/api";
+import { checkHealth, listPlans, fetchMe, deleteAccount } from "../services/api";
+import Modal from "../components/ui/Modal";
+import { AlertTriangle } from "lucide-react";
 
 /**
  * Settings — Claude-style layout:
@@ -243,9 +245,29 @@ function GhostButton({ children, danger, ...rest }) {
 // ── Account ───────────────────────────────
 function AccountTab() {
   const t = useT();
-  const { user, updateUser } = useAuth();
+  const toast = useToast();
+  const { user, updateUser, logout } = useAuth();
   const [name, setName] = useState(user?.name || "");
   const [email, setEmail] = useState(user?.email || "");
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deletePassword, setDeletePassword] = useState("");
+  const [deleteAck, setDeleteAck] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  const onDelete = async () => {
+    if (!deleteAck || !deletePassword.trim() || deleting) return;
+    setDeleting(true);
+    try {
+      await deleteAccount(deletePassword);
+      toast.success(t("settings.account.deletedToast"));
+      // Logout client để clear local state + chuyển sang /login
+      try { await logout(); } catch { /* ignore */ }
+    } catch (e) {
+      toast.error(e?.message || "Error",
+                  { title: t("settings.account.deleteFailedTitle") });
+      setDeleting(false);
+    }
+  };
 
   return (
     <>
@@ -290,9 +312,80 @@ function AccountTab() {
       <Section title={t("settings.account.deleteAccount")}
                description={t("settings.account.deleteDesc")}>
         <Card>
-          <GhostButton danger>{t("settings.account.deleteAccount")}</GhostButton>
+          <GhostButton danger onClick={() => setConfirmDelete(true)}>
+            {t("settings.account.deleteAccount")}
+          </GhostButton>
         </Card>
       </Section>
+
+      <Modal
+        open={confirmDelete}
+        onClose={() => { if (!deleting) { setConfirmDelete(false); setDeletePassword(""); setDeleteAck(false); } }}
+        width={460}
+        title={null}
+        actions={
+          <>
+            <GhostButton onClick={() => { if (!deleting) { setConfirmDelete(false); setDeletePassword(""); setDeleteAck(false); } }}>
+              {t("common.cancel")}
+            </GhostButton>
+            <button
+              onClick={onDelete}
+              disabled={!deleteAck || !deletePassword.trim() || deleting}
+              style={{
+                height: 32, padding: "0 14px", borderRadius: 7,
+                background: "var(--err)", color: "#fff", border: "none",
+                fontSize: 13, fontWeight: 500, cursor: "pointer",
+                opacity: (!deleteAck || !deletePassword.trim() || deleting) ? 0.5 : 1,
+              }}
+            >
+              {deleting ? t("settings.account.deletingAccount") : t("settings.account.deleteConfirmAction")}
+            </button>
+          </>
+        }
+      >
+        <div style={{ display: "flex", gap: 14, alignItems: "flex-start", padding: "4px 2px" }}>
+          <div style={{
+            width: 40, height: 40, borderRadius: "50%",
+            background: "rgba(239,68,68,0.12)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            flexShrink: 0,
+          }}>
+            <AlertTriangle size={18} style={{ color: "var(--err)" }} />
+          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 15, fontWeight: 600, color: "var(--n-10)", marginBottom: 6 }}>
+              {t("settings.account.deleteConfirmTitle")}
+            </div>
+            <div style={{ fontSize: 12.5, color: "var(--n-8)", lineHeight: 1.55, marginBottom: 14 }}>
+              {t("settings.account.deleteConfirmBody")}
+            </div>
+            <Field label={t("settings.account.deletePasswordLabel")}>
+              <TextInput
+                type="password"
+                value={deletePassword}
+                onChange={(e) => setDeletePassword(e.target.value)}
+                placeholder={t("settings.account.deletePasswordPlaceholder")}
+                disabled={deleting}
+                autoFocus
+              />
+            </Field>
+            <label style={{
+              display: "flex", alignItems: "center", gap: 8,
+              fontSize: 12, color: "var(--n-9)", marginTop: 10,
+              cursor: deleting ? "not-allowed" : "pointer",
+            }}>
+              <input
+                type="checkbox"
+                checked={deleteAck}
+                onChange={(e) => setDeleteAck(e.target.checked)}
+                disabled={deleting}
+                style={{ accentColor: "var(--err)" }}
+              />
+              <span>{t("settings.account.deleteConfirmCheckbox")}</span>
+            </label>
+          </div>
+        </div>
+      </Modal>
     </>
   );
 }

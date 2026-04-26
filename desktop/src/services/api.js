@@ -130,12 +130,13 @@ export async function previewVoice(audioFile, text, refText = '', params = {}) {
   return res.json();
 }
 
-export async function cloneVoice(audioFile, name, refText = '', tags = '') {
+export async function cloneVoice(audioFile, name, refText = '', tags = '', consent = false) {
   const form = new FormData();
   form.append('audio', audioFile);
   form.append('name', name);
   if (refText) form.append('ref_text', refText);
   if (tags) form.append('tags', tags);
+  form.append('consent', consent ? 'true' : 'false');
   const res = await request('/voices/clone', { method: 'POST', body: form });
   return res.json();
 }
@@ -153,6 +154,23 @@ export async function listPlans() {
 
 export async function fetchMe() {
   const res = await request('/auth/me');
+  return res.json();
+}
+
+/** Hard-delete tài khoản user hiện tại + voices folder + DB rows.
+ *  Yêu cầu password để xác nhận (chống CSRF / lỡ tay). */
+export async function deleteAccount(password) {
+  const res = await request('/auth/me', {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ password }),
+  });
+  return res.json();
+}
+
+/** Resend email verification — server rate limit 60s. */
+export async function resendVerificationEmail() {
+  const res = await request('/auth/resend-verification', { method: 'POST' });
   return res.json();
 }
 

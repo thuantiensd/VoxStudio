@@ -11,6 +11,8 @@ import STTPage from "./pages/STTPage";
 
 import LoginPage from "./auth/LoginPage";
 import SignupPage from "./auth/SignupPage";
+import TermsPage from "./pages/TermsPage";
+import PrivacyPage from "./pages/PrivacyPage";
 import { AuthProvider, useAuth } from "./auth/AuthContext";
 import { I18nProvider } from "./i18n/I18nContext";
 import { ThemeProvider } from "./theme/ThemeContext";
@@ -73,6 +75,8 @@ function UserScopedRoot() {
           <Routes>
             <Route path="/login"  element={<PublicOnlyRoute><LoginPage  /></PublicOnlyRoute>} />
             <Route path="/signup" element={<PublicOnlyRoute><SignupPage /></PublicOnlyRoute>} />
+            <Route path="/terms"   element={<TermsPage />} />
+            <Route path="/privacy" element={<PrivacyPage />} />
             <Route path="/*" element={<ProtectedRoute><Shell /></ProtectedRoute>} />
           </Routes>
         </UpgradeProvider>

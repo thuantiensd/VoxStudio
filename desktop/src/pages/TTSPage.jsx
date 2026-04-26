@@ -306,9 +306,6 @@ function SettingsPanel({ s }) {
         </div>
       )}
 
-      {/* Auto-save folder (Electron only) */}
-      <FolderPickerSection s={s} />
-
       {/* Speed knob */}
       <div className="flex flex-col items-center gap-3 mb-5 p-4 rounded-lg"
         style={{ background: 'var(--bg-card)', border: '1px solid #2a2a40' }}>
@@ -376,6 +373,9 @@ function SettingsPanel({ s }) {
           )}
         </>
       )}
+
+      {/* Auto-save folder (Electron only) — đặt cuối cùng vì là tuỳ chọn output */}
+      <FolderPickerSection s={s} />
     </>
   );
 }

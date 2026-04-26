@@ -19,6 +19,7 @@ from app.config import DUBBING_DIR, VOICES_DIR, TTS_DEFAULT_GUIDANCE, TTS_DEFAUL
 from app.core.gpu_manager import gpu
 from app.core.storage import load_voice
 from app.services import whisper_svc, translate_svc, llm_translate_svc, edge_tts_svc, vocal_separator_svc, gemini_translate_svc, diarize_svc, resemblyzer_diarize_svc
+from app.services.tts_svc import trim_silence
 
 logger = logging.getLogger(__name__)
 
@@ -885,6 +886,9 @@ def generate_segment(project_id: str, seg_id: str) -> dict:
                 kwargs["language"] = project["target_language"]
 
             waveform = gpu.generate_tts(tts_text, voice_prompt=voice_prompt, **kwargs)
+            # Cắt khoảng lặng đầu/cuối — quan trọng cho dubbing vì nếu TTS có
+            # 0.3s im đầu, voice sẽ delay so với mouth movement của video gốc.
+            waveform = trim_silence(waveform, gpu.sampling_rate, threshold_db=-40, pad_ms=30)
             sr = gpu.sampling_rate
             audio_np = waveform.cpu().numpy()
 
