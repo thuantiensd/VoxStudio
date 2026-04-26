@@ -3,6 +3,8 @@
 import logging
 import time
 
+import torch
+
 from app.config import TTS_DEFAULT_GUIDANCE, TTS_DEFAULT_STEPS
 from app.core.gpu_manager import gpu
 from app.core.storage import load_voice, save_audio
@@ -88,6 +90,12 @@ def generate(
 
     waveform = gpu.generate_tts(text, voice_prompt=voice_prompt, **kwargs)
 
+    # Trim leading/trailing silence — OmniVoice thường để khoảng lặng
+    # ~0.3-0.5s đầu/cuối do voice prompt + padding generation. User cảm
+    # giác audio "khởi động chậm" → cắt cho gọn, vẫn chừa 30ms đệm để
+    # không bị clip mở miệng đầu câu.
+    waveform = _trim_silence(waveform, gpu.sampling_rate, threshold_db=-40, pad_ms=30)
+
     file_id, file_path = save_audio(waveform, gpu.sampling_rate)
     duration = waveform.shape[-1] / gpu.sampling_rate
     elapsed = time.time() - t0
@@ -99,3 +107,36 @@ def generate(
         "duration": round(duration, 2),
         "sample_rate": gpu.sampling_rate,
     }
+
+
+def _trim_silence(waveform, sample_rate, threshold_db=-40, pad_ms=30):
+    """Cắt khoảng lặng đầu + cuối waveform.
+
+    waveform: torch.Tensor shape [..., T] (mono hoặc multi-ch). Trả về
+    cùng shape, đã trim. Threshold: -40 dB so với peak. Pad: giữ thêm
+    pad_ms ms ở mỗi đầu để không clip phụ âm/khẩu hình.
+    """
+    try:
+        if waveform is None or not isinstance(waveform, torch.Tensor):
+            return waveform
+        x = waveform
+        if x.dim() > 1:
+            mag = x.abs().mean(dim=tuple(range(x.dim() - 1)))
+        else:
+            mag = x.abs()
+        if mag.numel() == 0:
+            return waveform
+        peak = float(mag.max().item())
+        if peak <= 0:
+            return waveform
+        thresh = peak * (10 ** (threshold_db / 20.0))  # -40dB → peak * 0.01
+        nonsilent = (mag > thresh).nonzero(as_tuple=False).flatten()
+        if nonsilent.numel() == 0:
+            return waveform  # toàn bộ là silent — không động vào
+        pad = int(sample_rate * pad_ms / 1000)
+        start = max(0, int(nonsilent[0].item()) - pad)
+        end = min(mag.numel(), int(nonsilent[-1].item()) + pad + 1)
+        return x[..., start:end].contiguous()
+    except Exception as e:
+        logger.warning("trim_silence failed, returning original: %s", e)
+        return waveform
