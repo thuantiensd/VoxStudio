@@ -36,6 +36,10 @@ class User(Base):
     verify_token:    Mapped[str | None] = mapped_column(String(64), nullable=True)
     verify_sent_at:  Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
+    # Password reset
+    reset_token:     Mapped[str | None] = mapped_column(String(64), nullable=True)
+    reset_sent_at:   Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
     created_at:    Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     def public_dict(self):

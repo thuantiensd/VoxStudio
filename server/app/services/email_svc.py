@@ -76,16 +76,33 @@ async def send_email(to_email: str, subject: str,
 
 # ── Templates ────────────────────────────────────────
 
-def verification_email(name: str, verify_url: str) -> tuple[str, str, str]:
-    """Trả (subject, html, text) cho email xác thực."""
-    subject = "Xác thực email VoxStudio"
+def _otp_html_block(code: str) -> str:
+    """Block hiển thị OTP cỡ lớn — dùng chung cho verify + reset."""
+    return f"""
+  <div style="text-align: center; margin: 28px 0;">
+    <div style="display: inline-block; padding: 18px 28px;
+                background: linear-gradient(135deg, rgba(108,92,242,0.08), rgba(236,72,153,0.06));
+                border: 2px solid #6c5cf2; border-radius: 12px;">
+      <div style="font-family: 'SF Mono', Menlo, monospace; font-size: 32px;
+                  font-weight: 700; color: #6c5cf2; letter-spacing: 8px;">
+        {code}
+      </div>
+    </div>
+  </div>
+"""
+
+
+def verification_email(name: str, code: str) -> tuple[str, str, str]:
+    """Trả (subject, html, text) cho email OTP xác thực — 6 chữ số."""
+    subject = f"Mã xác thực VoxStudio: {code}"
     text = f"""Chào {name},
 
-Cảm ơn bạn đã đăng ký VoxStudio. Vui lòng xác thực email bằng cách bấm link sau:
+Mã xác thực email VoxStudio của bạn:
 
-{verify_url}
+    {code}
 
-Link có hiệu lực trong 24 giờ.
+Mã có hiệu lực trong 10 phút. Nhập mã này vào ứng dụng VoxStudio để hoàn
+tất đăng ký.
 
 Nếu bạn không đăng ký tài khoản này, vui lòng bỏ qua email này.
 
@@ -94,19 +111,54 @@ Nếu bạn không đăng ký tài khoản này, vui lòng bỏ qua email này.
     html = f"""\
 <!DOCTYPE html>
 <html><body style="font-family: -apple-system, sans-serif; max-width: 560px; margin: 0 auto; padding: 24px; color: #1f2937;">
-  <h2 style="margin: 0 0 16px; color: #6c5cf2;">Xác thực email VoxStudio</h2>
+  <h2 style="margin: 0 0 16px; color: #6c5cf2;">Xác thực email</h2>
   <p>Chào <b>{name}</b>,</p>
-  <p>Cảm ơn bạn đã đăng ký VoxStudio. Bấm nút bên dưới để xác thực email và bắt đầu sử dụng.</p>
-  <p style="text-align: center; margin: 28px 0;">
-    <a href="{verify_url}"
-       style="display: inline-block; padding: 12px 28px; background: linear-gradient(135deg, #6c5cf2, #ec4899); color: #fff; text-decoration: none; border-radius: 8px; font-weight: 600;">
-      Xác thực email
-    </a>
+  <p>Cảm ơn bạn đã đăng ký VoxStudio. Nhập mã sau vào ứng dụng để hoàn tất:</p>
+  {_otp_html_block(code)}
+  <p style="font-size: 12px; color: #6b7280; text-align: center;">
+    Mã có hiệu lực trong <b>10 phút</b>.
   </p>
-  <p style="font-size: 12px; color: #6b7280;">Hoặc copy link này vào trình duyệt: <br>
-    <span style="word-break: break-all;">{verify_url}</span>
+  <p style="font-size: 12px; color: #6b7280;">
+    Nếu bạn không đăng ký tài khoản này, vui lòng bỏ qua email.
   </p>
-  <p style="font-size: 12px; color: #6b7280;">Link có hiệu lực trong 24 giờ. Nếu bạn không đăng ký tài khoản này, vui lòng bỏ qua email.</p>
+  <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 24px 0;">
+  <p style="font-size: 11px; color: #9ca3af;">— VoxStudio Team</p>
+</body></html>
+"""
+    return subject, html, text
+
+
+def password_reset_email(name: str, code: str) -> tuple[str, str, str]:
+    """Trả (subject, html, text) cho email OTP reset mật khẩu."""
+    subject = f"Mã đặt lại mật khẩu VoxStudio: {code}"
+    text = f"""Chào {name},
+
+Mã đặt lại mật khẩu của bạn:
+
+    {code}
+
+Mã có hiệu lực trong 10 phút. Nhập mã này vào ứng dụng VoxStudio để đặt
+mật khẩu mới.
+
+Nếu không phải bạn yêu cầu, vui lòng bỏ qua email — mật khẩu hiện tại
+vẫn còn hiệu lực.
+
+— VoxStudio
+"""
+    html = f"""\
+<!DOCTYPE html>
+<html><body style="font-family: -apple-system, sans-serif; max-width: 560px; margin: 0 auto; padding: 24px; color: #1f2937;">
+  <h2 style="margin: 0 0 16px; color: #6c5cf2;">Đặt lại mật khẩu</h2>
+  <p>Chào <b>{name}</b>,</p>
+  <p>Bạn vừa yêu cầu đặt lại mật khẩu VoxStudio. Nhập mã sau vào ứng dụng:</p>
+  {_otp_html_block(code)}
+  <p style="font-size: 12px; color: #6b7280; text-align: center;">
+    Mã có hiệu lực trong <b>10 phút</b>.
+  </p>
+  <p style="font-size: 12px; color: #6b7280;">
+    Nếu không phải bạn yêu cầu, vui lòng bỏ qua email — mật khẩu hiện tại
+    của bạn vẫn còn hiệu lực và an toàn.
+  </p>
   <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 24px 0;">
   <p style="font-size: 11px; color: #9ca3af;">— VoxStudio Team</p>
 </body></html>

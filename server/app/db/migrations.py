@@ -36,6 +36,8 @@ async def _ensure_user_columns(db: AsyncSession):
         "email_verified":   "BOOLEAN NOT NULL DEFAULT 0",
         "verify_token":     "VARCHAR(64)",
         "verify_sent_at":   "DATETIME",
+        "reset_token":      "VARCHAR(64)",
+        "reset_sent_at":    "DATETIME",
     }
     for col, ddl in additions.items():
         if col not in existing:

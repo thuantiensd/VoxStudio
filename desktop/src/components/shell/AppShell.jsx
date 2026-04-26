@@ -5,7 +5,6 @@ import { Upload as UploadIcon } from "lucide-react";
 import Sidebar from "./Sidebar";
 import Titlebar from "./Titlebar";
 import CommandPalette from "./CommandPalette";
-import EmailVerifyBanner from "../EmailVerifyBanner";
 import { useHotkeys } from "./useHotkeys";
 import { useT } from "../../i18n/I18nContext";
 
@@ -73,7 +72,6 @@ export default function AppShell({ children }) {
     <div className="flex flex-col h-screen overflow-hidden"
          style={{ background: "var(--n-0)", color: "var(--n-10)" }}>
       <Titlebar onOpenPalette={() => setPaletteOpen(true)} />
-      <EmailVerifyBanner />
       <div className="flex flex-1 overflow-hidden">
         <Sidebar />
         <main className="flex-1 overflow-hidden"

@@ -168,9 +168,51 @@ export async function deleteAccount(password) {
   return res.json();
 }
 
-/** Resend email verification — server rate limit 60s. */
+/** Resend email verification OTP — server rate limit 60s. */
 export async function resendVerificationEmail() {
   const res = await request('/auth/resend-verification', { method: 'POST' });
+  return res.json();
+}
+
+/** Submit OTP 6 chữ số để verify email. Trả {ok, user}. */
+export async function verifyEmailOtp(code) {
+  const res = await request('/auth/verify-otp', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ code }),
+  });
+  return res.json();
+}
+
+/** Reset password bằng OTP. Body: email + code 6 chữ số + new_password. */
+export async function resetPasswordWithOtp({ email, code, newPassword }) {
+  const res = await fetch(`${API_BASE}/auth/reset-password`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json',
+               'ngrok-skip-browser-warning': 'true' },
+    body: JSON.stringify({ email, code, new_password: newPassword }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new AppError(body?.detail || 'Network error', { status: res.status });
+  }
+  return res.json();
+}
+
+/** Forgot password — gửi email reset. KHÔNG yêu cầu auth. Server LUÔN
+ *  trả ok (chống email enumeration) nên FE không thể biết email có
+ *  tồn tại hay không. */
+export async function forgotPassword(email) {
+  const res = await fetch(`${API_BASE}/auth/forgot-password`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json',
+               'ngrok-skip-browser-warning': 'true' },
+    body: JSON.stringify({ email }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new AppError(body?.detail || 'Network error', { status: res.status });
+  }
   return res.json();
 }
 

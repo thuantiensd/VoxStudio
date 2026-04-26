@@ -63,8 +63,8 @@ async def register(
     total_users = await db.scalar(select(User.id).limit(1))
     role = "admin" if total_users is None else "user"
 
-    # Token verify (admin auto-verified)
-    verify_token = None if role == "admin" else secrets.token_urlsafe(32)
+    # OTP 6 chữ số (admin auto-verified, không cần OTP)
+    otp = None if role == "admin" else f"{secrets.randbelow(1000000):06d}"
     user = User(
         email=body.email.lower().strip(),
         password_hash=hash_password(body.password),
@@ -73,8 +73,8 @@ async def register(
         role=role,
         last_active_at=datetime.utcnow(),
         email_verified=(role == "admin"),
-        verify_token=verify_token,
-        verify_sent_at=datetime.utcnow() if verify_token else None,
+        verify_token=otp,
+        verify_sent_at=datetime.utcnow() if otp else None,
     )
     db.add(user)
     await db.commit()
@@ -88,11 +88,9 @@ async def register(
         metadata={"initial_role": role},
     )
 
-    # Send verification email (non-blocking — không fail register nếu SMTP down)
-    if verify_token:
-        app_url = os.environ.get("APP_BASE_URL", "https://voxstudio.app").rstrip("/")
-        verify_url = f"{app_url}/api/v1/auth/verify?token={verify_token}"
-        subject, html, txt = email_svc.verification_email(user.name, verify_url)
+    # Gửi OTP qua email (non-blocking — không fail register nếu SMTP down)
+    if otp:
+        subject, html, txt = email_svc.verification_email(user.name, otp)
         try:
             await email_svc.send_email(user.email, subject, html, txt)
         except Exception as e:
@@ -169,27 +167,38 @@ async def me(
     }
 
 
-@router.get("/verify")
-async def verify_email(
-    token: str,
+def _new_otp() -> str:
+    """6 chữ số ngẫu nhiên, không bias. Trả str đã pad zero."""
+    return f"{secrets.randbelow(1000000):06d}"
+
+
+class VerifyOtpRequest(BaseModel):
+    code: str = Field(min_length=6, max_length=6)
+
+
+@router.post("/verify-otp")
+async def verify_otp(
+    body: VerifyOtpRequest,
     request: Request,
+    user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_session),
 ):
-    """User bấm link trong email → mark verified. Trả HTML đơn giản
-    (không cần frontend vì user mở từ email client)."""
-    if not token:
-        raise HTTPException(400, "Thiếu token.")
-    user = await db.scalar(select(User).where(User.verify_token == token))
-    if not user:
-        return _verify_html_response(False,
-            "Link không hợp lệ hoặc đã hết hạn. Vui lòng yêu cầu gửi lại email xác thực.")
+    """User submit OTP 6 chữ số từ app. Trả {ok: true} + user (đã verified)."""
+    if user.email_verified:
+        return {"ok": True, "user": user.public_dict()}
 
-    # Token có hiệu lực 24h
+    code = (body.code or "").strip()
+    if not code.isdigit() or len(code) != 6:
+        raise HTTPException(400, "Mã OTP phải là 6 chữ số.")
+
+    if not user.verify_token or user.verify_token != code:
+        raise HTTPException(400, "Mã OTP không đúng. Hãy thử lại hoặc yêu cầu mã mới.")
+
+    # OTP có hiệu lực 10 phút
     if user.verify_sent_at:
         age = (datetime.utcnow() - user.verify_sent_at).total_seconds()
-        if age > 24 * 3600:
-            return _verify_html_response(False,
-                "Link đã hết hạn (>24 giờ). Vui lòng yêu cầu gửi lại email xác thực.")
+        if age > 10 * 60:
+            raise HTTPException(400, "Mã OTP đã hết hạn (>10 phút). Hãy yêu cầu mã mới.")
 
     user.email_verified = True
     user.verify_token = None
@@ -199,39 +208,8 @@ async def verify_email(
         db, user_id=user.id, action="email_verified",
         ip=_client_ip(request),
     )
-    logger.info("Email verified: %s", user.email)
-    return _verify_html_response(True,
-        "Xác thực thành công! Bạn có thể quay lại app và bắt đầu dùng.")
-
-
-def _verify_html_response(ok: bool, message: str):
-    """Trả 1 trang HTML tối giản — user mở từ email."""
-    from fastapi.responses import HTMLResponse
-    color = "#22c55e" if ok else "#ef4444"
-    icon = "✓" if ok else "✗"
-    title = "Xác thực email" + (" thành công" if ok else " thất bại")
-    html = f"""<!DOCTYPE html>
-<html lang="vi"><head><meta charset="utf-8"><title>{title}</title>
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<style>
-  body {{ font-family: -apple-system, BlinkMacSystemFont, sans-serif;
-         display: flex; align-items: center; justify-content: center;
-         min-height: 100vh; margin: 0; background: #f9fafb; padding: 20px; }}
-  .card {{ background: #fff; border-radius: 12px; padding: 40px;
-          box-shadow: 0 4px 24px rgba(0,0,0,0.08); max-width: 420px; text-align: center; }}
-  .icon {{ width: 64px; height: 64px; border-radius: 50%; background: {color}1a;
-          color: {color}; display: inline-flex; align-items: center; justify-content: center;
-          font-size: 32px; font-weight: 700; margin-bottom: 20px; }}
-  h1 {{ margin: 0 0 12px; font-size: 22px; color: #111827; }}
-  p {{ margin: 0; color: #4b5563; line-height: 1.55; }}
-</style></head><body>
-  <div class="card">
-    <div class="icon">{icon}</div>
-    <h1>{title}</h1>
-    <p>{message}</p>
-  </div>
-</body></html>"""
-    return HTMLResponse(html, status_code=200 if ok else 400)
+    logger.info("Email verified via OTP: %s", user.email)
+    return {"ok": True, "user": user.public_dict()}
 
 
 @router.post("/resend-verification")
@@ -248,16 +226,99 @@ async def resend_verification(
             wait = int(60 - age)
             raise HTTPException(429, f"Vui lòng đợi {wait}s rồi thử lại.")
 
-    user.verify_token = secrets.token_urlsafe(32)
+    user.verify_token = _new_otp()
     user.verify_sent_at = datetime.utcnow()
     await db.commit()
 
-    app_url = os.environ.get("APP_BASE_URL", "https://voxstudio.app").rstrip("/")
-    verify_url = f"{app_url}/api/v1/auth/verify?token={user.verify_token}"
-    subject, html, txt = email_svc.verification_email(user.name, verify_url)
+    subject, html, txt = email_svc.verification_email(user.name, user.verify_token)
     sent = await email_svc.send_email(user.email, subject, html, txt)
     if not sent:
         raise HTTPException(503, "Không gửi được email lúc này. Vui lòng thử lại sau.")
+    return {"ok": True}
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+
+
+@router.post("/forgot-password")
+async def forgot_password(
+    body: ForgotPasswordRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_session),
+):
+    """Gửi email reset password. KHÔNG báo email tồn tại hay không (để
+    chống enumeration). Luôn trả {ok: true}."""
+    user = await db.scalar(
+        select(User).where(User.email == body.email.lower().strip())
+    )
+    if user and not user.is_banned:
+        # Rate limit: 60s/email
+        if user.reset_sent_at:
+            age = (datetime.utcnow() - user.reset_sent_at).total_seconds()
+            if age < 60:
+                # Vẫn trả ok nhưng không gửi email lại
+                return {"ok": True}
+
+        user.reset_token = _new_otp()
+        user.reset_sent_at = datetime.utcnow()
+        await db.commit()
+
+        subject, html, txt = email_svc.password_reset_email(user.name, user.reset_token)
+        try:
+            await email_svc.send_email(user.email, subject, html, txt)
+            await audit_svc.log(
+                db, user_id=user.id, action="forgot_password_requested",
+                ip=_client_ip(request),
+            )
+        except Exception as e:
+            logger.warning("Send reset email failed: %s", e)
+    else:
+        # Email không tồn tại → vẫn trả ok (chống user enumeration)
+        logger.info("forgot-password for unknown email: %s", body.email)
+
+    return {"ok": True}
+
+
+class ResetPasswordOtpRequest(BaseModel):
+    email: EmailStr
+    code: str = Field(min_length=6, max_length=6)
+    new_password: str = Field(min_length=8, max_length=128)
+
+
+@router.post("/reset-password")
+async def reset_password_submit(
+    body: ResetPasswordOtpRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_session),
+):
+    """Verify OTP + email match → update password_hash. Tránh leak nên
+    cùng error message cho mọi trường hợp invalid."""
+    user = await db.scalar(
+        select(User).where(User.email == body.email.lower().strip())
+    )
+    bad_msg = "Mã không đúng hoặc đã hết hạn. Hãy yêu cầu mã mới."
+    if not user or not user.reset_token:
+        raise HTTPException(400, bad_msg)
+
+    code = (body.code or "").strip()
+    if not code.isdigit() or len(code) != 6 or user.reset_token != code:
+        raise HTTPException(400, bad_msg)
+
+    if user.reset_sent_at:
+        age = (datetime.utcnow() - user.reset_sent_at).total_seconds()
+        if age > 10 * 60:
+            raise HTTPException(400, bad_msg)
+
+    user.password_hash = hash_password(body.new_password)
+    user.reset_token = None
+    user.reset_sent_at = None
+    await db.commit()
+    await audit_svc.log(
+        db, user_id=user.id, action="password_reset",
+        ip=_client_ip(request),
+    )
+    logger.info("Password reset for user %d", user.id)
     return {"ok": True}
 
 

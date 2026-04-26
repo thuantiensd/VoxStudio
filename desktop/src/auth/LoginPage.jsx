@@ -1,9 +1,11 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Loader2 } from "lucide-react";
+import { Loader2, Mail, X, Check } from "lucide-react";
 import logoUrl from "../assets/logo.svg";
 import { useAuth } from "./AuthContext";
 import { useT } from "../i18n/I18nContext";
+import { forgotPassword, resetPasswordWithOtp } from "../services/api";
+import OtpInput from "../components/ui/OtpInput";
 
 export default function LoginPage() {
   const t = useT();
@@ -13,6 +15,7 @@ export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
+  const [forgotOpen, setForgotOpen] = useState(false);
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -85,7 +88,8 @@ export default function LoginPage() {
                   {t("auth.login.passwordLabel")}
                 </label>
                 <button type="button" className="text-xs hover:underline"
-                        style={{ color: "var(--accent)" }}>
+                        style={{ color: "var(--accent)" }}
+                        onClick={() => setForgotOpen(true)}>
                   {t("auth.login.forgotPassword")}
                 </button>
               </div>
@@ -131,6 +135,215 @@ export default function LoginPage() {
             </Link>
           </div>
         </div>
+      </div>
+
+      <ForgotPasswordModal
+        open={forgotOpen}
+        onClose={() => setForgotOpen(false)}
+        defaultEmail={email}
+      />
+    </div>
+  );
+}
+
+/* ─── Forgot password — 3 step modal: email → OTP+newPw → done ─── */
+function ForgotPasswordModal({ open, onClose, defaultEmail }) {
+  const t = useT();
+  const [step, setStep] = useState("email");  // 'email' | 'reset' | 'done'
+  const [email, setEmail] = useState(defaultEmail || "");
+  const [code, setCode] = useState("");
+  const [newPw, setNewPw] = useState("");
+  const [newPw2, setNewPw2] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  if (!open) return null;
+
+  const close = () => {
+    if (busy) return;
+    setStep("email"); setEmail(defaultEmail || ""); setCode("");
+    setNewPw(""); setNewPw2(""); setError("");
+    onClose();
+  };
+
+  const submitEmail = async (e) => {
+    e.preventDefault();
+    if (!email.trim() || busy) return;
+    setBusy(true); setError("");
+    try {
+      await forgotPassword(email.trim());
+      setStep("reset");
+    } catch (err) {
+      setError(err?.message || "Error");
+    }
+    setBusy(false);
+  };
+
+  const submitReset = async (e) => {
+    e?.preventDefault?.();
+    if (busy) return;
+    if (code.length !== 6) { setError(t("forgotPw.errCodeLen")); return; }
+    if (newPw.length < 8) { setError(t("forgotPw.errPwShort")); return; }
+    if (newPw !== newPw2) { setError(t("forgotPw.errPwMismatch")); return; }
+    setBusy(true); setError("");
+    try {
+      await resetPasswordWithOtp({ email: email.trim(), code, newPassword: newPw });
+      setStep("done");
+    } catch (err) {
+      setError(err?.message || "Error");
+    }
+    setBusy(false);
+  };
+
+  const inputStyle = {
+    width: "100%", boxSizing: "border-box",
+    padding: "10px 12px", borderRadius: 7,
+    background: "var(--bg-surface, #0f0f1e)",
+    border: "1px solid #2a2a40",
+    color: "var(--text-primary, #fff)", fontSize: 13,
+    marginBottom: 10,
+  };
+  const primaryBtn = {
+    width: "100%", padding: "10px", borderRadius: 8,
+    background: "var(--accent)", color: "#fff", border: "none",
+    fontSize: 13, fontWeight: 600, cursor: busy ? "wait" : "pointer",
+    display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6,
+    opacity: busy ? 0.6 : 1,
+  };
+
+  return (
+    <div
+      onClick={(e) => { if (e.target === e.currentTarget) close(); }}
+      style={{
+        position: "fixed", inset: 0, zIndex: 200,
+        background: "rgba(0,0,0,0.5)", backdropFilter: "blur(4px)",
+        display: "flex", alignItems: "center", justifyContent: "center", padding: 24,
+      }}
+    >
+      <div style={{
+        width: "100%", maxWidth: 460,
+        background: "var(--bg-card, #1a1a2e)",
+        border: "1px solid #2a2a40",
+        borderRadius: 12, padding: 28,
+        boxShadow: "0 20px 60px rgba(0,0,0,0.5)",
+      }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+          <h2 style={{ margin: 0, fontSize: 17, fontWeight: 700, color: "var(--text-primary, #fff)" }}>
+            {step === "done" ? t("forgotPw.doneTitle") : t("forgotPw.title")}
+          </h2>
+          <button onClick={close} disabled={busy}
+            style={{ background: "transparent", border: "none", cursor: "pointer",
+                     color: "var(--text-secondary, #888)", padding: 4 }}>
+            <X size={16} />
+          </button>
+        </div>
+
+        {step === "email" && (
+          <form onSubmit={submitEmail}>
+            <p style={{ fontSize: 13, lineHeight: 1.55,
+                        color: "var(--text-secondary, #888)", margin: "0 0 16px" }}>
+              {t("forgotPw.body")}
+            </p>
+            <input
+              type="email" required autoFocus
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder={t("auth.login.emailPlaceholder")}
+              style={inputStyle}
+            />
+            {error && (
+              <div style={{ fontSize: 12, color: "var(--danger, #ef4444)", marginBottom: 10 }}>
+                {error}
+              </div>
+            )}
+            <button type="submit" disabled={busy || !email.trim()} style={primaryBtn}>
+              {busy && <Loader2 size={14} className="animate-spin" />}
+              {t("forgotPw.send")}
+            </button>
+          </form>
+        )}
+
+        {step === "reset" && (
+          <form onSubmit={submitReset}>
+            <p style={{ fontSize: 13, lineHeight: 1.55,
+                        color: "var(--text-secondary, #888)", margin: "0 0 6px" }}>
+              {t("forgotPw.codeBody", { email })}
+            </p>
+            <p style={{ fontSize: 11.5, color: "var(--text-secondary, #888)", margin: "0 0 14px" }}>
+              {t("forgotPw.spamHint")}
+            </p>
+
+            <OtpInput
+              value={code}
+              onChange={setCode}
+              autoFocus
+              disabled={busy}
+            />
+
+            <div style={{ marginTop: 16 }}>
+              <input
+                type="password" minLength={8} required
+                value={newPw}
+                onChange={(e) => setNewPw(e.target.value)}
+                placeholder={t("forgotPw.newPwPlaceholder")}
+                style={inputStyle}
+              />
+              <input
+                type="password" minLength={8} required
+                value={newPw2}
+                onChange={(e) => setNewPw2(e.target.value)}
+                placeholder={t("forgotPw.confirmPwPlaceholder")}
+                style={inputStyle}
+              />
+            </div>
+
+            {error && (
+              <div style={{ fontSize: 12, color: "var(--danger, #ef4444)", marginBottom: 10 }}>
+                {error}
+              </div>
+            )}
+            <button type="submit"
+              disabled={busy || code.length !== 6 || !newPw || !newPw2}
+              style={primaryBtn}>
+              {busy && <Loader2 size={14} className="animate-spin" />}
+              {t("forgotPw.resetBtn")}
+            </button>
+            <button type="button"
+              onClick={() => { setStep("email"); setError(""); }}
+              disabled={busy}
+              style={{
+                width: "100%", padding: "8px", marginTop: 8,
+                background: "transparent", color: "var(--text-secondary, #888)",
+                border: "none", fontSize: 12, cursor: "pointer",
+              }}>
+              ← {t("forgotPw.backEmail")}
+            </button>
+          </form>
+        )}
+
+        {step === "done" && (
+          <div style={{ textAlign: "center", padding: "8px 4px" }}>
+            <div style={{
+              width: 56, height: 56, borderRadius: "50%",
+              background: "rgba(34,197,94,0.15)", color: "#22c55e",
+              display: "inline-flex", alignItems: "center", justifyContent: "center",
+              marginBottom: 14,
+            }}>
+              <Check size={24} />
+            </div>
+            <p style={{ fontSize: 14, fontWeight: 600,
+                        color: "var(--text-primary, #fff)", margin: "0 0 6px" }}>
+              {t("forgotPw.doneTitle")}
+            </p>
+            <p style={{ fontSize: 12.5, lineHeight: 1.55,
+                        color: "var(--text-secondary, #888)", margin: "0 0 18px" }}>
+              {t("forgotPw.doneBody")}
+            </p>
+            <button onClick={close} style={primaryBtn}>
+              {t("forgotPw.backToLogin")}
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );

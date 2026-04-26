@@ -13,6 +13,7 @@ import LoginPage from "./auth/LoginPage";
 import SignupPage from "./auth/SignupPage";
 import TermsPage from "./pages/TermsPage";
 import PrivacyPage from "./pages/PrivacyPage";
+import VerifyPendingPage from "./pages/VerifyPendingPage";
 import { AuthProvider, useAuth } from "./auth/AuthContext";
 import { I18nProvider } from "./i18n/I18nContext";
 import { ThemeProvider } from "./theme/ThemeContext";
@@ -46,8 +47,12 @@ function Shell() {
  * ProtectedRoute — bắt buộc đăng nhập. Chưa auth thì redirect về /login.
  */
 function ProtectedRoute({ children }) {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, user } = useAuth();
   if (!isAuthenticated) return <Navigate to="/login" replace />;
+  // Hard gate: bắt buộc verify email trước khi vào app (admin auto-verify)
+  if (user && !user.email_verified && user.role !== "admin") {
+    return <VerifyPendingPage />;
+  }
   return children;
 }
 

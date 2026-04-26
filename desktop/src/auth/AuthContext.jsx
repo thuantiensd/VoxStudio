@@ -144,6 +144,29 @@ export function AuthProvider({ children }) {
     [],
   );
 
+  /** Re-fetch /auth/me và merge user object — dùng khi user vừa verify
+   *  email, đổi mật khẩu, hoặc cần resync account state từ server. */
+  const refreshUser = useCallback(async () => {
+    if (!auth?.token) return null;
+    try {
+      const res = await fetch(`${SERVER_URL}/api/v1/auth/me`, {
+        headers: {
+          Authorization: `Bearer ${auth.token}`,
+          "ngrok-skip-browser-warning": "true",
+        },
+      });
+      if (!res.ok) return null;
+      const data = await res.json();
+      if (data?.user) {
+        const next = { ...auth, user: data.user };
+        writeStored(next);
+        setAuth(next);
+        return data.user;
+      }
+    } catch {}
+    return null;
+  }, [auth]);
+
   return (
     <AuthContext.Provider
       value={{
@@ -155,6 +178,7 @@ export function AuthProvider({ children }) {
         signup,
         logout,
         updateUser,
+        refreshUser,
       }}
     >
       {children}
