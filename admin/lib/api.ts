@@ -112,6 +112,14 @@ export async function updateUser(id: number, patch: {
   });
 }
 
+export async function banUser(id: number) {
+  return api<any>(`/admin/users/${id}`, { method: "DELETE" });
+}
+
+export async function purgeUser(id: number) {
+  return api<any>(`/admin/users/${id}/purge?confirm=DELETE`, { method: "DELETE" });
+}
+
 export async function fetchAudit(params: {
   user_id?: number; action?: string; page?: number; per_page?: number;
 } = {}) {

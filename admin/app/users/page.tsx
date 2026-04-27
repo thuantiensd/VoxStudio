@@ -1,8 +1,8 @@
 "use client";
 import { useEffect, useState } from "react";
-import { Search, Ban, ShieldCheck, Loader2, ChevronLeft, ChevronRight } from "lucide-react";
+import { Search, Ban, ShieldCheck, Loader2, ChevronLeft, ChevronRight, Trash2, AlertTriangle } from "lucide-react";
 import Shell from "@/components/Shell";
-import { fetchUsers, updateUser } from "@/lib/api";
+import { fetchUsers, updateUser, purgeUser } from "@/lib/api";
 
 export default function UsersPage() {
   const [data, setData] = useState<any>(null);
@@ -12,6 +12,7 @@ export default function UsersPage() {
   const [banned, setBanned] = useState<"" | "only" | "hide">("");
   const [page, setPage] = useState(1);
   const [editing, setEditing] = useState<any | null>(null);
+  const [purging, setPurging] = useState<any | null>(null);
 
   async function load() {
     setLoading(true);
@@ -117,11 +118,18 @@ export default function UsersPage() {
                       <td className="p-3 text-muted text-xs">
                         {u.created_at ? new Date(u.created_at).toLocaleDateString("vi-VN") : ""}
                       </td>
-                      <td className="p-3 text-right">
+                      <td className="p-3 text-right whitespace-nowrap">
                         <button onClick={() => setEditing(u)}
-                                className="text-xs text-accent hover:underline">
+                                className="text-xs text-accent hover:underline mr-3">
                           Sửa
                         </button>
+                        {u.role !== "admin" && (
+                          <button onClick={() => setPurging(u)}
+                                  title="Xoá vĩnh viễn"
+                                  className="inline-flex items-center gap-1 text-xs text-red-400 hover:text-red-300 hover:underline">
+                            <Trash2 size={11} /> Xoá
+                          </button>
+                        )}
                       </td>
                     </tr>
                   ))}
@@ -158,6 +166,14 @@ export default function UsersPage() {
             user={editing}
             onClose={() => setEditing(null)}
             onSaved={() => { setEditing(null); load(); }}
+          />
+        )}
+
+        {purging && (
+          <PurgeModal
+            user={purging}
+            onClose={() => setPurging(null)}
+            onPurged={() => { setPurging(null); load(); }}
           />
         )}
       </div>
@@ -242,6 +258,110 @@ function Field({ label, children }: any) {
     <div className="mb-3">
       <div className="text-xs text-muted mb-1">{label}</div>
       {children}
+    </div>
+  );
+}
+
+function PurgeModal({ user, onClose, onPurged }: any) {
+  const [confirmText, setConfirmText] = useState("");
+  const [working, setWorking] = useState(false);
+  const [error, setError] = useState("");
+
+  const canSubmit = confirmText === "DELETE";
+
+  async function doPurge() {
+    setWorking(true);
+    setError("");
+    try {
+      await purgeUser(user.id);
+      onPurged();
+    } catch (e: any) {
+      setError(e?.detail || e?.message || "Lỗi xoá");
+    } finally {
+      setWorking(false);
+    }
+  }
+
+  return (
+    <div onClick={() => !working && onClose()}
+         className="fixed inset-0 bg-black/60 backdrop-blur flex items-center justify-center z-50 p-4">
+      <div onClick={(e) => e.stopPropagation()}
+           className="w-full max-w-md bg-surface border border-border rounded-xl p-5">
+        <div className="flex items-center gap-2.5 mb-4">
+          <div className="w-9 h-9 rounded-lg bg-red-500/15 text-red-400 flex items-center justify-center">
+            <AlertTriangle size={18} />
+          </div>
+          <div>
+            <div className="text-base font-semibold">Xoá user vĩnh viễn?</div>
+            <div className="text-xs text-muted">Hành động không thể hoàn tác</div>
+          </div>
+        </div>
+
+        <div className="bg-bg/50 border border-border rounded-md p-3 mb-3 text-xs space-y-1.5">
+          <div className="flex gap-2">
+            <span className="w-16 text-muted flex-shrink-0">Email</span>
+            <span className="font-medium truncate">{user.email}</span>
+          </div>
+          <div className="flex gap-2">
+            <span className="w-16 text-muted flex-shrink-0">Tên</span>
+            <span>{user.name || "—"}</span>
+          </div>
+          <div className="flex gap-2">
+            <span className="w-16 text-muted flex-shrink-0">Gói</span>
+            <span className="capitalize">{user.plan}</span>
+          </div>
+          <div className="flex gap-2">
+            <span className="w-16 text-muted flex-shrink-0">ID</span>
+            <span className="font-mono">{user.id}</span>
+          </div>
+        </div>
+
+        <div className="text-xs text-muted leading-relaxed mb-3">
+          Sẽ <b className="text-fg">xoá vĩnh viễn</b>:
+          <ul className="list-disc ml-5 mt-1 space-y-0.5">
+            <li>Tài khoản user trong DB</li>
+            <li>Mọi giao dịch thanh toán của user</li>
+            <li>Voice clones + file embedding trên server</li>
+            <li>Lịch sử jobs, usage events</li>
+          </ul>
+          <div className="mt-2 text-yellow-500/90">
+            Audit log sẽ giữ lại (ẩn danh user_id).
+          </div>
+        </div>
+
+        <div className="mb-3">
+          <label className="block text-xs text-muted mb-1.5">
+            Gõ <code className="px-1 py-0.5 rounded bg-red-500/15 text-red-400 font-mono">DELETE</code> để xác nhận
+          </label>
+          <input
+            value={confirmText}
+            onChange={(e) => setConfirmText(e.target.value)}
+            placeholder="DELETE"
+            disabled={working}
+            className="w-full h-9 px-3 text-sm bg-bg border border-border rounded-md font-mono
+                       focus:outline-none focus:border-red-500/50 disabled:opacity-50"
+          />
+        </div>
+
+        {error && (
+          <div className="mb-3 px-3 py-2 rounded text-xs bg-red-500/15 text-red-400 border border-red-500/30">
+            {error}
+          </div>
+        )}
+
+        <div className="flex gap-2">
+          <button onClick={onClose} disabled={working}
+                  className="flex-1 h-9 border border-border rounded-md text-sm hover:bg-white/5 disabled:opacity-40">
+            Huỷ
+          </button>
+          <button onClick={doPurge} disabled={!canSubmit || working}
+                  className="flex-1 h-9 rounded-md text-sm font-semibold bg-red-600 hover:bg-red-500 text-white
+                             disabled:opacity-40 inline-flex items-center justify-center gap-1.5">
+            {working ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
+            Xoá vĩnh viễn
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

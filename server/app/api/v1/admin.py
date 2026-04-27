@@ -272,6 +272,7 @@ async def soft_delete_user(
     admin: User = Depends(require_admin),
     db: AsyncSession = Depends(get_session),
 ):
+    """Soft-delete: ban user (set is_banned=True). Data còn nguyên, có thể unban."""
     user = await db.get(User, user_id)
     if not user:
         raise HTTPException(404, "User không tồn tại")
@@ -284,6 +285,58 @@ async def soft_delete_user(
         target_type="user", target_id=str(user_id),
     )
     return {"ok": True}
+
+
+@router.delete("/users/{user_id}/purge")
+async def purge_user(
+    user_id: int,
+    confirm: str = Query("", description='Phải = "DELETE" để xác nhận'),
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_session),
+):
+    """Hard-delete: xoá vĩnh viễn user + cascade Payment/Voice/Job/UsageEvent
+    + xoá voices folder. KHÔNG HOÀN TÁC ĐƯỢC.
+
+    Frontend phải bắt admin gõ "DELETE" vào ô input để confirm.
+    """
+    if confirm != "DELETE":
+        raise HTTPException(
+            400,
+            'Phải gửi tham số confirm="DELETE" để xác nhận xoá vĩnh viễn.',
+        )
+    user = await db.get(User, user_id)
+    if not user:
+        raise HTTPException(404, "User không tồn tại")
+    if user.id == admin.id:
+        raise HTTPException(400, "Không thể xoá chính bạn")
+    if user.role == "admin":
+        raise HTTPException(
+            400,
+            "Không thể xoá admin khác. Demote về role=user trước rồi mới xoá.",
+        )
+
+    user_email = user.email  # save trước khi xoá để log
+
+    # Wipe voices folder của user
+    try:
+        from app.core.storage import delete_user_voices
+        n = delete_user_voices(user_id)
+        logger.info("admin_purge_user=%d wiped %d voice files", user_id, n)
+    except Exception as e:
+        logger.warning("admin_purge_user: voice cleanup failed: %s", e)
+
+    # Cascade DELETE qua FK: Payment/Voice/Job/UsageEvent tự xoá. AuditLog SET NULL.
+    await db.delete(user)
+    await db.commit()
+
+    await audit_svc.log(
+        db, user_id=admin.id, action="admin_purge_user",
+        target_type="user", target_id=str(user_id),
+        metadata={"email": user_email},
+    )
+    logger.info("admin_purge_user: user %d (%s) purged by admin %d",
+                user_id, user_email, admin.id)
+    return {"ok": True, "deleted_email": user_email}
 
 
 # ── Audit log ──────────────────────────────────────────────
