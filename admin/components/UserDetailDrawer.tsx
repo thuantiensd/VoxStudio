@@ -158,12 +158,6 @@ export function UserDetailDrawer({
                   <Row label="Email" value={data.user.email} mono />
                   <Row label="Tên" value={data.user.name || "—"} />
                   <Row label="Gói hiện tại" value={<PlanBadge plan={data.user.plan} />} />
-                  {data.user.plan_expires_at && (
-                    <Row
-                      label="Hết hạn"
-                      value={new Date(data.user.plan_expires_at).toLocaleString("vi-VN")}
-                    />
-                  )}
                   <Row label="Role" value={<RoleBadge role={data.user.role} />} />
                   <Row
                     label="Email verified"
