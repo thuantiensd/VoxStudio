@@ -54,6 +54,8 @@ class User(Base):
             "is_banned": self.is_banned,
             "email_verified": bool(self.email_verified),
             "created_at": self.created_at.isoformat() if self.created_at else None,
+            "last_active_at": self.last_active_at.isoformat() if self.last_active_at else None,
+            "plan_expires_at": self.plan_expires_at.isoformat() if self.plan_expires_at else None,
         }
 
 

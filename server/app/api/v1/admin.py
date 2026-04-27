@@ -191,9 +191,29 @@ async def get_user_detail(
         select(Job).where(Job.user_id == user_id)
         .order_by(Job.created_at.desc()).limit(20)
     )).scalars().all()
+    # Payments của user
+    from app.db.models import Payment
+    payments = (await db.execute(
+        select(Payment).where(Payment.user_id == user_id)
+        .order_by(Payment.created_at.desc()).limit(50)
+    )).scalars().all()
+    total_spent_vnd = sum(
+        (p.amount_vnd or 0) for p in payments if p.status == "paid"
+    )
     return {
         "user": user.public_dict(),
         "usage_month": usage,
+        "total_spent_vnd": total_spent_vnd,
+        "payments": [
+            {
+                "ref_code": p.id, "plan_id": p.plan_id,
+                "amount_vnd": p.amount_vnd, "amount_usd": p.amount_usd,
+                "is_ltd": bool(p.is_ltd), "status": p.status,
+                "note": p.note,
+                "created_at": p.created_at.isoformat() if p.created_at else None,
+                "paid_at": p.paid_at.isoformat() if p.paid_at else None,
+            } for p in payments
+        ],
         "audit_recent": [
             {
                 "id": a.id, "action": a.action,
