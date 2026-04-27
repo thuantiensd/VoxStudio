@@ -23,8 +23,8 @@ from typing import Any
 from sqlalchemy import select, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import Payment, User
-from app.services import plan_svc
+from app.db.models import Payment, Plan, User
+from app.services import email_svc, plan_svc
 
 logger = logging.getLogger(__name__)
 
@@ -224,12 +224,11 @@ async def confirm_payment(
     if note:
         p.note = note
 
-    # Nếu là LTD, tăng slots_taken trên Plan
-    if p.is_ltd:
-        from app.db.models import Plan
-        plan_row = await db.get(Plan, p.plan_id)
-        if plan_row:
-            plan_row.ltd_slots_taken = (plan_row.ltd_slots_taken or 0) + 1
+    # Lấy plan_row để tăng slots LTD + lấy display name cho email
+    plan_row = await db.get(Plan, p.plan_id)
+    if p.is_ltd and plan_row:
+        plan_row.ltd_slots_taken = (plan_row.ltd_slots_taken or 0) + 1
+    plan_display_name = (plan_row.name if plan_row else p.plan_id).strip() or p.plan_id
 
     # Safety net: auto-huỷ mọi pending KHÁC của cùng user.
     # (`create_payment` đã chặn ở khâu checkout, đây là phòng cho dữ liệu cũ.)
@@ -250,6 +249,23 @@ async def confirm_payment(
     if cancelled_others:
         logger.info("Confirm %s → auto-cancelled %d other pending(s) of user=%d",
                     ref_code, cancelled_others, user.id)
+
+    # Gửi email xác nhận — fire-and-forget, không block response.
+    if user.email:
+        try:
+            import asyncio
+            subject, html, text = email_svc.payment_confirmed_email(
+                name=(user.name or user.email.split("@")[0]),
+                plan_name=plan_display_name,
+                ref_code=p.id,
+                amount_vnd=p.amount_vnd,
+                is_ltd=bool(p.is_ltd),
+            )
+            asyncio.create_task(
+                email_svc.send_email(user.email, subject, html, text)
+            )
+        except Exception as e:
+            logger.warning("Failed to dispatch payment-confirmed email: %s", e)
     logger.info("Payment confirmed: %s by admin=%d → user=%d plan=%s",
                 ref_code, admin_id, user.id, user.plan)
     return _to_dict(p)

@@ -1,0 +1,446 @@
+{
+  "brand": {
+    "name": "VoxStudio",
+    "tagline": "Lồng tiếng & dịch phụ đề chuyên nghiệp bằng AI"
+  },
+  "nav": {
+    "home": "Trang chủ",
+    "features": "Tính năng",
+    "pricing": "Bảng giá",
+    "download": "Tải xuống",
+    "contact": "Liên hệ",
+    "downloadCta": "Tải miễn phí",
+    "signIn": "Đăng nhập",
+    "signUp": "Đăng ký",
+    "account": "Tài khoản"
+  },
+  "auth": {
+    "signInTitle": "Đăng nhập VoxStudio",
+    "signInSubtitle": "Chào mừng trở lại — đăng nhập để xem trạng thái tài khoản và lịch sử thanh toán.",
+    "signUpTitle": "Tạo tài khoản",
+    "signUpSubtitle": "Đăng ký miễn phí trong 30 giây — dùng cùng tài khoản với app desktop.",
+    "name": "Họ tên",
+    "namePh": "Tên hiển thị",
+    "email": "Email",
+    "emailPh": "voxstudio.vn@gmail.com",
+    "password": "Mật khẩu",
+    "passwordPh": "Tối thiểu 8 ký tự",
+    "submitSignIn": "Đăng nhập",
+    "submitSignUp": "Đăng ký",
+    "haveAccount": "Đã có tài khoản?",
+    "noAccount": "Chưa có tài khoản?",
+    "forgot": "Quên mật khẩu?",
+    "or": "hoặc",
+    "verifyTitle": "Xác thực email",
+    "verifySubtitle": "Nhập mã 6 số đã gửi tới {email}.",
+    "verifyCode": "Mã xác thực",
+    "verifyCodePh": "______",
+    "verifyCta": "Xác thực",
+    "resend": "Gửi lại mã",
+    "resentOk": "Đã gửi lại mã.",
+    "forgotTitle": "Quên mật khẩu?",
+    "forgotSubtitle": "Nhập email — chúng tôi sẽ gửi mã đặt lại mật khẩu.",
+    "forgotCta": "Gửi mã",
+    "resetTitle": "Đặt lại mật khẩu",
+    "resetSubtitle": "Nhập mã đã gửi vào email + mật khẩu mới.",
+    "resetCta": "Cập nhật mật khẩu",
+    "newPassword": "Mật khẩu mới",
+    "logoutCta": "Đăng xuất",
+    "errInvalid": "Email hoặc mật khẩu không đúng.",
+    "errExists": "Email này đã được đăng ký.",
+    "errGeneric": "Đã xảy ra lỗi, vui lòng thử lại."
+  },
+  "account": {
+    "title": "Tài khoản của bạn",
+    "subtitle": "Quản lý gói dịch vụ và lịch sử thanh toán.",
+    "planTitle": "Gói hiện tại",
+    "planFree": "Bạn đang dùng gói miễn phí.",
+    "planActive": "Hết hạn: {date}",
+    "planLifetime": "Trọn đời — không hết hạn.",
+    "upgrade": "Nâng cấp gói",
+    "paymentsTitle": "Lịch sử thanh toán",
+    "noPayments": "Chưa có giao dịch nào.",
+    "viewQr": "Xem QR thanh toán",
+    "cancel": "Huỷ",
+    "statusPending": "Chờ xác nhận",
+    "statusPaid": "Đã thanh toán",
+    "statusCancelled": "Đã huỷ",
+    "verifyBanner": "Email chưa được xác thực — bạn cần xác thực để mua gói.",
+    "verifyAction": "Xác thực ngay"
+  },
+  "checkout": {
+    "title": "Thanh toán gói {plan}",
+    "creating": "Đang tạo mã giao dịch…",
+    "scanHint": "Quét QR bằng app banking hoặc nhập tay theo thông tin bên dưới.",
+    "bankName": "Ngân hàng",
+    "accountName": "Chủ tài khoản",
+    "accountNo": "Số tài khoản",
+    "amount": "Số tiền",
+    "refCode": "Mã giao dịch",
+    "important": "QUAN TRỌNG: phải ghi đúng mã \"{ref}\" trong nội dung chuyển khoản.",
+    "didTransfer": "Tôi đã chuyển khoản",
+    "afterHint": "Đội ngũ sẽ xác nhận trong vài phút đến vài giờ. Bạn có thể đóng trang này — quay lại bất kỳ lúc nào để xem trạng thái.",
+    "polling": "Đang chờ xác nhận…",
+    "confirmed": "✓ Đã xác nhận! Gói {plan} đã được kích hoạt.",
+    "errCheckout": "Không tạo được giao dịch. Vui lòng thử lại."
+  },
+  "landing": {
+    "hero": {
+      "badge": "AI dubbing · giữ nguyên cảm xúc",
+      "headline": "Lồng tiếng video chuyên nghiệp — chỉ vài phút",
+      "subheadline": "Phần mềm desktop AI dub video, clone giọng, dịch phụ đề. Chạy trực tiếp trên máy bạn — riêng tư, không upload, miễn phí dùng thử.",
+      "ctaPrimary": "Tải VoxStudio miễn phí",
+      "ctaSecondary": "Xem demo (90 giây)",
+      "platforms": "Cho macOS · Windows sắp ra mắt"
+    },
+    "trust": {
+      "title": "Tin dùng bởi creator Việt",
+      "stat1": "Lồng tiếng tự động",
+      "stat1Value": "10+ ngôn ngữ",
+      "stat2": "Voice clone từ",
+      "stat2Value": "3-5 giây",
+      "stat3": "Xử lý",
+      "stat3Value": "100% offline GPU",
+      "stat4": "Hỗ trợ video",
+      "stat4Value": "MP4/MOV/MKV"
+    },
+    "demo": {
+      "eyebrow": "Demo nhanh",
+      "title": "Từ video gốc tới phiên bản lồng tiếng — 4 bước",
+      "subtitle": "Drop video, chọn giọng, dịch & lồng tiếng, xuất file. Đơn giản như vậy.",
+      "watchLabel": "Demo · 90s",
+      "placeholder": "Video demo sẽ cập nhật sớm — bản chính sẽ có voice-over giới thiệu đầy đủ."
+    },
+    "features": {
+      "eyebrow": "Tính năng",
+      "title": "Mọi thứ bạn cần để lồng tiếng video",
+      "subtitle": "Một bộ công cụ tích hợp — không cần ghép nối nhiều phần mềm.",
+      "items": {
+        "dub": {
+          "title": "Auto Dub video",
+          "desc": "Tự động tách giọng gốc, dịch phụ đề, sinh giọng AI và mix lại với background music. Hỗ trợ Trung/Hàn/Nhật/Anh → Việt và ngược lại."
+        },
+        "voiceClone": {
+          "title": "Voice Clone 3 giây",
+          "desc": "Clone giọng bất kỳ chỉ với 3-5 giây audio mẫu. Lưu thư viện giọng riêng, dùng lại cho mọi project."
+        },
+        "subtitleEditor": {
+          "title": "Subtitle Editor trực quan",
+          "desc": "Sửa transcript + timing trên giao diện kéo thả. Xuất SRT/VTT hoặc burn-in trực tiếp vào video."
+        },
+        "stt": {
+          "title": "Speech-to-Text chính xác",
+          "desc": "Whisper-based STT, nhận diện đa ngôn ngữ với độ chính xác cao. Tự sửa thuật ngữ riêng theo từ điển bạn cấu hình."
+        },
+        "byok": {
+          "title": "BYOK — dùng API riêng",
+          "desc": "Cắm API key của bạn (OpenAI, Claude, Gemini, DeepL, Qwen, Google Cloud) cho dịch phụ đề chất lượng cao nhất, không phụ thuộc ai."
+        },
+        "topicGlossary": {
+          "title": "Topic hint + Glossary",
+          "desc": "Cho AI biết video về chủ đề gì + từ điển thuật ngữ — đặc biệt hữu ích cho game, công nghệ, y khoa, anime."
+        },
+        "batch": {
+          "title": "Batch & Queue",
+          "desc": "Đẩy 10+ video vào hàng đợi, xử lý qua đêm. Resume khi crash, không mất tiến độ."
+        },
+        "downloader": {
+          "title": "Tải video YouTube",
+          "desc": "Tải video từ YouTube/TikTok ngay trong app. Sạch sẽ, không quảng cáo, đầy đủ chất lượng."
+        },
+        "privacy": {
+          "title": "Riêng tư tuyệt đối",
+          "desc": "Xử lý ngay trên máy bạn — file gốc không bao giờ rời khỏi máy tính. Không telemetry mặc định."
+        }
+      }
+    },
+    "useCases": {
+      "eyebrow": "Dành cho ai",
+      "title": "VoxStudio phù hợp với bạn nếu...",
+      "items": {
+        "creator": {
+          "title": "Creator YouTube/TikTok",
+          "desc": "Reup nội dung quốc tế đã xin phép → tăng view tiếng Việt mà không cần thuê dub thủ công."
+        },
+        "edu": {
+          "title": "Giáo viên & học viện",
+          "desc": "Dịch khoá học, video bài giảng tiếng Anh sang tiếng Việt giữ nguyên giọng giảng viên."
+        },
+        "podcast": {
+          "title": "Podcaster & studio",
+          "desc": "Sản xuất phiên bản đa ngôn ngữ cho podcast, không cần thu lại."
+        },
+        "agency": {
+          "title": "Agency làm content quốc tế",
+          "desc": "Tự động hoá pipeline localize — giảm 90% thời gian so với quy trình thủ công."
+        }
+      }
+    },
+    "pricing": {
+      "eyebrow": "Bảng giá",
+      "title": "Bắt đầu miễn phí — nâng cấp khi cần",
+      "subtitle": "Hiển thị giá theo ngôn ngữ. Tỉ giá USD↔VND cập nhật theo thị trường.",
+      "perMonth": "/tháng",
+      "popular": "Phổ biến nhất",
+      "ltdLabel": "Trọn đời",
+      "free": {
+        "name": "Miễn phí",
+        "price": "0đ",
+        "desc": "Trải nghiệm đầy đủ, không cần thẻ",
+        "features": [
+          "Auto Dub video — tối đa 5 phút mỗi clip",
+          "Voice clone — 1 giọng",
+          "Tải video YouTube — 15 lượt/ngày",
+          "STT + Subtitle editor cơ bản",
+          "Hỗ trợ qua cộng đồng"
+        ],
+        "cta": "Tải miễn phí"
+      },
+      "pro": {
+        "name": "Pro",
+        "price": "$20",
+        "priceVnd": "520.000đ",
+        "desc": "Cho creator chuyên nghiệp",
+        "features": [
+          "Mọi thứ trong gói Miễn phí",
+          "Auto Dub không giới hạn thời lượng",
+          "Voice clone — 10 giọng",
+          "Tải YouTube/TikTok không giới hạn",
+          "Ưu tiên hàng đợi GPU",
+          "Hỗ trợ email — 24h"
+        ],
+        "cta": "Chọn Pro"
+      },
+      "studio": {
+        "name": "Studio",
+        "price": "$69",
+        "priceVnd": "1.794.000đ",
+        "desc": "Cho studio & agency",
+        "features": [
+          "Mọi thứ trong gói Pro",
+          "Voice clone không giới hạn",
+          "Batch dubbing 10+ video song song",
+          "BYOK đầy đủ engines",
+          "Topic hint + Glossary nâng cao",
+          "Hỗ trợ ưu tiên qua Zalo"
+        ],
+        "cta": "Chọn Studio"
+      },
+      "ltdHint": "Có ưu đãi mua trọn đời — xem chi tiết trong app sau khi cài đặt.",
+      "viewFull": "Xem bảng giá đầy đủ"
+    },
+    "faq": {
+      "eyebrow": "Câu hỏi thường gặp",
+      "title": "Bạn đang băn khoăn?",
+      "items": {
+        "q1": {
+          "q": "VoxStudio có miễn phí không?",
+          "a": "Có — gói Miễn phí cho phép dub video tối đa 5 phút/clip, 1 voice clone, 15 lượt tải video YouTube/ngày, không cần thẻ tín dụng. Đủ để bạn đánh giá chất lượng trước khi nâng cấp."
+        },
+        "q2": {
+          "q": "Phần mềm chạy trên máy hay cloud?",
+          "a": "Chạy trực tiếp trên máy bạn. File video gốc, voice clone không bao giờ upload lên server. Riêng phần dịch phụ đề có thể dùng API ngoài (BYOK) — bạn tự chọn nhà cung cấp."
+        },
+        "q3": {
+          "q": "Hỗ trợ những ngôn ngữ nào?",
+          "a": "Hiện hỗ trợ: Anh, Trung (giản thể/phồn thể), Nhật, Hàn, Việt cho cả nguồn và đích. Đầu vào video format MP4/MOV/MKV/AVI/WebM."
+        },
+        "q4": {
+          "q": "Cấu hình máy tối thiểu?",
+          "a": "macOS 12+ (Apple Silicon hoặc Intel), 8 GB RAM. Để xử lý nhanh: 16 GB RAM, máy có GPU rời. Bản Windows sẽ ra mắt sau."
+        },
+        "q5": {
+          "q": "Thanh toán bằng cách nào?",
+          "a": "Hiện tại nhận chuyển khoản ngân hàng nội địa Việt Nam — quét VietQR hoặc nhập tay. Sau khi chuyển, đội ngũ xác nhận trong vài phút đến vài giờ."
+        },
+        "q6": {
+          "q": "Có hoàn tiền không?",
+          "a": "Có — hoàn 100% trong vòng 7 ngày nếu bạn không hài lòng. Reply email biên lai để yêu cầu hoàn."
+        }
+      }
+    },
+    "cta": {
+      "title": "Sẵn sàng dub video chuyên nghiệp?",
+      "subtitle": "Tải miễn phí, không cần thẻ. Cài đặt 2 phút, xử lý ngay video đầu tiên trong 5 phút.",
+      "button": "Tải VoxStudio miễn phí",
+      "secondary": "Xem demo trước"
+    },
+    "footer": {
+      "tagline": "Lồng tiếng & dịch phụ đề chuyên nghiệp bằng AI — chạy trên máy bạn.",
+      "product": "Sản phẩm",
+      "company": "Công ty",
+      "support": "Hỗ trợ",
+      "legal": "Pháp lý",
+      "copyright": "© 2026 VoxStudio. Bảo lưu mọi quyền.",
+      "links": {
+        "features": "Tính năng",
+        "pricing": "Bảng giá",
+        "download": "Tải xuống",
+        "changelog": "Changelog",
+        "about": "Về chúng tôi",
+        "contact": "Liên hệ",
+        "blog": "Blog",
+        "faq": "FAQ",
+        "support": "Hỗ trợ kỹ thuật",
+        "terms": "Điều khoản dịch vụ",
+        "privacy": "Chính sách riêng tư"
+      }
+    }
+  },
+  "downloadPage": {
+    "eyebrow": "Tải xuống",
+    "title": "Cài đặt VoxStudio cho máy của bạn",
+    "subtitle": "Phiên bản mới nhất, miễn phí cho mọi cấu hình.",
+    "version": "Phiên bản",
+    "latest": "Mới nhất",
+    "macIntel": "macOS (Intel)",
+    "macArm": "macOS (Apple Silicon)",
+    "windows": "Windows",
+    "linux": "Linux",
+    "comingSoon": "Sắp ra mắt",
+    "downloadNow": "Tải ngay",
+    "size": "Dung lượng",
+    "released": "Phát hành",
+    "instructionsTitle": "Hướng dẫn cài đặt",
+    "instructions": {
+      "mac1": "Tải file .dmg → mở → kéo VoxStudio vào thư mục Applications.",
+      "mac2": "Lần đầu mở: chuột phải → Open (do bypass Gatekeeper — app chưa code-signed).",
+      "mac3": "Đăng ký tài khoản miễn phí trong app, nhập mã xác thực 6 số gửi qua email."
+    },
+    "systemReq": "Yêu cầu hệ thống",
+    "systemReqMac": "macOS 12 Monterey trở lên · 8 GB RAM tối thiểu · 4 GB ổ cứng trống",
+    "checksumTitle": "Tự kiểm tra checksum (tuỳ chọn)",
+    "checksumDesc": "Đảm bảo file tải về không bị thay đổi. Mở Terminal, chạy:"
+  },
+  "pricingPage": {
+    "title": "Bảng giá VoxStudio",
+    "subtitle": "Bắt đầu miễn phí, nâng cấp khi cần. Mọi gói đều bao gồm cập nhật miễn phí trọn đời.",
+    "compareTitle": "So sánh chi tiết",
+    "feature": "Tính năng",
+    "comparison": {
+      "dubLength": "Thời lượng Auto Dub mỗi clip",
+      "dubLengthFree": "5 phút",
+      "dubLengthPro": "Không giới hạn",
+      "dubLengthStudio": "Không giới hạn",
+      "voiceClones": "Số voice clone",
+      "voiceClonesFree": "1",
+      "voiceClonesPro": "10",
+      "voiceClonesStudio": "Không giới hạn",
+      "downloads": "Tải video YouTube/ngày",
+      "downloadsFree": "15",
+      "downloadsPro": "Không giới hạn",
+      "downloadsStudio": "Không giới hạn",
+      "batch": "Batch dubbing song song",
+      "batchFree": "—",
+      "batchPro": "3 video",
+      "batchStudio": "10+ video",
+      "byok": "BYOK API engines",
+      "byokFree": "Cơ bản",
+      "byokPro": "Đầy đủ",
+      "byokStudio": "Đầy đủ + advanced",
+      "support": "Hỗ trợ",
+      "supportFree": "Cộng đồng",
+      "supportPro": "Email 24h",
+      "supportStudio": "Zalo ưu tiên"
+    },
+    "ltdTitle": "Mua trọn đời (LTD)",
+    "ltdDesc": "Trả 1 lần, dùng mãi mãi — số lượng có hạn. Liên hệ để biết giá ưu đãi.",
+    "guaranteeTitle": "Cam kết hoàn tiền 7 ngày",
+    "guaranteeDesc": "Không hài lòng trong vòng 7 ngày? Reply email biên lai, hoàn 100%."
+  },
+  "contactPage": {
+    "title": "Liên hệ với chúng tôi",
+    "subtitle": "Có câu hỏi, đề xuất, hoặc vấn đề kỹ thuật? Chúng tôi phản hồi trong 24h.",
+    "channels": {
+      "emailTitle": "Email",
+      "emailValue": "voxstudio.vn@gmail.com",
+      "emailDesc": "Cách nhanh nhất để liên hệ. Phản hồi trong 24h ngày làm việc.",
+      "zaloTitle": "Zalo (gói trả phí)",
+      "zaloValue": "Sẽ cung cấp sau khi mua gói",
+      "zaloDesc": "Hỗ trợ ưu tiên cho khách hàng Pro/Studio.",
+      "githubTitle": "Báo lỗi & đóng góp",
+      "githubValue": "github.com/thuantiensd/VoxStudio",
+      "githubDesc": "Mở issue trên GitHub nếu phát hiện bug hoặc có đề xuất tính năng."
+    },
+    "businessTitle": "Hợp tác doanh nghiệp",
+    "businessDesc": "Cần custom enterprise, tích hợp API, đào tạo nhân sự? Email business@voxstudio.vn để nhận báo giá."
+  },
+  "termsPage": {
+    "title": "Điều khoản dịch vụ",
+    "lastUpdated": "Cập nhật lần cuối: 26/04/2026",
+    "intro": "Cảm ơn bạn đã sử dụng VoxStudio. Khi bạn cài đặt, đăng ký, hoặc sử dụng phần mềm VoxStudio (\"Dịch vụ\"), bạn đồng ý tuân thủ các điều khoản dưới đây.",
+    "sections": [
+      {
+        "title": "1. Tài khoản",
+        "body": "Bạn phải cung cấp email hợp lệ để xác thực. Bạn chịu trách nhiệm bảo mật tài khoản và mật khẩu của mình. Một tài khoản chỉ được dùng cho một cá nhân — không được chia sẻ."
+      },
+      {
+        "title": "2. Sử dụng dịch vụ",
+        "body": "Bạn cam kết chỉ dùng VoxStudio cho mục đích hợp pháp. Cấm sử dụng phần mềm để: tạo deepfake mạo danh người khác mà không có sự đồng thuận; sản xuất nội dung vi phạm bản quyền; quấy rối, lừa đảo, lan truyền thông tin sai lệch."
+      },
+      {
+        "title": "3. Bản quyền nội dung bạn xử lý",
+        "body": "Bạn giữ toàn bộ bản quyền với video, audio, voice clone bạn tạo và xử lý qua VoxStudio. Chúng tôi không lưu trữ hay yêu cầu bất kỳ license nào trên nội dung của bạn. Bạn chịu trách nhiệm xin phép bản quyền với nội dung gốc trước khi xử lý."
+      },
+      {
+        "title": "4. Voice Clone — sự đồng thuận",
+        "body": "Khi clone giọng người khác, bạn xác nhận đã có sự đồng thuận của người đó. Vi phạm có thể dẫn đến khoá tài khoản và trách nhiệm pháp lý."
+      },
+      {
+        "title": "5. Thanh toán & hoàn tiền",
+        "body": "Gói trả phí được kích hoạt sau khi đội ngũ xác nhận chuyển khoản (vài phút đến vài giờ). Bạn được hoàn tiền 100% trong 7 ngày kể từ lúc thanh toán nếu không hài lòng — chỉ cần reply email biên lai. Sau 7 ngày, gói tháng không hoàn (nhưng có thể huỷ tự động gia hạn). Gói trọn đời (LTD) hoàn 100% trong 14 ngày."
+      },
+      {
+        "title": "6. Giới hạn trách nhiệm",
+        "body": "VoxStudio cung cấp \"như hiện trạng\". Chúng tôi không chịu trách nhiệm với thiệt hại gián tiếp phát sinh từ việc dùng phần mềm. Trách nhiệm tối đa của chúng tôi giới hạn ở số tiền bạn đã thanh toán trong 12 tháng gần nhất."
+      },
+      {
+        "title": "7. Thay đổi điều khoản",
+        "body": "Chúng tôi có thể cập nhật các điều khoản này. Thay đổi quan trọng sẽ được thông báo qua email ít nhất 14 ngày trước khi có hiệu lực."
+      },
+      {
+        "title": "8. Liên hệ",
+        "body": "Mọi thắc mắc về điều khoản, vui lòng email voxstudio.vn@gmail.com."
+      }
+    ]
+  },
+  "privacyPage": {
+    "title": "Chính sách quyền riêng tư",
+    "lastUpdated": "Cập nhật lần cuối: 26/04/2026",
+    "intro": "VoxStudio cam kết bảo vệ quyền riêng tư của bạn. Tài liệu này giải thích chúng tôi thu thập, sử dụng và bảo vệ thông tin của bạn như thế nào.",
+    "sections": [
+      {
+        "title": "1. Thông tin chúng tôi thu thập",
+        "body": "Khi đăng ký: email, mật khẩu (đã hash), tên hiển thị. Khi sử dụng: thời gian dùng, gói đang dùng, lượt tải/dub (để tính quota). Chúng tôi KHÔNG thu thập: nội dung video, file audio, voice clone, transcript. Mọi xử lý này diễn ra trên máy bạn."
+      },
+      {
+        "title": "2. Cookies & telemetry",
+        "body": "App không bật telemetry mặc định. Trang web này dùng cookie kỹ thuật cần thiết (theme, ngôn ngữ). Không có ad tracking, không bán dữ liệu cho bên thứ ba."
+      },
+      {
+        "title": "3. BYOK — API key của bạn",
+        "body": "Khi bạn nhập API key (OpenAI, Claude, Gemini, ...) vào app, key được lưu MÃ HOÁ trên máy bạn. Không gửi về server VoxStudio. Khi dịch phụ đề, app gọi trực tiếp đến nhà cung cấp API mà bạn chọn."
+      },
+      {
+        "title": "4. Thanh toán",
+        "body": "Chúng tôi xử lý thanh toán qua chuyển khoản ngân hàng nội địa. Bạn cung cấp ref code trong nội dung chuyển khoản — chúng tôi đối chiếu thủ công. Chúng tôi KHÔNG lưu thông tin thẻ tín dụng."
+      },
+      {
+        "title": "5. Email",
+        "body": "Chúng tôi gửi email cho bạn để: xác thực tài khoản, đặt lại mật khẩu, xác nhận thanh toán, thông báo bảo trì quan trọng. Bạn không thể opt-out các email kỹ thuật này — đây là yêu cầu vận hành dịch vụ."
+      },
+      {
+        "title": "6. Lưu trữ & xoá",
+        "body": "Dữ liệu tài khoản lưu trên server đặt tại Việt Nam. Khi bạn xoá tài khoản (Settings → Tài khoản → Xoá vĩnh viễn), mọi dữ liệu cá nhân của bạn được xoá cứng trong vòng 30 ngày. Lịch sử thanh toán được giữ lại 5 năm theo yêu cầu kế toán."
+      },
+      {
+        "title": "7. Quyền của bạn",
+        "body": "Bạn có quyền: xem dữ liệu cá nhân, sửa thông tin, xoá tài khoản, khiếu nại với cơ quan bảo vệ dữ liệu. Liên hệ voxstudio.vn@gmail.com để thực hiện."
+      },
+      {
+        "title": "8. Trẻ em dưới 13",
+        "body": "VoxStudio không hướng tới người dùng dưới 13 tuổi. Nếu phát hiện chúng tôi đã thu thập dữ liệu của trẻ em mà không có sự đồng thuận của người giám hộ, vui lòng email để chúng tôi xoá ngay."
+      }
+    ]
+  }
+}

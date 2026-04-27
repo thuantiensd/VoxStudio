@@ -1,0 +1,398 @@
+{
+  "brand": {
+    "name": "VoxStudio",
+    "tagline": "Professional AI dubbing & subtitle translation"
+  },
+  "nav": {
+    "home": "Home",
+    "features": "Features",
+    "pricing": "Pricing",
+    "download": "Download",
+    "contact": "Contact",
+    "downloadCta": "Get the app",
+    "signIn": "Sign in",
+    "signUp": "Sign up",
+    "account": "Account"
+  },
+  "auth": {
+    "signInTitle": "Sign in to VoxStudio",
+    "signInSubtitle": "Welcome back — sign in to see your account status and payment history.",
+    "signUpTitle": "Create an account",
+    "signUpSubtitle": "Free signup in 30 seconds — same account as the desktop app.",
+    "name": "Name",
+    "namePh": "Display name",
+    "email": "Email",
+    "emailPh": "voxstudio.vn@gmail.com",
+    "password": "Password",
+    "passwordPh": "Min 8 characters",
+    "submitSignIn": "Sign in",
+    "submitSignUp": "Sign up",
+    "haveAccount": "Already have an account?",
+    "noAccount": "Don't have an account?",
+    "forgot": "Forgot password?",
+    "or": "or",
+    "verifyTitle": "Verify your email",
+    "verifySubtitle": "Enter the 6-digit code sent to {email}.",
+    "verifyCode": "Verification code",
+    "verifyCodePh": "______",
+    "verifyCta": "Verify",
+    "resend": "Resend code",
+    "resentOk": "Code resent.",
+    "forgotTitle": "Forgot password?",
+    "forgotSubtitle": "Enter your email — we'll send a reset code.",
+    "forgotCta": "Send code",
+    "resetTitle": "Reset password",
+    "resetSubtitle": "Enter the code from your email and a new password.",
+    "resetCta": "Update password",
+    "newPassword": "New password",
+    "logoutCta": "Sign out",
+    "errInvalid": "Wrong email or password.",
+    "errExists": "This email is already registered.",
+    "errGeneric": "Something went wrong, please try again."
+  },
+  "account": {
+    "title": "Your account",
+    "subtitle": "Manage your plan and payment history.",
+    "planTitle": "Current plan",
+    "planFree": "You're on the free plan.",
+    "planActive": "Expires: {date}",
+    "planLifetime": "Lifetime — never expires.",
+    "upgrade": "Upgrade plan",
+    "paymentsTitle": "Payment history",
+    "noPayments": "No transactions yet.",
+    "viewQr": "View payment QR",
+    "cancel": "Cancel",
+    "statusPending": "Pending review",
+    "statusPaid": "Paid",
+    "statusCancelled": "Cancelled",
+    "verifyBanner": "Email not verified — you need to verify before purchasing.",
+    "verifyAction": "Verify now"
+  },
+  "checkout": {
+    "title": "Checkout — {plan} plan",
+    "creating": "Creating payment…",
+    "scanHint": "Scan QR with your banking app or enter the details below manually.",
+    "bankName": "Bank",
+    "accountName": "Account holder",
+    "accountNo": "Account number",
+    "amount": "Amount",
+    "refCode": "Reference code",
+    "important": "IMPORTANT: include the exact code \"{ref}\" in the transfer memo.",
+    "didTransfer": "I've made the transfer",
+    "afterHint": "Our team will confirm within minutes to a few hours. You can close this page — come back anytime to check status.",
+    "polling": "Waiting for confirmation…",
+    "confirmed": "✓ Confirmed! Your {plan} plan is now active.",
+    "errCheckout": "Could not create payment. Please try again."
+  },
+  "landing": {
+    "hero": {
+      "badge": "AI dubbing · emotion-aware",
+      "headline": "Studio-grade video dubbing — in minutes",
+      "subheadline": "Desktop app for AI dubbing, voice cloning, subtitle translation. Runs locally on your machine — private, no uploads, free to try.",
+      "ctaPrimary": "Download for free",
+      "ctaSecondary": "Watch demo (90s)",
+      "platforms": "macOS available · Windows coming soon"
+    },
+    "trust": {
+      "title": "Built for serious creators",
+      "stat1": "Auto dubbing across",
+      "stat1Value": "10+ languages",
+      "stat2": "Voice clone from",
+      "stat2Value": "3-5 seconds",
+      "stat3": "Processing",
+      "stat3Value": "100% local GPU",
+      "stat4": "Video formats",
+      "stat4Value": "MP4/MOV/MKV"
+    },
+    "demo": {
+      "eyebrow": "Quick demo",
+      "title": "From source video to fully dubbed — 4 steps",
+      "subtitle": "Drop your video, pick a voice, translate & dub, export. That simple.",
+      "watchLabel": "Demo · 90s",
+      "placeholder": "Demo video coming soon — final cut will include a full voice-over walkthrough."
+    },
+    "features": {
+      "eyebrow": "Features",
+      "title": "Everything you need to dub video",
+      "subtitle": "An integrated toolkit — no need to chain multiple apps.",
+      "items": {
+        "dub": {
+          "title": "Auto Dub Video",
+          "desc": "Automatically separate original voice, translate subtitles, generate AI voice and remix with background music. Supports CN/KR/JP/EN ↔ Vietnamese."
+        },
+        "voiceClone": {
+          "title": "3-Second Voice Clone",
+          "desc": "Clone any voice with just 3-5 seconds of sample audio. Save your own voice library, reuse across projects."
+        },
+        "subtitleEditor": {
+          "title": "Visual Subtitle Editor",
+          "desc": "Edit transcript + timing on a drag-drop UI. Export SRT/VTT or burn-in directly into video."
+        },
+        "stt": {
+          "title": "Accurate Speech-to-Text",
+          "desc": "Whisper-based STT with multi-language detection and high accuracy. Auto-correct domain terms via your custom glossary."
+        },
+        "byok": {
+          "title": "BYOK — bring your own keys",
+          "desc": "Plug in your API keys (OpenAI, Claude, Gemini, DeepL, Qwen, Google Cloud) for top-tier subtitle translation — no vendor lock-in."
+        },
+        "topicGlossary": {
+          "title": "Topic hints + Glossary",
+          "desc": "Tell the AI the topic of your video plus a glossary of domain terms — ideal for gaming, tech, medical, anime."
+        },
+        "batch": {
+          "title": "Batch & Queue",
+          "desc": "Push 10+ videos into a queue, process overnight. Resume on crash — no lost progress."
+        },
+        "downloader": {
+          "title": "YouTube Downloader",
+          "desc": "Pull videos from YouTube/TikTok directly inside the app. Clean, ad-free, full quality."
+        },
+        "privacy": {
+          "title": "Private by design",
+          "desc": "Processing happens on your machine — your source files never leave the computer. No telemetry by default."
+        }
+      }
+    },
+    "useCases": {
+      "eyebrow": "Built for",
+      "title": "VoxStudio is for you if...",
+      "items": {
+        "creator": {
+          "title": "YouTube/TikTok creators",
+          "desc": "Re-upload licensed international content with localized voice — grow your audience without hiring dubbing studios."
+        },
+        "edu": {
+          "title": "Educators & academies",
+          "desc": "Translate online courses and lecture videos while keeping the lecturer's voice and emotion."
+        },
+        "podcast": {
+          "title": "Podcasters & studios",
+          "desc": "Produce multilingual editions of your show without re-recording sessions."
+        },
+        "agency": {
+          "title": "Localization agencies",
+          "desc": "Automate your localization pipeline — cut 90% of the time vs. manual workflow."
+        }
+      }
+    },
+    "pricing": {
+      "eyebrow": "Pricing",
+      "title": "Start free — upgrade when you need to",
+      "subtitle": "Prices shown in USD. Live USD↔VND conversion in-app.",
+      "perMonth": "/month",
+      "popular": "Most popular",
+      "ltdLabel": "Lifetime",
+      "free": {
+        "name": "Free",
+        "price": "$0",
+        "desc": "Full preview, no credit card",
+        "features": [
+          "Auto Dub — up to 5 minutes per clip",
+          "Voice clone — 1 voice",
+          "YouTube downloads — 15/day",
+          "STT + basic subtitle editor",
+          "Community support"
+        ],
+        "cta": "Download free"
+      },
+      "pro": {
+        "name": "Pro",
+        "price": "$20",
+        "priceVnd": "520,000₫",
+        "desc": "For professional creators",
+        "features": [
+          "Everything in Free",
+          "Auto Dub — unlimited length",
+          "Voice clone — 10 voices",
+          "Unlimited YouTube/TikTok downloads",
+          "Priority GPU queue",
+          "Email support — 24h"
+        ],
+        "cta": "Choose Pro"
+      },
+      "studio": {
+        "name": "Studio",
+        "price": "$69",
+        "priceVnd": "1,794,000₫",
+        "desc": "For studios & agencies",
+        "features": [
+          "Everything in Pro",
+          "Unlimited voice clones",
+          "Batch dubbing — 10+ in parallel",
+          "Full BYOK engines",
+          "Advanced topic hints + Glossary",
+          "Priority support via Zalo"
+        ],
+        "cta": "Choose Studio"
+      },
+      "ltdHint": "Lifetime deals available — see details inside the app after install.",
+      "viewFull": "See full comparison"
+    },
+    "faq": {
+      "eyebrow": "Frequently asked",
+      "title": "Got questions?",
+      "items": {
+        "q1": {
+          "q": "Is VoxStudio free?",
+          "a": "Yes — the Free tier lets you dub clips up to 5 min, 1 voice clone, 15 YouTube downloads/day. No credit card required. Plenty to evaluate quality before upgrading."
+        },
+        "q2": {
+          "q": "Local app or cloud?",
+          "a": "Runs locally on your machine. Source video files and voice clones never leave your computer. Optional: BYOK subtitle translation calls external APIs you choose."
+        },
+        "q3": {
+          "q": "Which languages are supported?",
+          "a": "English, Chinese (Simplified/Traditional), Japanese, Korean, Vietnamese — both as source and target. Video formats: MP4/MOV/MKV/AVI/WebM."
+        },
+        "q4": {
+          "q": "Minimum system requirements?",
+          "a": "macOS 12+ (Apple Silicon or Intel), 8 GB RAM. For faster processing: 16 GB RAM, dedicated GPU. Windows version coming soon."
+        },
+        "q5": {
+          "q": "How do I pay?",
+          "a": "Currently we accept Vietnamese domestic bank transfers — VietQR scan or manual entry. After payment, our team confirms within minutes to a few hours."
+        },
+        "q6": {
+          "q": "Refund policy?",
+          "a": "Yes — 100% refund within 7 days if you're not satisfied. Just reply to the receipt email."
+        }
+      }
+    },
+    "cta": {
+      "title": "Ready to dub like a studio?",
+      "subtitle": "Free download, no credit card. Install in 2 minutes, ship your first dub in 5.",
+      "button": "Download VoxStudio free",
+      "secondary": "Watch demo first"
+    },
+    "footer": {
+      "tagline": "Professional AI dubbing & subtitle translation — running on your machine.",
+      "product": "Product",
+      "company": "Company",
+      "support": "Support",
+      "legal": "Legal",
+      "copyright": "© 2026 VoxStudio. All rights reserved.",
+      "links": {
+        "features": "Features",
+        "pricing": "Pricing",
+        "download": "Download",
+        "changelog": "Changelog",
+        "about": "About",
+        "contact": "Contact",
+        "blog": "Blog",
+        "faq": "FAQ",
+        "support": "Tech support",
+        "terms": "Terms of service",
+        "privacy": "Privacy policy"
+      }
+    }
+  },
+  "downloadPage": {
+    "eyebrow": "Download",
+    "title": "Install VoxStudio on your machine",
+    "subtitle": "Latest version, free for any setup.",
+    "version": "Version",
+    "latest": "Latest",
+    "macIntel": "macOS (Intel)",
+    "macArm": "macOS (Apple Silicon)",
+    "windows": "Windows",
+    "linux": "Linux",
+    "comingSoon": "Coming soon",
+    "downloadNow": "Download now",
+    "size": "Size",
+    "released": "Released",
+    "instructionsTitle": "Installation",
+    "instructions": {
+      "mac1": "Download the .dmg → open → drag VoxStudio into Applications.",
+      "mac2": "On first launch: right-click → Open (to bypass Gatekeeper — app is not yet code-signed).",
+      "mac3": "Sign up free inside the app, enter the 6-digit code from your email."
+    },
+    "systemReq": "System requirements",
+    "systemReqMac": "macOS 12 Monterey+ · 8 GB RAM minimum · 4 GB free disk",
+    "checksumTitle": "Verify checksum (optional)",
+    "checksumDesc": "Confirm the downloaded file hasn't been tampered with. In Terminal:"
+  },
+  "pricingPage": {
+    "title": "VoxStudio Pricing",
+    "subtitle": "Start free, upgrade as you grow. All plans include free updates for life.",
+    "compareTitle": "Detailed comparison",
+    "feature": "Feature",
+    "comparison": {
+      "dubLength": "Auto Dub length per clip",
+      "dubLengthFree": "5 minutes",
+      "dubLengthPro": "Unlimited",
+      "dubLengthStudio": "Unlimited",
+      "voiceClones": "Voice clones",
+      "voiceClonesFree": "1",
+      "voiceClonesPro": "10",
+      "voiceClonesStudio": "Unlimited",
+      "downloads": "YouTube downloads/day",
+      "downloadsFree": "15",
+      "downloadsPro": "Unlimited",
+      "downloadsStudio": "Unlimited",
+      "batch": "Parallel batch dubbing",
+      "batchFree": "—",
+      "batchPro": "3 videos",
+      "batchStudio": "10+ videos",
+      "byok": "BYOK API engines",
+      "byokFree": "Basic",
+      "byokPro": "Full",
+      "byokStudio": "Full + advanced",
+      "support": "Support",
+      "supportFree": "Community",
+      "supportPro": "Email 24h",
+      "supportStudio": "Priority Zalo"
+    },
+    "ltdTitle": "Lifetime deal (LTD)",
+    "ltdDesc": "Pay once, use forever — limited slots. Contact us for current pricing.",
+    "guaranteeTitle": "7-day money-back guarantee",
+    "guaranteeDesc": "Not satisfied within 7 days? Reply to the receipt email — 100% refund."
+  },
+  "contactPage": {
+    "title": "Get in touch",
+    "subtitle": "Questions, feedback, or technical issues? We respond within 24h.",
+    "channels": {
+      "emailTitle": "Email",
+      "emailValue": "voxstudio.vn@gmail.com",
+      "emailDesc": "Fastest way to reach us. Replies within 24h on business days.",
+      "zaloTitle": "Zalo (paid customers)",
+      "zaloValue": "Provided after purchase",
+      "zaloDesc": "Priority support for Pro/Studio customers.",
+      "githubTitle": "Bugs & feature requests",
+      "githubValue": "github.com/thuantiensd/VoxStudio",
+      "githubDesc": "Open an issue on GitHub if you find a bug or want to request a feature."
+    },
+    "businessTitle": "Business inquiries",
+    "businessDesc": "Need enterprise customization, API integration, or staff training? Email business@voxstudio.vn for a quote."
+  },
+  "termsPage": {
+    "title": "Terms of Service",
+    "lastUpdated": "Last updated: April 26, 2026",
+    "intro": "Thanks for using VoxStudio. By installing, signing up for, or using the VoxStudio software (the \"Service\"), you agree to the terms below.",
+    "sections": [
+      { "title": "1. Account",                  "body": "You must provide a valid email for verification. You're responsible for keeping your account and password secure. One account is for one individual — no sharing." },
+      { "title": "2. Acceptable use",            "body": "You agree to use VoxStudio only for lawful purposes. Forbidden: creating impersonation deepfakes without consent; producing copyright-infringing content; harassment, fraud, or spreading misinformation." },
+      { "title": "3. Content ownership",         "body": "You retain full ownership of any video, audio, voice clones you create or process via VoxStudio. We don't store or claim any license over your content. You're responsible for clearing rights on the source content before processing." },
+      { "title": "4. Voice cloning consent",     "body": "By cloning someone's voice, you confirm you have their consent. Violations may result in account suspension and legal liability." },
+      { "title": "5. Payments & refunds",        "body": "Paid plans activate after our team confirms the bank transfer (minutes to hours). You're entitled to a full 100% refund within 7 days if you're not satisfied — just reply to the receipt email. After 7 days, monthly plans are non-refundable (but you can cancel auto-renewal). Lifetime deals (LTD) are refundable within 14 days." },
+      { "title": "6. Limitation of liability",   "body": "VoxStudio is provided \"as is\". We're not liable for indirect damages from using the software. Our maximum liability is capped at what you've paid us in the trailing 12 months." },
+      { "title": "7. Changes to terms",          "body": "We may update these terms. Material changes are notified by email at least 14 days before they take effect." },
+      { "title": "8. Contact",                   "body": "For any questions about these terms, email voxstudio.vn@gmail.com." }
+    ]
+  },
+  "privacyPage": {
+    "title": "Privacy Policy",
+    "lastUpdated": "Last updated: April 26, 2026",
+    "intro": "VoxStudio is committed to protecting your privacy. This document explains what we collect, how we use it, and how we protect it.",
+    "sections": [
+      { "title": "1. What we collect",           "body": "On sign-up: email, hashed password, display name. During use: usage timing, current plan, dub/download counts (for quotas). We do NOT collect: video content, audio files, voice clones, transcripts. All of this stays on your machine." },
+      { "title": "2. Cookies & telemetry",       "body": "The app does not enable telemetry by default. This website uses essential cookies only (theme, language). No ad tracking, no data sales to third parties." },
+      { "title": "3. BYOK — your API keys",      "body": "When you enter API keys (OpenAI, Claude, Gemini, ...) into the app, the keys are stored ENCRYPTED locally on your machine. They are never sent to VoxStudio servers." },
+      { "title": "4. Payments",                  "body": "We process payments via Vietnamese domestic bank transfer. You provide a reference code in the transfer memo — we reconcile manually. We do NOT store credit card information." },
+      { "title": "5. Email",                     "body": "We email you for: account verification, password reset, payment confirmation, important maintenance notices. You cannot opt out of these technical emails — they are required to operate the service." },
+      { "title": "6. Storage & deletion",        "body": "Account data is stored on servers located in Vietnam. When you delete your account, all your personal data is hard-deleted within 30 days. Payment history is retained for 5 years per accounting requirements." },
+      { "title": "7. Your rights",               "body": "You have the right to: view your personal data, correct it, delete your account, file a complaint with a data protection authority. Contact voxstudio.vn@gmail.com to exercise these rights." },
+      { "title": "8. Children under 13",         "body": "VoxStudio is not directed at users under 13. If you discover we have collected data from a minor without guardian consent, please email us so we can remove it immediately." }
+    ]
+  }
+}

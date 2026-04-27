@@ -1134,6 +1134,15 @@ export default {
     afterTransferHint: "Sau khi nhận được, đội ngũ sẽ kích hoạt gói cho bạn trong vòng vài phút đến vài giờ.",
     copied: "Đã sao chép",
   },
+  paymentSuccess: {
+    title: "Thanh toán thành công!",
+    subtitle: "Gói {plan} đã được kích hoạt cho tài khoản của bạn.",
+    refCode: "Mã giao dịch",
+    plan: "Gói",
+    amount: "Số tiền",
+    emailNote: "Email xác nhận đã được gửi tới hộp thư của bạn.",
+    startUsing: "Bắt đầu sử dụng",
+  },
   billing: {
     statusPending: "Chờ xác nhận",
     statusPaid: "Đã thanh toán",

@@ -78,6 +78,27 @@ async def list_my_payments(
     return {"payments": await billing_svc.list_payments(db, user.id)}
 
 
+@router.get("/payments/{ref_code}")
+async def get_my_payment(
+    ref_code: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_session),
+):
+    """Xem lại 1 payment cụ thể của user — không tạo mới, không huỷ pending khác.
+    Dùng khi user click 'Xem QR' trên trang account để mở lại VietQR mà không
+    trigger create_payment (sẽ auto-huỷ pending cũ)."""
+    from app.db.models import Payment
+    p = await db.get(Payment, ref_code)
+    if not p or p.user_id != user.id:
+        raise HTTPException(404, "Không tìm thấy giao dịch.")
+    payment_dict = billing_svc._to_dict(p)
+    return {
+        "payment": payment_dict,
+        "bank": billing_svc.bank_info(),
+        "qr_url": billing_svc._qr_url(p.amount_vnd, p.id),
+    }
+
+
 @router.post("/payments/{ref_code}/cancel")
 async def cancel_my_payment(
     ref_code: str,

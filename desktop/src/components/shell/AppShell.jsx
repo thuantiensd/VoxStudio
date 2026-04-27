@@ -6,6 +6,7 @@ import Sidebar from "./Sidebar";
 import Titlebar from "./Titlebar";
 import CommandPalette from "./CommandPalette";
 import WelcomeModal from "../WelcomeModal";
+import PaymentSuccessModal from "../PaymentSuccessModal";
 import { useHotkeys } from "./useHotkeys";
 import { useT } from "../../i18n/I18nContext";
 
@@ -82,6 +83,7 @@ export default function AppShell({ children }) {
       </div>
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
       <WelcomeModal />
+      <PaymentSuccessModal />
 
       {/* Drop overlay toàn màn hình */}
       <AnimatePresence>

@@ -1134,6 +1134,15 @@ export default {
     afterTransferHint: "Once we receive your payment, the team will activate your plan within minutes to a few hours.",
     copied: "Copied",
   },
+  paymentSuccess: {
+    title: "Payment confirmed!",
+    subtitle: "The {plan} plan has been activated on your account.",
+    refCode: "Reference code",
+    plan: "Plan",
+    amount: "Amount",
+    emailNote: "A confirmation email has been sent to your inbox.",
+    startUsing: "Start using",
+  },
   billing: {
     statusPending: "Pending review",
     statusPaid: "Paid",
