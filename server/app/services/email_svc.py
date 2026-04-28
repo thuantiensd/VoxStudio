@@ -69,9 +69,47 @@ def _send_sync(to_email: str, subject: str, html_body: str, text_body: str) -> b
         return False
 
 
+async def _send_resend(to_email: str, subject: str, html_body: str, text_body: str) -> bool:
+    """Gửi qua Resend HTTPS API (dùng khi VPS bị block SMTP outbound)."""
+    api_key = os.environ.get("RESEND_API_KEY", "").strip()
+    from_email = os.environ.get("RESEND_FROM", "onboarding@resend.dev").strip()
+    from_name = os.environ.get("SMTP_FROM_NAME", "VoxStudio").strip()
+    try:
+        import httpx
+        async with httpx.AsyncClient(timeout=15) as client:
+            r = await client.post(
+                "https://api.resend.com/emails",
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "from": f"{from_name} <{from_email}>",
+                    "to": [to_email],
+                    "subject": subject,
+                    "html": html_body,
+                    "text": text_body,
+                },
+            )
+            if r.status_code in (200, 202):
+                logger.info("Resend email sent → %s (subject=%r)", to_email, subject)
+                return True
+            logger.warning("Resend API error %d: %s", r.status_code, r.text[:200])
+            return False
+    except Exception as e:
+        logger.warning("Resend send failed for %s: %s", to_email, e)
+        return False
+
+
 async def send_email(to_email: str, subject: str,
                      html_body: str, text_body: str) -> bool:
-    """Gửi email không block event loop — chạy trong threadpool."""
+    """Gửi email không block event loop.
+
+    Ưu tiên Resend HTTPS API nếu có RESEND_API_KEY (cho VPS bị block SMTP).
+    Fallback SMTP nếu không có.
+    """
+    if os.environ.get("RESEND_API_KEY", "").strip():
+        return await _send_resend(to_email, subject, html_body, text_body)
     return await asyncio.to_thread(_send_sync, to_email, subject, html_body, text_body)
 
 
@@ -112,6 +150,11 @@ Nếu bạn không đăng ký tài khoản này, vui lòng bỏ qua email này.
     html = f"""\
 <!DOCTYPE html>
 <html><body style="font-family: -apple-system, sans-serif; max-width: 560px; margin: 0 auto; padding: 24px; color: #1f2937;">
+  <div style="text-align: center; padding: 20px 0; border-bottom: 1px solid #e5e7eb; margin-bottom: 20px;">
+    <img src="https://voxstudio.vn/logo.png" alt="VoxStudio" width="48" height="48"
+         style="display: inline-block; border-radius: 10px; vertical-align: middle;">
+    <span style="font-size: 18px; font-weight: 700; margin-left: 10px; vertical-align: middle; color: #6c5cf2;">VoxStudio</span>
+  </div>
   <h2 style="margin: 0 0 16px; color: #6c5cf2;">Xác thực email</h2>
   <p>Chào <b>{name}</b>,</p>
   <p>Cảm ơn bạn đã đăng ký VoxStudio. Nhập mã sau vào ứng dụng để hoàn tất:</p>
@@ -442,6 +485,11 @@ vẫn còn hiệu lực.
     html = f"""\
 <!DOCTYPE html>
 <html><body style="font-family: -apple-system, sans-serif; max-width: 560px; margin: 0 auto; padding: 24px; color: #1f2937;">
+  <div style="text-align: center; padding: 20px 0; border-bottom: 1px solid #e5e7eb; margin-bottom: 20px;">
+    <img src="https://voxstudio.vn/logo.png" alt="VoxStudio" width="48" height="48"
+         style="display: inline-block; border-radius: 10px; vertical-align: middle;">
+    <span style="font-size: 18px; font-weight: 700; margin-left: 10px; vertical-align: middle; color: #6c5cf2;">VoxStudio</span>
+  </div>
   <h2 style="margin: 0 0 16px; color: #6c5cf2;">Đặt lại mật khẩu</h2>
   <p>Chào <b>{name}</b>,</p>
   <p>Bạn vừa yêu cầu đặt lại mật khẩu VoxStudio. Nhập mã sau vào ứng dụng:</p>
