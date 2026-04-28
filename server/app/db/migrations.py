@@ -22,8 +22,17 @@ logger = logging.getLogger(__name__)
 
 
 async def _columns_of(db: AsyncSession, table: str) -> set[str]:
-    res = await db.execute(text(f"PRAGMA table_info({table})"))
-    return {row[1] for row in res.all()}
+    """Lấy danh sách cột — hoạt động trên cả SQLite (PRAGMA) và Postgres (information_schema)."""
+    dialect = db.bind.dialect.name if db.bind else "sqlite"
+    if dialect == "sqlite":
+        res = await db.execute(text(f"PRAGMA table_info({table})"))
+        return {row[1] for row in res.all()}
+    # Postgres / others
+    res = await db.execute(text(
+        "SELECT column_name FROM information_schema.columns "
+        "WHERE table_name = :tbl AND table_schema = 'public'"
+    ), {"tbl": table})
+    return {row[0] for row in res.all()}
 
 
 async def _ensure_user_columns(db: AsyncSession):

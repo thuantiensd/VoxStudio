@@ -24,8 +24,9 @@ httpx<0.28  # Pin để tương thích với Douyin_TikTok_Download_API khi tíc
 pyjwt
 bcrypt
 sqlalchemy
-aiosqlite
-greenlet  # SQLAlchemy async engine runtime
+aiosqlite                # SQLite async (local dev)
+asyncpg                  # Postgres async (production via DATABASE_URL)
+greenlet                 # SQLAlchemy async engine runtime
 sentry-sdk[fastapi]  # error tracking (DSN opt-in qua ENV SENTRY_DSN)
 email-validator
 python-dotenv
