@@ -52,3 +52,7 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 # Server
 HOST = os.getenv("HOST", "0.0.0.0")
 PORT = int(os.getenv("PORT", "8000"))
+
+# Worker mode — split deploy: VPS chạy WORKER_ENABLED=false (API-only, không
+# load model, RAM thấp), RunPod chạy WORKER_ENABLED=true (process GPU job).
+WORKER_ENABLED = os.getenv("WORKER_ENABLED", "true").lower() != "false"

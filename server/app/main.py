@@ -16,7 +16,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.v1.router import api_router
-from app.config import DEVICE, DTYPE
+from app.config import DEVICE, DTYPE, WORKER_ENABLED
 from app.core.gpu_manager import gpu
 from app.db.session import init_db
 from app.db.migrations import run_migrations
@@ -60,13 +60,19 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     """Load models on startup, cleanup on shutdown."""
     logger.info("Starting VoxStudio Server...")
-    logger.info("Device: %s | Dtype: %s", DEVICE, DTYPE)
+    logger.info("Device: %s | Dtype: %s | Worker: %s",
+                DEVICE, DTYPE, "enabled" if WORKER_ENABLED else "disabled (API-only)")
     await init_db()
     await run_migrations()  # alter users cols + seed plans + promote admins from ENV
-    # Job queue worker — 1 thread chung cho mọi GPU-bound task
-    from app.worker.gpu_worker import start_worker, stop_worker
-    start_worker()
-    gpu.load_all()
+
+    stop_worker = None
+    if WORKER_ENABLED:
+        # Job queue worker — 1 thread chung cho mọi GPU-bound task
+        from app.worker.gpu_worker import start_worker, stop_worker
+        start_worker()
+        gpu.load_all()
+    else:
+        logger.info("[lifespan] worker disabled — skipping model load + queue thread")
 
     # Background TTL cleanup cho audio_output/ — chạy 1h/lần. Lần đầu chạy
     # ngay khi boot để dọn rác từ phiên trước.
@@ -84,7 +90,8 @@ async def lifespan(app: FastAPI):
     yield
     logger.info("Shutting down.")
     cleanup_task.cancel()
-    stop_worker()
+    if stop_worker is not None:
+        stop_worker()
 
 
 app = FastAPI(
@@ -115,21 +122,28 @@ app.include_router(api_router)
 
 @app.get("/health")
 async def health():
+    if not WORKER_ENABLED:
+        return {"status": "ok", "device": DEVICE, "mode": "api-only"}
     return {
         "status": "ok" if gpu.ready else "loading",
         "device": DEVICE,
+        "mode": "worker",
     }
 
 
 @app.get("/system/vram")
 async def vram():
     """Report current VRAM usage + which models are loaded."""
+    if not WORKER_ENABLED:
+        return {"mode": "api-only", "loaded": []}
     return gpu.vram_stats()
 
 
 @app.post("/system/unload")
 async def unload(models: str = "llm,tts"):
     """Free specified models from VRAM. models=comma-list of: llm, tts, whisper."""
+    if not WORKER_ENABLED:
+        return {"unloaded": [], "mode": "api-only"}
     targets = [m.strip() for m in models.split(",") if m.strip()]
     freed = []
     if "llm" in targets:
