@@ -48,6 +48,35 @@ def _ensure_local_file(remote_path: str) -> str:
     return local_path
 
 
+def _upload_to_vps(local_path: str, remote_path: str | None = None) -> bool:
+    """Push file local Pod → VPS. Dùng sau khi sinh output (TTS, dub, v.v.)
+    để VPS serve được URL. No-op nếu không set VPS_FILE_HOST.
+    """
+    vps_host = _os.environ.get("VPS_FILE_HOST", "")
+    if not vps_host or not _os.path.exists(local_path):
+        return False
+    remote_path = remote_path or local_path  # mirror path
+    # Đảm bảo thư mục tồn tại trên VPS
+    remote_dir = _os.path.dirname(remote_path)
+    try:
+        subprocess.run(
+            ["ssh", "-o", "StrictHostKeyChecking=no",
+             "-i", "/root/.ssh/id_ed25519",
+             vps_host, f"mkdir -p {remote_dir}"],
+            check=True, capture_output=True, timeout=15,
+        )
+        subprocess.run(
+            ["scp", "-o", "StrictHostKeyChecking=no",
+             "-i", "/root/.ssh/id_ed25519",
+             local_path, f"{vps_host}:{remote_path}"],
+            check=True, capture_output=True, timeout=300,
+        )
+        return True
+    except subprocess.CalledProcessError as e:
+        logger.warning("SCP upload back to VPS failed: %s", e.stderr.decode()[:200])
+        return False
+
+
 async def _run_sync_generator(gen_factory, progress_cb):
     """Chạy sync generator trong thread, bridge progress qua asyncio.Queue.
 
@@ -220,6 +249,21 @@ async def tts_handler(payload: dict, *, job_id: str, progress_cb) -> dict:
         payload.get("postprocess_output"),
         payload.get("audio_chunk_duration"),
     )
+    # Push generated audio file back to VPS (nếu chạy chế độ split worker).
+    # tts_svc trả audio_url dạng "/api/v1/tts/audio/<file_id>" — file thật ở
+    # AUDIO_OUTPUT_DIR/<file_id>.wav. Upload mirror path sang VPS để FE
+    # download qua URL VPS.
+    try:
+        from app.config import AUDIO_OUTPUT_DIR as _AOD
+        audio_url = result.get("audio_url", "")
+        if audio_url.startswith("/api/v1/tts/audio/"):
+            file_id = audio_url.rsplit("/", 1)[-1]
+            local_path = str(_AOD / f"{file_id}.wav")
+            if _os.path.exists(local_path):
+                _upload_to_vps(local_path)
+    except Exception as e:
+        logger.warning("TTS upload-back skipped: %s", e)
+
     # KHÔNG gọi progress_cb(step="done") ở đây — worker._process_one sẽ emit
     # "done" cuối cùng kèm 'result' sau khi handler return. Nếu handler tự emit
     # "done" thì subscriber sẽ thấy event "done" rỗng trước, trả về {} sớm.
