@@ -200,14 +200,14 @@ def _split_long_segment(seg: dict, max_duration: float = 12.0) -> list[dict]:
     return out
 
 
-def _snap_segment_to_words(seg: dict, gap_threshold: float = 0.5,
-                            keep_padding: float = 0.2) -> dict:
+def _snap_segment_to_words(seg: dict, gap_threshold: float = 0.2,
+                            keep_padding: float = 0.08) -> dict:
     """Tighten segment boundaries to actual first/last word times.
 
     Whisper VAD pads each segment by 200-400ms. With word timestamps we can
-    snap start/end to real speech. But we keep `keep_padding` seconds of
-    padding so TTS has natural room (avoids speedup pressure when text is
-    slightly long for the slot).
+    snap start/end to real speech. `keep_padding` giữ chút lề cho TTS, nhưng
+    đã được thắt chặt từ 0.2s → 0.08s (Tier 1.3) để boundary chính xác hơn.
+    `gap_threshold` từ 0.5s → 0.2s — snap aggressive hơn.
     """
     words = seg.get("words") or []
     if not words:
@@ -222,6 +222,95 @@ def _snap_segment_to_words(seg: dict, gap_threshold: float = 0.5,
     if seg["end"] - speech_end > gap_threshold:
         snapped["end"] = round(min(seg["end"], speech_end + keep_padding), 2)
     return snapped
+
+
+def _silero_speech_timestamps(audio_path: str | Path) -> list[tuple[float, float]]:
+    """Dùng Silero VAD detect đoạn nói thực trong audio gốc.
+
+    Trả về list (start_s, end_s) — boundary chính xác đến ~20ms (vs ~200ms
+    của Whisper VAD). Cache kết quả để gọi nhiều lần không tốn GPU.
+
+    Nếu Silero không available, trả [] — caller fallback về word timestamps.
+    """
+    try:
+        from silero_vad import load_silero_vad, get_speech_timestamps
+        import torch
+        import soundfile as _sf
+    except Exception:
+        return []
+
+    try:
+        audio, sr = _sf.read(str(audio_path))
+        # Mono + resample về 16kHz (Silero yêu cầu)
+        if audio.ndim > 1:
+            audio = audio.mean(axis=1)
+        if sr != 16000:
+            import librosa
+            audio = librosa.resample(audio, orig_sr=sr, target_sr=16000)
+            sr = 16000
+        audio_t = torch.from_numpy(audio).float()
+        model = load_silero_vad()
+        ts = get_speech_timestamps(
+            audio_t, model,
+            sampling_rate=16000,
+            threshold=0.4,
+            min_speech_duration_ms=200,
+            min_silence_duration_ms=200,
+            return_seconds=True,
+        )
+        return [(t["start"], t["end"]) for t in ts]
+    except Exception as e:
+        logger.warning("Silero VAD failed: %s — fallback to word timestamps", e)
+        return []
+
+
+def _snap_segments_with_silero(segments: list[dict], audio_path: str | Path,
+                                tighten_only: bool = True) -> list[dict]:
+    """Tier 1.3: Snap segment boundaries với Silero VAD (chính xác ~20ms).
+
+    Args:
+      segments: list segments đã có start/end từ Whisper.
+      audio_path: path tới audio gốc.
+      tighten_only: nếu True, chỉ điều chỉnh boundary INSIDE segment hiện tại
+                    (không expand). Tránh việc segment lấn sang đoạn khác.
+
+    Algorithm:
+      1. Chạy Silero VAD trên audio gốc → list speech regions chính xác.
+      2. Cho mỗi segment, tìm speech region overlap nhiều nhất → snap
+         start/end về biên speech region đó.
+      3. Giữ padding nhỏ 50ms để TTS có chỗ thở.
+    """
+    speech_regions = _silero_speech_timestamps(audio_path)
+    if not speech_regions:
+        return [dict(s) for s in segments]
+
+    PADDING = 0.05  # 50ms padding nhẹ
+    out = []
+    for seg in segments:
+        new_seg = dict(seg)
+        s_start, s_end = seg["start"], seg["end"]
+        # Tìm speech regions overlap với segment
+        overlapping = [
+            (r_start, r_end) for r_start, r_end in speech_regions
+            if r_end > s_start and r_start < s_end
+        ]
+        if overlapping:
+            # Lấy biên speech earliest/latest trong segment
+            speech_start = max(s_start, min(r[0] for r in overlapping))
+            speech_end = min(s_end, max(r[1] for r in overlapping))
+            if tighten_only:
+                # Chỉ tighten — không expand quá segment hiện tại
+                new_start = max(s_start, speech_start - PADDING)
+                new_end = min(s_end, speech_end + PADDING)
+            else:
+                new_start = speech_start - PADDING
+                new_end = speech_end + PADDING
+            # Sanity check — không để segment quá ngắn
+            if new_end - new_start >= 0.3:
+                new_seg["start"] = round(new_start, 2)
+                new_seg["end"] = round(new_end, 2)
+        out.append(new_seg)
+    return out
 
 
 def _split_all_long_segments(segments: list[dict], max_duration: float = 12.0) -> list[dict]:
@@ -244,11 +333,16 @@ def _merge_short_segments(segments: list[dict], min_duration: float = 2.5,
     - Segments shorter than min_duration get merged with the next/prev segment
     - Only merge if the gap < max_gap seconds
     - Do NOT let combined segment exceed max_combined (otherwise TTS too long → speedup)
+
+    Tier 1.2: ghi lại các "internal_pauses" trong segment đã merge — list của
+    {position_sec_relative, duration} — để post-TTS insert silence tại đúng
+    vị trí tương đối, giữ rhythm/cảm xúc gốc.
     """
     if not segments:
         return segments
 
     merged = [dict(segments[0])]
+    merged[-1].setdefault("internal_pauses", [])
 
     for seg in segments[1:]:
         prev = merged[-1]
@@ -264,12 +358,66 @@ def _merge_short_segments(segments: list[dict], min_duration: float = 2.5,
             and combined_dur <= max_combined
         )
         if should_merge:
+            # Record pause position RELATIVE TO START of merged segment.
+            # Vd: prev=0-3s, gap=0.4s, cur=3.4-5s → merged 0-5s với pause
+            # tại offset 3s, duration 0.4s.
+            if gap >= 0.3:  # chỉ track pause > 300ms (đáng lưu cho dub)
+                pause_offset = prev["end"] - prev["start"]
+                prev["internal_pauses"].append({
+                    "offset": round(pause_offset, 3),
+                    "duration": round(gap, 3),
+                })
             prev["end"] = seg["end"]
             prev["text"] = (prev["text"] + " " + seg["text"]).strip()
         else:
-            merged.append(dict(seg))
+            new_seg = dict(seg)
+            new_seg.setdefault("internal_pauses", [])
+            merged.append(new_seg)
 
     return merged
+
+
+def _insert_pauses_in_audio(audio_np, sr: int, target_total_dur: float,
+                              pauses: list[dict]) -> "np.ndarray":
+    """Tier 1.2: Insert silence vào audio TTS tại vị trí pauses (proportional).
+
+    Args:
+      audio_np: TTS output audio array (1D mono).
+      sr: sample rate.
+      target_total_dur: target total duration của segment (= seg.end - seg.start).
+      pauses: list {"offset": s_relative_to_seg_start, "duration": s}.
+
+    Algorithm:
+      1. TTS thường ngắn hơn target_total_dur (vì dub trimmed silence).
+         Tỉ lệ TTS/target = ratio.
+      2. Với mỗi pause, position trong TTS = offset * ratio.
+      3. Insert np.zeros(silence_samples) tại insert_idx.
+    """
+    import numpy as np
+    if not pauses or len(audio_np) == 0:
+        return audio_np
+
+    actual_dur = len(audio_np) / sr
+    if actual_dur <= 0 or target_total_dur <= 0:
+        return audio_np
+    ratio = actual_dur / target_total_dur  # TTS_dur / target_dur
+
+    # Sort pauses by offset asc — insert from end to start để tránh shift index
+    sorted_pauses = sorted(pauses, key=lambda p: p["offset"], reverse=True)
+    out = audio_np.copy()
+    for p in sorted_pauses:
+        # Map vị trí: offset trong khung target → vị trí trong TTS audio
+        rel_pos = p["offset"] * ratio
+        insert_idx = int(rel_pos * sr)
+        if insert_idx < 0 or insert_idx > len(out):
+            continue
+        silence_samples = int(p["duration"] * sr)
+        if silence_samples <= 0:
+            continue
+        # Hơi giảm silence để tránh quá dài (TTS đã rate-matched)
+        silence = np.zeros(silence_samples, dtype=out.dtype)
+        out = np.concatenate([out[:insert_idx], silence, out[insert_idx:]])
+    return out
 
 
 def _trim_sparse_segments(segments: list[dict], max_speech_per_sec: float = 14.0) -> list[dict]:
@@ -542,17 +690,27 @@ def transcribe_project(project_id: str) -> dict:
     )
     logger.info("Post-process: snap-to-words removed %.1fs of silent edges", snap_savings)
 
-    # 2. Split segments > 12s using word-level silence gaps (real time, not estimate)
-    split_segs = _split_all_long_segments(snapped, max_duration=12.0)
+    # 1b. Tier 1.3: Refine boundary với Silero VAD (chính xác ~20ms vs Whisper ~200ms)
+    silero_snapped = _snap_segments_with_silero(snapped, audio_to_transcribe, tighten_only=True)
+    silero_savings = sum(
+        (s1["end"] - s1["start"]) - (s2["end"] - s2["start"])
+        for s1, s2 in zip(snapped, silero_snapped)
+    )
+    logger.info("Post-process: Silero VAD refined %d segments, saved %.2fs",
+                len(silero_snapped), silero_savings)
+    snapped = silero_snapped
+
+    # 2. Split segments > 10s (Tier 1.1 — siết từ 12s → 10s để TTS natural hơn)
+    split_segs = _split_all_long_segments(snapped, max_duration=10.0)
     logger.info("Post-process: %d segments after split-long (was %d snapped)",
                 len(split_segs), len(snapped))
 
     # 3. Trim sparse-speech segments (text too short for slot duration)
-    trimmed = _trim_sparse_segments(split_segs, max_speech_per_sec=14.0)
+    trimmed = _trim_sparse_segments(split_segs, max_speech_per_sec=13.0)
     logger.info("Post-process: %d segments after trim-sparse", len(trimmed))
 
-    # 4. Merge adjacent short segments (< 2.5s, gap < 1.5s, combined <= 10s)
-    merged = _merge_short_segments(trimmed, min_duration=2.5, max_gap=1.5, max_combined=10.0)
+    # 4. Merge adjacent short segments (Tier 1.1: min 3s, gap 1.0s, combined 9s)
+    merged = _merge_short_segments(trimmed, min_duration=3.0, max_gap=1.0, max_combined=9.0)
     logger.info("Post-process: %d segments after merge-short (final)", len(merged))
 
     # ── Diarization: gán speaker + gender cho từng segment ──
@@ -905,25 +1063,42 @@ def generate_segment(project_id: str, seg_id: str) -> dict:
 
             audio_np, sr = sf.read(str(out_path))
             actual_dur = len(audio_np) / sr
-            ratio = actual_dur / target_duration if target_duration > 0 else 1.0
 
-            # Pass 2: if too far off, re-generate with native speed (chỉ khi auto_pace)
-            if auto_pace and abs(ratio - 1.0) > SPEED_TOLERANCE:
-                edge_speed = max(MIN_EDGE_SPEED, min(MAX_EDGE_SPEED, ratio))
+            # ── Tier 1.1 + 1.4: rate-aware speed matching ──
+            # Tính speed factor dựa trên rate gốc + slot time, clamp ≤ 1.10x.
+            speed_factor, reason = _compute_target_speed(
+                seg, target_duration, tts_text, actual_dur,
+            )
+
+            # Pass 2: re-generate ở Edge TTS rate đó (nếu auto_pace + lệch đáng kể)
+            if auto_pace and abs(speed_factor - 1.0) > SPEED_TOLERANCE:
+                edge_speed = max(MIN_EDGE_SPEED, min(MAX_EDGE_SPEED, speed_factor))
+                logger.info("[dub] edge speed match: target=%.2fs actual=%.2fs "
+                            "speed=%.2fx reason=%s",
+                            target_duration, actual_dur, edge_speed, reason)
                 mp3_v2 = seg_dir / f"{seg_id}_v2.mp3"
                 _edge_generate_sync(tts_text, str(mp3_v2), language=lang,
                                     voice=edge_voice, speed=edge_speed)
                 _mp3_to_wav(mp3_v2, out_path)
                 audio_np, sr = sf.read(str(out_path))
                 actual_dur = len(audio_np) / sr
-                ratio = actual_dur / target_duration if target_duration > 0 else 1.0
 
-            # Fine-tune with atempo (chỉ khi auto_pace)
-            if auto_pace and actual_dur > 0 and abs(ratio - 1.0) > 0.03:
-                stretched = seg_dir / f"{seg_id}_stretched.wav"
-                _atempo_stretch(out_path, stretched, ratio)
-                audio_np, sr = sf.read(str(stretched))
-                stretched.unlink(missing_ok=True)
+            # Fine-tune với atempo nếu vẫn lệch slot > 3% (đã được rate-match
+            # nhưng Edge TTS speed param không chính xác 100%).
+            if auto_pace and actual_dur > 0 and target_duration > 0:
+                final_ratio = actual_dur / target_duration
+                # Chỉ atempo trong giới hạn strict, vượt thì để overflow
+                # (silence sẽ rơi vào gap kế bên hoặc segment lấn nhẹ).
+                if abs(final_ratio - 1.0) > 0.03 and final_ratio <= MAX_SPEED_FACTOR:
+                    stretched = seg_dir / f"{seg_id}_stretched.wav"
+                    _atempo_stretch(out_path, stretched, final_ratio)
+                    audio_np, sr = sf.read(str(stretched))
+                    stretched.unlink(missing_ok=True)
+                elif final_ratio > MAX_SPEED_FACTOR:
+                    logger.warning("[dub] segment %s overflow: actual=%.2fs target=%.2fs "
+                                   "ratio=%.2f > MAX %.2f — accepting overflow",
+                                   seg.get("id", "?"), actual_dur, target_duration,
+                                   final_ratio, MAX_SPEED_FACTOR)
 
         else:
             # ── OmniVoice (local GPU) ──
@@ -955,31 +1130,47 @@ def generate_segment(project_id: str, seg_id: str) -> dict:
             sr = gpu.sampling_rate
             audio_np = waveform.cpu().numpy()
 
-            # ── Auto-align: ONLY speed up if TTS is too long for slot ──
-            # Atempo < 1.0 (slowing down short TTS) muddies the voice; instead
-            # just let silence fill the gap naturally. Only compress when needed
-            # to prevent overlap with next segment.
+            # ── Tier 1.1 + 1.4: rate-aware auto-align ──
+            # Atempo < 1.0 muddies voice → chỉ speedup, slowdown để silence fill.
+            # Strict cap MAX_SPEED_FACTOR (1.10x) thay vì 1.3x để tránh chipmunk.
             actual_dur = len(audio_np) / sr
-            if auto_pace and target_duration > 0 and actual_dur > target_duration * 1.15:
-                ratio = actual_dur / target_duration
-                # Cap at 1.3x — beyond that atempo creates "rushed/chipmunk" artifact.
-                # If still too long, accept slight overlap into next segment.
-                ratio_clamped = min(1.3, ratio)
-                logger.info("OmniVoice speed-up: actual=%.2fs target=%.2fs ratio=%.2f (capped=%.2f)",
-                            actual_dur, target_duration, ratio, ratio_clamped)
-                seg_dir = _segments_dir(project_id)
-                raw_wav = seg_dir / f"{seg_id}_raw.wav"
-                stretched_wav = seg_dir / f"{seg_id}_stretched.wav"
-                sf.write(str(raw_wav), audio_np, sr)
-                try:
-                    _atempo_stretch(raw_wav, stretched_wav, ratio_clamped)
-                    audio_np, sr = sf.read(str(stretched_wav))
-                finally:
-                    raw_wav.unlink(missing_ok=True)
-                    stretched_wav.unlink(missing_ok=True)
+            if auto_pace and target_duration > 0 and actual_dur > target_duration:
+                speed_factor, reason = _compute_target_speed(
+                    seg, target_duration, tts_text, actual_dur,
+                )
+                # Speed factor luôn trong [MIN, MAX]. Nếu reason=overflow_clamped
+                # → segment sẽ overflow nhẹ vào silence kế (chấp nhận được).
+                if speed_factor > 1.0 + 0.03:
+                    logger.info("[dub] OmniVoice speed-match: actual=%.2fs target=%.2fs "
+                                "speed=%.2fx reason=%s",
+                                actual_dur, target_duration, speed_factor, reason)
+                    seg_dir = _segments_dir(project_id)
+                    raw_wav = seg_dir / f"{seg_id}_raw.wav"
+                    stretched_wav = seg_dir / f"{seg_id}_stretched.wav"
+                    sf.write(str(raw_wav), audio_np, sr)
+                    try:
+                        _atempo_stretch(raw_wav, stretched_wav, speed_factor)
+                        audio_np, sr = sf.read(str(stretched_wav))
+                    finally:
+                        raw_wav.unlink(missing_ok=True)
+                        stretched_wav.unlink(missing_ok=True)
+                if reason == "overflow_clamped":
+                    logger.warning("[dub] OmniVoice segment %s overflow: clamped to "
+                                   "%.2fx — dub will be %.0fms longer than slot",
+                                   seg.get("id", "?"), MAX_SPEED_FACTOR,
+                                   (actual_dur / MAX_SPEED_FACTOR - target_duration) * 1000)
             elif actual_dur < target_duration * 0.9:
                 logger.info("OmniVoice short-fill: actual=%.2fs target=%.2fs (silence padding)",
                             actual_dur, target_duration)
+
+        # Tier 1.2: Insert internal pauses để giữ rhythm gốc
+        internal_pauses = seg.get("internal_pauses") or []
+        if internal_pauses:
+            audio_np = _insert_pauses_in_audio(
+                audio_np, sr, target_duration, internal_pauses,
+            )
+            logger.info("[dub] inserted %d internal pause(s) into segment %s",
+                        len(internal_pauses), seg.get("id", "?"))
 
         # Apply volume
         if seg.get("volume", 1.0) != 1.0:
@@ -1139,9 +1330,72 @@ def _atempo_stretch(in_path: Path, out_path: Path, tempo: float):
     )
 
 
-SPEED_TOLERANCE = 0.15  # 15% — within this, only use atempo fine-tune
-MAX_EDGE_SPEED = 2.0    # Edge TTS max rate
-MIN_EDGE_SPEED = 0.5    # Edge TTS min rate
+# ── TTS speed matching (Tier 1.4 strict + Tier 1.1 rate-aware) ──
+# Tighten để dub khớp gốc: speedup max 1.10x (Disney/Netflix standard),
+# trên 1.10x sẽ nghe gấp gáp (chipmunk effect).
+SPEED_TOLERANCE = 0.05      # 5% — chỉ skip atempo nếu lệch < 5%
+MAX_SPEED_FACTOR = 1.10     # speedup tối đa (strict)
+MIN_SPEED_FACTOR = 0.92     # slowdown tối đa (avoid muddy voice)
+MAX_EDGE_SPEED = 1.10       # Edge TTS rate max — match speedup limit
+MIN_EDGE_SPEED = 0.92       # Edge TTS rate min
+# Tốc độ nói tiếng Việt trung bình (chars/sec, không tính space/punct).
+# Dùng làm fallback khi không tính được rate gốc (vd Whisper không có
+# original_text, hoặc segment có text rỗng).
+DEFAULT_VN_RATE = 13.0
+
+
+def _count_meaningful_chars(text: str) -> int:
+    """Đếm ký tự "có nghĩa" — bỏ space, dấu câu, ký tự control. Dùng để
+    tính speech rate (chars/sec) cho TTS speed matching."""
+    if not text:
+        return 0
+    import re
+    # Giữ chữ cái + số + dấu thanh tiếng Việt (Unicode L category)
+    cleaned = re.sub(r"[^\w]", "", text, flags=re.UNICODE)
+    return len(cleaned)
+
+
+def _compute_target_speed(seg: dict, target_dur: float, dub_text: str,
+                          tts_natural_dur: float) -> tuple[float, str]:
+    """Tính tỉ số speedup tối ưu cho TTS dub.
+
+    Trả về (speed_factor, reason) — speed_factor nằm trong [MIN, MAX].
+
+    Logic:
+      1. Tính rate gốc (orig_chars / orig_dur). Nếu thiếu → DEFAULT_VN_RATE.
+      2. Estimate dub_dur_at_orig_rate = dub_chars / orig_rate.
+      3. Compare với target_dur (slot time):
+         - Nếu fit thoải mái (≤ 1.0x slot): trả 1.0 — TTS chạy natural rate.
+         - Nếu vượt nhẹ (≤ 1.10x slot): trả ratio để match slot, nghe ok.
+         - Nếu vượt mạnh: clamp về MAX_SPEED_FACTOR + cảnh báo (sẽ overflow).
+      4. Tránh slowdown < MIN_SPEED_FACTOR (TTS slow xuống nghe muddy).
+    """
+    orig_text = seg.get("original_text") or seg.get("text") or ""
+    orig_dur = seg.get("end", 0) - seg.get("start", 0)
+
+    orig_chars = _count_meaningful_chars(orig_text)
+    if orig_chars > 0 and orig_dur > 0.5:
+        orig_rate = orig_chars / orig_dur
+    else:
+        orig_rate = DEFAULT_VN_RATE
+
+    # Use TTS natural duration as baseline if available — more accurate than
+    # estimating from char count (TTS engines have different paces).
+    if tts_natural_dur > 0 and target_dur > 0:
+        ratio = tts_natural_dur / target_dur
+    else:
+        dub_chars = _count_meaningful_chars(dub_text)
+        est_dur = dub_chars / orig_rate if orig_rate > 0 else target_dur
+        ratio = est_dur / target_dur if target_dur > 0 else 1.0
+
+    # Clamp + decide
+    if ratio <= 1.0 + SPEED_TOLERANCE:
+        # Fit naturally or slight slowdown — keep at 1.0 for cleanest voice
+        return (max(MIN_SPEED_FACTOR, min(1.0, ratio)), "natural")
+    if ratio <= MAX_SPEED_FACTOR:
+        return (ratio, "speedup_within_limit")
+    # Overflow — clamp + warn
+    return (MAX_SPEED_FACTOR, "overflow_clamped")
 
 
 def _generate_all_batched(project_id: str, project: dict):

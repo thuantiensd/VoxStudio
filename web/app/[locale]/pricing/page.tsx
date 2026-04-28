@@ -4,7 +4,7 @@ import { Pricing } from "@/components/marketing/pricing";
 import { Sparkles, ShieldCheck } from "lucide-react";
 
 const ROWS = [
-  "dubLength", "voiceClones", "downloads", "batch", "byok", "support",
+  "dubLength", "stt", "voiceClones", "projects", "downloads", "batch", "byok", "support",
 ] as const;
 
 export default function PricingPage() {
