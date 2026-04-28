@@ -13,11 +13,39 @@ from typing import Any
 
 import tempfile
 import os as _os
+import subprocess
 
 from app.services import dubbing_svc, whisper_svc, tts_svc
 from app.worker.gpu_worker import register_handler
 
 logger = logging.getLogger(__name__)
+
+
+def _ensure_local_file(remote_path: str) -> str:
+    """Nếu file path trỏ tới VPS (không tồn tại local), SCP về /tmp.
+
+    Dùng khi worker chạy trên Pod riêng (RunPod) còn API node trên VPS.
+    Pod kết nối VPS qua SSH key đã setup ở /root/.ssh/id_ed25519.
+    Trả về local path để xử lý.
+    """
+    if _os.path.exists(remote_path):
+        return remote_path
+
+    vps_host = _os.environ.get("VPS_FILE_HOST", "")  # vd "root@152.42.172.224"
+    if not vps_host:
+        raise ValueError(f"File không tồn tại: {remote_path}")
+
+    local_path = f"/tmp/{_os.path.basename(remote_path)}"
+    try:
+        subprocess.run(
+            ["scp", "-o", "StrictHostKeyChecking=no",
+             "-i", "/root/.ssh/id_ed25519",
+             f"{vps_host}:{remote_path}", local_path],
+            check=True, capture_output=True, timeout=120,
+        )
+    except subprocess.CalledProcessError as e:
+        raise ValueError(f"SCP thất bại từ {vps_host}: {e.stderr.decode()[:200]}")
+    return local_path
 
 
 async def _run_sync_generator(gen_factory, progress_cb):
@@ -110,8 +138,9 @@ async def stt_handler(payload: dict, *, job_id: str, progress_cb) -> dict:
     (tránh chuyển Base64 lớn qua JSON)."""
     audio_path = payload.get("audio_path")
     language = payload.get("language") or None
-    if not audio_path or not _os.path.exists(audio_path):
+    if not audio_path:
         raise ValueError("Không tìm thấy file audio cần xử lý.")
+    audio_path = _ensure_local_file(audio_path)
 
     await progress_cb(step="transcribing", progress=5)
     # Whisper blocking call — chạy trong thread để không block event loop
