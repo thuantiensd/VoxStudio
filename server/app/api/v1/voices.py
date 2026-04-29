@@ -1,6 +1,5 @@
 """Voice management API — per-user isolation."""
 
-import json
 import shutil
 import tempfile
 
@@ -10,14 +9,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.deps import get_current_user, require_verified
 from app.auth.rate_limit import require_quota
 from app.config import TTS_DEFAULT_GUIDANCE, TTS_DEFAULT_STEPS
-from app.core.gpu_manager import gpu
-from app.core.storage import save_audio
 from app.db.models import User
 from app.db.session import get_session
 from app.models.schemas import VoiceInfo, VoiceListResponse
-from app.services import plan_svc, voice_svc
-from app.services.tts_svc import trim_silence
-from app.services.audio_preprocess_svc import preprocess_ref_audio
+from app.services import job_svc, plan_svc, voice_svc
 
 router = APIRouter(prefix="/voices", tags=["Voices"])
 
@@ -41,58 +36,56 @@ async def preview_voice(
     audio_chunk_duration: float = Form(None, description="Audio chunk duration"),
     ctx: dict = Depends(require_quota("tts")),
 ):
-    """Preview TTS với reference audio (không lưu voice). Require auth + quota."""
-    from omnivoice import OmniVoiceGenerationConfig
+    """Preview TTS với reference audio (không lưu voice). Require auth + quota.
 
+    GPU work is routed through the DB job queue so API-only VPS deployments do
+    not try to load OmniVoice locally.
+    """
+    user: User = ctx["user"]
+    db: AsyncSession = ctx["db"]
     suffix = "." + (audio.filename.split(".")[-1] if audio.filename else "wav")
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
         shutil.copyfileobj(audio.file, tmp)
         tmp_path = tmp.name
 
-    # Preprocess: trim silence + normalize → embedding học từ audio sạch.
-    # Tránh giọng clone kế thừa pattern delay đầu câu của ref audio bẩn.
-    clean_path = preprocess_ref_audio(tmp_path)
-
     try:
-        voice_prompt = gpu.create_voice_prompt(ref_audio=clean_path, ref_text=ref_text)
-
-        cfg = {
-            "num_step": num_step or TTS_DEFAULT_STEPS,
-            "guidance_scale": guidance_scale if guidance_scale is not None else TTS_DEFAULT_GUIDANCE,
-        }
-        for k, v in [
-            ("t_shift", t_shift), ("layer_penalty_factor", layer_penalty_factor),
-            ("position_temperature", position_temperature),
-            ("class_temperature", class_temperature),
-            ("denoise", denoise), ("preprocess_prompt", preprocess_prompt),
-            ("postprocess_output", postprocess_output),
-            ("audio_chunk_duration", audio_chunk_duration),
-        ]:
-            if v is not None:
-                cfg[k] = v
-
-        gen_config = OmniVoiceGenerationConfig(**cfg)
-        kwargs = {"generation_config": gen_config}
-        if language: kwargs["language"] = language
-        if speed and speed != 1.0: kwargs["speed"] = speed
-
-        waveform = gpu.generate_tts(text, voice_prompt=voice_prompt, **kwargs)
-        # Cắt khoảng lặng đầu/cuối — OmniVoice luôn để ~0.3-0.5s im đầu clip.
-        waveform = trim_silence(waveform, gpu.sampling_rate, threshold_db=-40, pad_ms=30)
-        file_id, _ = save_audio(waveform, gpu.sampling_rate)
-        duration = waveform.shape[-1] / gpu.sampling_rate
-        return {
-            "audio_url": f"/api/v1/tts/audio/{file_id}",
-            "duration": round(duration, 2),
-        }
+        result = await job_svc.enqueue_and_wait(
+            db,
+            user_id=user.id,
+            kind="voice_preview",
+            timeout=900.0,
+            payload={
+                "audio_path": tmp_path,
+                "text": text,
+                "ref_text": ref_text,
+                "language": language,
+                "speed": speed,
+                "config": {
+                    "num_step": num_step or TTS_DEFAULT_STEPS,
+                    "guidance_scale": (
+                        guidance_scale
+                        if guidance_scale is not None
+                        else TTS_DEFAULT_GUIDANCE
+                    ),
+                    "t_shift": t_shift,
+                    "layer_penalty_factor": layer_penalty_factor,
+                    "position_temperature": position_temperature,
+                    "class_temperature": class_temperature,
+                    "denoise": denoise,
+                    "preprocess_prompt": preprocess_prompt,
+                    "postprocess_output": postprocess_output,
+                    "audio_chunk_duration": audio_chunk_duration,
+                },
+            },
+        )
+        result.pop("usage", None)
+        return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     finally:
-        # Dọn 2 file tạm: upload gốc + bản đã preprocess
         import os as _os
-        for p in {tmp_path, clean_path}:
-            try: _os.remove(p)
-            except Exception: pass
+        try: _os.remove(tmp_path)
+        except Exception: pass
 
 
 @router.post("/clone", response_model=VoiceInfo)
@@ -133,18 +126,27 @@ async def clone_voice(
     try:
         tag_list = [t.strip() for t in tags.split(",") if t.strip()] if tags else []
         client_ip = (request.client.host if request.client else None)
-        meta = await voice_svc.clone(
+        meta = await job_svc.enqueue_and_wait(
             db,
             user_id=user.id,
-            audio_path=tmp_path,
-            name=name,
-            ref_text=ref_text or None,
-            tags=tag_list,
-            consent_ip=client_ip,
+            kind="voice_clone",
+            timeout=900.0,
+            payload={
+                "audio_path": tmp_path,
+                "_owner_user_id": user.id,
+                "name": name,
+                "ref_text": ref_text or None,
+                "tags": tag_list,
+                "consent_ip": client_ip,
+            },
         )
         return meta
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        import os as _os
+        try: _os.remove(tmp_path)
+        except Exception: pass
 
 
 @router.get("", response_model=VoiceListResponse)

@@ -15,7 +15,9 @@ import tempfile
 import os as _os
 import subprocess
 
-from app.services import dubbing_svc, whisper_svc, tts_svc
+from app.services import dubbing_svc, whisper_svc, tts_svc, voice_svc
+from app.core.gpu_manager import gpu
+from app.core.storage import save_audio
 from app.worker.gpu_worker import register_handler
 
 logger = logging.getLogger(__name__)
@@ -276,3 +278,117 @@ async def tts_handler(payload: dict, *, job_id: str, progress_cb) -> dict:
 
 
 register_handler("tts", tts_handler)
+
+
+# ── Voice preview / clone handlers ─────────────────────────
+
+async def voice_preview_handler(payload: dict, *, job_id: str, progress_cb) -> dict:
+    """Generate a temporary cloned-voice preview on the GPU worker."""
+    audio_path = payload.get("audio_path")
+    text = (payload.get("text") or "").strip()
+    if not audio_path:
+        raise ValueError("Không tìm thấy audio mẫu.")
+    if not text:
+        raise ValueError("Nội dung preview trống.")
+    audio_path = _ensure_local_file(audio_path)
+
+    await progress_cb(step="preprocessing", progress=10)
+    from app.services.audio_preprocess_svc import preprocess_ref_audio
+    from app.services.tts_svc import trim_silence
+    from omnivoice import OmniVoiceGenerationConfig
+
+    clean_path = preprocess_ref_audio(audio_path)
+    try:
+        await progress_cb(step="creating_voice_prompt", progress=30)
+        voice_prompt = gpu.create_voice_prompt(
+            ref_audio=clean_path,
+            ref_text=payload.get("ref_text") or None,
+        )
+
+        cfg = {
+            k: v for k, v in (payload.get("config") or {}).items()
+            if v is not None
+        }
+        gen_config = OmniVoiceGenerationConfig(**cfg)
+        kwargs = {"generation_config": gen_config}
+        language = payload.get("language")
+        speed = payload.get("speed")
+        if language:
+            kwargs["language"] = language
+        if speed and speed != 1.0:
+            kwargs["speed"] = speed
+
+        await progress_cb(step="generating", progress=65)
+        waveform = gpu.generate_tts(text, voice_prompt=voice_prompt, **kwargs)
+        waveform = trim_silence(
+            waveform, gpu.sampling_rate, threshold_db=-40, pad_ms=30,
+        )
+        file_id, file_path = save_audio(waveform, gpu.sampling_rate)
+        _upload_to_vps(file_path)
+        duration = waveform.shape[-1] / gpu.sampling_rate
+        await progress_cb(step="finalizing", progress=100)
+        return {
+            "audio_url": f"/api/v1/tts/audio/{file_id}",
+            "duration": round(duration, 2),
+            "usage": {"characters": len(text)},
+        }
+    finally:
+        for p in {audio_path, clean_path}:
+            try:
+                if p and _os.path.exists(p):
+                    _os.remove(p)
+            except Exception:
+                pass
+
+
+register_handler("voice_preview", voice_preview_handler)
+
+
+async def voice_clone_handler(payload: dict, *, job_id: str, progress_cb) -> dict:
+    """Clone and persist a voice on the GPU worker."""
+    audio_path = payload.get("audio_path")
+    if not audio_path:
+        raise ValueError("Không tìm thấy audio mẫu.")
+    audio_path = _ensure_local_file(audio_path)
+
+    await progress_cb(step="cloning", progress=20)
+    from app.db.session import AsyncSessionLocal
+    async with AsyncSessionLocal() as db:
+        meta = await voice_svc.clone(
+            db,
+            user_id=int(payload.get("_owner_user_id") or 0),
+            audio_path=audio_path,
+            name=payload.get("name") or "Voice",
+            ref_text=payload.get("ref_text") or None,
+            tags=payload.get("tags") or [],
+            consent_ip=payload.get("consent_ip"),
+        )
+
+    # Mirror voice files back to the API VPS for admin/delete/download visibility.
+    try:
+        from app.config import VOICES_DIR as _VOICES_DIR
+        owner = payload.get("_owner_user_id")
+        voice_id = meta.get("id")
+        remote_root = _os.environ.get(
+            "VPS_VOICES_DIR",
+            "/home/voxstudio/VoxStudio/server/voices",
+        )
+        if owner and voice_id:
+            for ext in ("wav", "pt", "json"):
+                local_path = str(_VOICES_DIR / str(owner) / f"{voice_id}.{ext}")
+                remote_path = f"{remote_root}/{owner}/{voice_id}.{ext}"
+                _upload_to_vps(local_path, remote_path=remote_path)
+    except Exception as e:
+        logger.warning("Voice clone upload-back skipped: %s", e)
+
+    try:
+        if audio_path and _os.path.exists(audio_path):
+            _os.remove(audio_path)
+    except Exception:
+        pass
+
+    await progress_cb(step="finalizing", progress=100)
+    return {**meta, "usage": {"characters": 0}}
+
+
+register_handler("voice_clone", voice_clone_handler)
