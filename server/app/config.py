@@ -55,3 +55,23 @@ PORT = int(os.getenv("PORT", "8000"))
 # Worker mode — split deploy: VPS chạy WORKER_ENABLED=false (API-only, không
 # load model, RAM thấp), RunPod chạy WORKER_ENABLED=true (process GPU job).
 WORKER_ENABLED = os.getenv("WORKER_ENABLED", "true").lower() != "false"
+
+# ── Storage backend ────────────────────────────────────────────
+# "local" = filesystem (dev); "r2" = Cloudflare R2 (production).
+# Khi r2: cần đầy đủ R2_ACCOUNT_ID + R2_ACCESS_KEY_ID + R2_SECRET_ACCESS_KEY
+# + R2_BUCKET_PUBLIC + R2_BUCKET_PRIVATE; thiếu sẽ raise lỗi ở runtime call.
+STORAGE_BACKEND = os.getenv("STORAGE_BACKEND", "local").lower()
+
+R2_ACCOUNT_ID = os.getenv("R2_ACCOUNT_ID", "")
+R2_ACCESS_KEY_ID = os.getenv("R2_ACCESS_KEY_ID", "")
+R2_SECRET_ACCESS_KEY = os.getenv("R2_SECRET_ACCESS_KEY", "")
+R2_BUCKET_PUBLIC = os.getenv("R2_BUCKET_PUBLIC", "voxstudio-public")
+R2_BUCKET_PRIVATE = os.getenv("R2_BUCKET_PRIVATE", "voxstudio-private")
+# Public URL prefix — pub-xxx.r2.dev hoặc files.voxstudio.vn (custom domain).
+# Bắt buộc set khi STORAGE_BACKEND=r2 để build URL audio output trả về client.
+R2_PUBLIC_URL = os.getenv("R2_PUBLIC_URL", "").rstrip("/")
+# Endpoint S3-compatible — auto build từ ACCOUNT_ID nếu không override.
+R2_ENDPOINT_URL = os.getenv(
+    "R2_ENDPOINT_URL",
+    f"https://{R2_ACCOUNT_ID}.r2.cloudflarestorage.com" if R2_ACCOUNT_ID else "",
+)

@@ -3,13 +3,13 @@
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, RedirectResponse
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.rate_limit import require_quota
-from app.config import AUDIO_OUTPUT_DIR
-from app.core.storage import get_audio_path
+from app.config import AUDIO_OUTPUT_DIR, STORAGE_BACKEND
+from app.core.storage import get_audio_path, get_audio_url
 from app.db.models import User
 from app.models.schemas import TTSRequest, TTSResponse
 from app.services import tts_svc, edge_tts_svc, job_svc
@@ -101,7 +101,17 @@ async def edge_generate(req: EdgeTTSRequest):
 
 @router.get("/audio/{file_id}")
 async def get_audio(file_id: str):
-    """Download generated audio file."""
+    """Trả file audio output.
+
+    R2 mode: redirect 302 sang URL public R2 (CDN, không qua VPS bandwidth).
+    Local mode: stream file từ filesystem.
+    """
+    if STORAGE_BACKEND == "r2":
+        url = get_audio_url(file_id)
+        if url:
+            return RedirectResponse(url=url, status_code=302)
+        # Fallback: nếu R2 build URL fail, thử serve local (file vừa generate
+        # có thể chưa kịp upload xong).
     path = get_audio_path(file_id)
     if path is None:
         raise HTTPException(status_code=404, detail="Audio not found")

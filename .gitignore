@@ -22,6 +22,10 @@ server/*.db
 server/*.db-journal
 
 # Node / Frontend
+web/node_modules/
+web/.next/
+admin/node_modules/
+admin/.next/
 desktop/node_modules/
 desktop/dist/
 desktop/.vite/

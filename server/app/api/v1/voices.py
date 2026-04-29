@@ -1,20 +1,48 @@
 """Voice management API — per-user isolation."""
 
+import os as _os
 import shutil
 import tempfile
+import uuid
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.deps import get_current_user, require_verified
 from app.auth.rate_limit import require_quota
-from app.config import TTS_DEFAULT_GUIDANCE, TTS_DEFAULT_STEPS
+from app.config import STORAGE_BACKEND, TTS_DEFAULT_GUIDANCE, TTS_DEFAULT_STEPS
 from app.db.models import User
 from app.db.session import get_session
 from app.models.schemas import VoiceInfo, VoiceListResponse
 from app.services import job_svc, plan_svc, voice_svc
 
 router = APIRouter(prefix="/voices", tags=["Voices"])
+
+
+def _stage_ref_audio(audio: UploadFile, user_id: int) -> tuple[dict, str | None]:
+    """Save reference audio cho job payload.
+
+    R2 mode: stream upload → R2 private bucket, trả ({audio_key: ...}, None).
+    Local mode: write tmp file, trả ({audio_path: ...}, tmp_path) — caller
+    cleanup tmp_path sau khi job xong.
+    """
+    suffix = "." + (audio.filename.split(".")[-1] if audio.filename else "wav")
+    if STORAGE_BACKEND == "r2":
+        from app.core import storage_r2
+        key = f"uploads/{user_id}/voice-{uuid.uuid4().hex}{suffix}"
+        try:
+            storage_r2.upload_fileobj(
+                audio.file, key,
+                content_type=audio.content_type or "application/octet-stream",
+            )
+        except Exception as e:
+            raise HTTPException(500, f"Upload R2 thất bại: {e}")
+        return {"audio_key": key}, None
+
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+        shutil.copyfileobj(audio.file, tmp)
+        tmp_path = tmp.name
+    return {"audio_path": tmp_path}, tmp_path
 
 
 @router.post("/preview")
@@ -43,10 +71,7 @@ async def preview_voice(
     """
     user: User = ctx["user"]
     db: AsyncSession = ctx["db"]
-    suffix = "." + (audio.filename.split(".")[-1] if audio.filename else "wav")
-    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-        shutil.copyfileobj(audio.file, tmp)
-        tmp_path = tmp.name
+    audio_payload, tmp_path = _stage_ref_audio(audio, user.id)
 
     try:
         result = await job_svc.enqueue_and_wait(
@@ -55,7 +80,7 @@ async def preview_voice(
             kind="voice_preview",
             timeout=900.0,
             payload={
-                "audio_path": tmp_path,
+                **audio_payload,
                 "text": text,
                 "ref_text": ref_text,
                 "language": language,
@@ -83,9 +108,9 @@ async def preview_voice(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     finally:
-        import os as _os
-        try: _os.remove(tmp_path)
-        except Exception: pass
+        if tmp_path:
+            try: _os.remove(tmp_path)
+            except Exception: pass
 
 
 @router.post("/clone", response_model=VoiceInfo)
@@ -118,10 +143,7 @@ async def clone_voice(
                 f"{plan.name if plan else 'hiện tại'}. Xoá giọng cũ hoặc nâng cấp gói.",
             )
 
-    suffix = "." + (audio.filename.split(".")[-1] if audio.filename else "wav")
-    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-        shutil.copyfileobj(audio.file, tmp)
-        tmp_path = tmp.name
+    audio_payload, tmp_path = _stage_ref_audio(audio, user.id)
 
     try:
         tag_list = [t.strip() for t in tags.split(",") if t.strip()] if tags else []
@@ -132,7 +154,7 @@ async def clone_voice(
             kind="voice_clone",
             timeout=900.0,
             payload={
-                "audio_path": tmp_path,
+                **audio_payload,
                 "_owner_user_id": user.id,
                 "name": name,
                 "ref_text": ref_text or None,
@@ -144,9 +166,9 @@ async def clone_voice(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     finally:
-        import os as _os
-        try: _os.remove(tmp_path)
-        except Exception: pass
+        if tmp_path:
+            try: _os.remove(tmp_path)
+            except Exception: pass
 
 
 @router.get("", response_model=VoiceListResponse)

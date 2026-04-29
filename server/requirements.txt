@@ -31,3 +31,4 @@ sentry-sdk[fastapi]  # error tracking (DSN opt-in qua ENV SENTRY_DSN)
 email-validator
 python-dotenv
 google-auth
+boto3                # S3-compatible client cho Cloudflare R2 storage
