@@ -1126,7 +1126,9 @@ def generate_segment(project_id: str, seg_id: str) -> dict:
             waveform = gpu.generate_tts(tts_text, voice_prompt=voice_prompt, **kwargs)
             # Cắt khoảng lặng đầu/cuối — quan trọng cho dubbing vì nếu TTS có
             # 0.3s im đầu, voice sẽ delay so với mouth movement của video gốc.
-            waveform = trim_silence(waveform, gpu.sampling_rate, threshold_db=-40, pad_ms=30)
+            # Dubbing: trim hơi tight hơn TTS thường (-45dB / 50ms) vì cần align
+            # lip-sync với video — tránh delay 0.3s so với mouth movement.
+            waveform = trim_silence(waveform, gpu.sampling_rate, threshold_db=-45, pad_ms=50)
             sr = gpu.sampling_rate
             audio_np = waveform.cpu().numpy()
 

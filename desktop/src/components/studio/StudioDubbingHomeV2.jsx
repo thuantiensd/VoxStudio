@@ -21,7 +21,7 @@ import {
 import { showError } from "../../services/errors";
 import { getActivePreset, saveCustomPreset } from "../../services/preset";
 import {
-  LANGUAGE_VALUES, LOCALE_MAP, LANG_LABEL_VI,
+  LOCALE_MAP,
   TRANSCRIBE_SOURCES, TRANSLATE_TARGETS, langLabel,
   loadTTSSettings, saveTTSSettings,
 } from "../../services/ttsSettings";
@@ -326,7 +326,8 @@ export default function StudioDubbingHomeV2() {
     });
     saveTTSSettings({
       engine: cfg.ttsModel === "premium" ? "omnivoice" : "edge",
-      language: cfg.voiceLang === "auto" ? "" : cfg.voiceLang,
+      // voiceLang đã bỏ — dùng targetLang làm canonical language cho TTS preset
+      language: cfg.targetLang === "auto" ? "" : cfg.targetLang,
       voiceId: cfg.voiceId || "",
       edgeVoice: cfg.edgeVoice || "",
       emotion: cfg.emotion || "normal",
@@ -1120,38 +1121,37 @@ function voiceMatchesLang(voice, semantic) {
   return false;
 }
 
-function VoicePickerLayout({ langValue, onLangChange, count, children }) {
+function VoicePickerLayout({ count, children }) {
+  // Bỏ language picker bên trong — voice list tự filter theo targetLang
+  // ở top (sourceLang/targetLang ⇄). Tránh redundant + giảm UI clutter.
   const t = useT();
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "180px 1fr", gap: 10 }}>
-      <div>
-        <Label>{t("dub.language")}</Label>
-        <select value={langValue} onChange={(e) => onLangChange(e.target.value)} style={selectStyle}>
-          {LANGUAGE_VALUES.map((code) => (
-            <option key={code} value={code}>{LANG_LABEL_VI[code] || code}</option>
-          ))}
-        </select>
-      </div>
-      <div>
-        <Label>{t("dub.voice")}{count != null ? ` · ${t("dub.voiceCount", { n: count })}` : ""}</Label>
-        {children}
-      </div>
+    <div>
+      <Label>{t("dub.voice")}{count != null ? ` · ${t("dub.voiceCount", { n: count })}` : ""}</Label>
+      {children}
     </div>
   );
 }
 
 function OmniVoicePicker({ cfg, set, voices }) {
   const t = useT();
+  // Khi user chưa clone giọng nào → vẫn cho dùng Premium với giọng mặc định
+  // của OmniVoice (backend nhận voice_id=null sẽ tự fallback sang giọng built-in).
+  // Đồng thời nhắc nhẹ + link mời clone để có giọng riêng.
   if (!voices.length) {
+    // Force voiceId = "" để gửi default xuống backend
+    if (cfg.voiceId !== "") {
+      setTimeout(() => set({ voiceId: "" }), 0);
+    }
     return (
       <div style={{
         padding: "12px 14px", background: "var(--n-1)",
         border: "1px dashed var(--n-3)", borderRadius: 7,
         color: "var(--n-8)", fontSize: 12.5, lineHeight: 1.5,
       }}>
-        <b style={{ color: "var(--n-10)" }}>{t("dub.noVoicesPremium")}</b>
+        <b style={{ color: "var(--n-10)" }}>{t("dub.usingDefaultPremium")}</b>
         <br />
-        {t("dub.pleaseHint")}{" "}
+        {t("dub.cloneHint")}{" "}
         <a
           onClick={() => set({ ttsModel: "standard" })}
           style={{
@@ -1163,18 +1163,13 @@ function OmniVoicePicker({ cfg, set, voices }) {
       </div>
     );
   }
-  // 'auto' → match theo targetLang
-  const effectiveLang = cfg.voiceLang === "auto" ? cfg.targetLang : cfg.voiceLang;
-  const filtered = voices.filter((v) => voiceMatchesLang(v, effectiveLang));
+  // Filter theo targetLang (set ở dropdown top-level "Ngôn ngữ đích")
+  const filtered = voices.filter((v) => voiceMatchesLang(v, cfg.targetLang));
   if (filtered.length && !filtered.some((v) => v.id === cfg.voiceId)) {
     setTimeout(() => set({ voiceId: filtered[0].id }), 0);
   }
   return (
-    <VoicePickerLayout
-      langValue={cfg.voiceLang}
-      onLangChange={(v) => set({ voiceLang: v, voiceId: "" })}
-      count={filtered.length}
-    >
+    <VoicePickerLayout count={filtered.length}>
       {filtered.length === 0 ? (
         <div style={emptyVoiceStyle}>{t("dub.noVoiceForLang")}</div>
       ) : (
@@ -1203,17 +1198,13 @@ function EdgeVoicePicker({ cfg, set, voices }) {
       </div>
     );
   }
-  const effectiveLang = cfg.voiceLang === "auto" ? cfg.targetLang : cfg.voiceLang;
-  const filtered = voices.filter((v) => voiceMatchesLang(v, effectiveLang));
+  // Filter theo targetLang (top-level "Ngôn ngữ đích")
+  const filtered = voices.filter((v) => voiceMatchesLang(v, cfg.targetLang));
   if (filtered.length && !filtered.some((v) => (v.short_name || v.name) === cfg.edgeVoice)) {
     setTimeout(() => set({ edgeVoice: filtered[0].short_name || filtered[0].name }), 0);
   }
   return (
-    <VoicePickerLayout
-      langValue={cfg.voiceLang}
-      onLangChange={(v) => set({ voiceLang: v, edgeVoice: "" })}
-      count={filtered.length}
-    >
+    <VoicePickerLayout count={filtered.length}>
       {filtered.length === 0 ? (
         <div style={emptyVoiceStyle}>{t("dub.noVoiceForLang")}</div>
       ) : (

@@ -869,6 +869,8 @@ export default {
     toastReQueued: "Đã thêm lại vào hàng đợi.",
     presetDesc: "Cấu hình batch",
     noVoicesPremium: "Chưa có giọng Premium nào.",
+    usingDefaultPremium: "Sẽ dùng giọng Premium mặc định.",
+    cloneHint: "Mẹo: clone giọng riêng ở Voice Library, hoặc",
     switchToStandard: "chuyển sang Standard",
     pleaseHint: "Vui lòng",
     toUseEdgeHint: "để dùng giọng Edge TTS có sẵn.",

@@ -316,7 +316,7 @@ async def voice_preview_handler(payload: dict, *, job_id: str, progress_cb) -> d
         await progress_cb(step="generating", progress=65)
         waveform = gpu.generate_tts(text, voice_prompt=voice_prompt, **kwargs)
         waveform = trim_silence(
-            waveform, gpu.sampling_rate, threshold_db=-40, pad_ms=30,
+            waveform, gpu.sampling_rate,  # default -50dB / 80ms — đủ thoáng, không cắt phụ âm
         )
         # save_audio tự upload R2 public bucket nếu STORAGE_BACKEND=r2
         file_id, _file_path = save_audio(waveform, gpu.sampling_rate)

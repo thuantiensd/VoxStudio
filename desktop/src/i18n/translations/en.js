@@ -869,6 +869,8 @@ export default {
     toastReQueued: "Re-added to the queue.",
     presetDesc: "Batch configuration",
     noVoicesPremium: "No Premium voices yet.",
+    usingDefaultPremium: "Will use the default Premium voice.",
+    cloneHint: "Tip: clone your own voice in Voice Library, or",
     switchToStandard: "switch to Standard",
     pleaseHint: "Please",
     toUseEdgeHint: "to use the built-in Edge TTS voices.",
