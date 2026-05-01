@@ -672,7 +672,16 @@ async def auto_dub(
             gpu_worker.unsubscribe(job_id, q)
 
     from app.db.models import Job  # local import tránh circular
-    return StreamingResponse(event_generator(), media_type="text/event-stream")
+    # Headers chống proxy/CDN buffer SSE — đảm bảo event tới ngay khi yield.
+    # X-Accel-Buffering: no → tắt nginx buffering nếu deploy sau proxy.
+    sse_headers = {
+        "Cache-Control": "no-cache, no-transform",
+        "X-Accel-Buffering": "no",
+        "Connection": "keep-alive",
+    }
+    return StreamingResponse(
+        event_generator(), media_type="text/event-stream", headers=sse_headers,
+    )
 
 
 @router.post("/projects/from-url")
@@ -747,7 +756,14 @@ async def create_project_from_url(
                                      last_project_id)
             yield f"data: {json.dumps(item)}\n\n"
 
-    return StreamingResponse(event_generator(), media_type="text/event-stream")
+    sse_headers = {
+        "Cache-Control": "no-cache, no-transform",
+        "X-Accel-Buffering": "no",
+        "Connection": "keep-alive",
+    }
+    return StreamingResponse(
+        event_generator(), media_type="text/event-stream", headers=sse_headers,
+    )
 
 
 @router.post("/projects/{project_id}/cancel")
