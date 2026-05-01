@@ -146,16 +146,19 @@ export default function ProjectCard({ item, onOpen, onRetry }) {
             onError={(e) => { e.currentTarget.style.display = "none"; }}
           />
         )}
-        {/* Fallback icon */}
-        <div
-          style={{
-            position: "absolute", inset: 0,
-            display: "flex", alignItems: "center", justifyContent: "center",
-            pointerEvents: "none", zIndex: 0,
-          }}
-        >
-          <Film size={36} style={{ color: "rgba(255,255,255,0.12)" }} />
-        </div>
+        {/* Fallback icon — chỉ hiện khi chưa có thumbnail (tránh overlay mờ
+            đè lên ảnh thật làm khó nhìn). */}
+        {!thumbSrc && (
+          <div
+            style={{
+              position: "absolute", inset: 0,
+              display: "flex", alignItems: "center", justifyContent: "center",
+              pointerEvents: "none", zIndex: 0,
+            }}
+          >
+            <Film size={36} style={{ color: "rgba(255,255,255,0.12)" }} />
+          </div>
+        )}
 
         {/* Status badge top-left */}
         <StatusBadge status={item.status} />
