@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { Loader2, User, ChevronDown, ChevronUp, FolderUp, X, Check, Download, FileText, Cloud, Cpu } from 'lucide-react';
-import { generateTTS, generateEdgeTTS, listVoices, listEdgeVoices, audioURL } from '../services/api';
+import { generateTTS, generateEdgeTTS, listVoices, listEdgeVoices, audioURL, confirmAudioReceived } from '../services/api';
 import AudioPlayer from '../components/AudioPlayer';
 import SpeedKnob from '../components/SpeedKnob';
 import PageHeader, { Page, PageContent } from '../components/ui/PageHeader';
@@ -159,6 +159,9 @@ async function autoSaveAudio({ audioUrl, folder, baseName, toast, t }) {
     });
     if (savedPath) {
       toast.success(t('tts.autoSavedAt', { path: savedPath }), { duration: 6000 });
+      // Báo server đã tải xong → server xoá file ngay (privacy + storage).
+      // Best-effort: lỗi confirm không ảnh hưởng user vì server có TTL cleanup.
+      confirmAudioReceived(audioUrl).catch(() => {});
     }
     return savedPath;
   } catch (e) {

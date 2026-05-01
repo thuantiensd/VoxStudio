@@ -103,6 +103,35 @@ export function audioURL(path) {
   return `${SERVER_URL}${path}`;
 }
 
+/**
+ * Báo server: client đã tải audio thành công → server xoá file local.
+ * Tiết kiệm storage server + tăng privacy. Failure bị nuốt (best-effort)
+ * vì TTL cleanup task vẫn xử lý sau 1h nếu confirm fail.
+ *
+ * Input audioUrl có dạng `/api/v1/tts/audio/{file_id}?u=&exp=&sig=`.
+ * Hàm trích file_id + giữ nguyên query params (sig) khi gọi confirm.
+ */
+export async function confirmAudioReceived(audioUrl) {
+  if (!audioUrl) return;
+  try {
+    // Tách path + query
+    const u = audioUrl.startsWith('http')
+      ? new URL(audioUrl)
+      : new URL(audioUrl, SERVER_URL);
+    // Path: /api/v1/tts/audio/{file_id} → match file_id ở segment cuối
+    const m = u.pathname.match(/\/tts\/audio\/([^/]+)$/);
+    if (!m) return;
+    const fileId = m[1];
+    const qs = u.search; // giữ nguyên ?u=&exp=&sig=
+    await request(`/tts/audio/${fileId}/confirm-received${qs}`, {
+      method: 'POST',
+    });
+  } catch (e) {
+    // Best-effort — server có TTL cleanup nên không cần raise
+    console.warn('[confirmAudioReceived] failed (will be cleaned up by TTL):', e?.message);
+  }
+}
+
 // ── Voices ──────────────────────────────────────────
 export async function listVoices() {
   const res = await request('/voices');
