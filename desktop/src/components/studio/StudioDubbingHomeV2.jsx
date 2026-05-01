@@ -42,10 +42,18 @@ const MAX_SIZE_MB = 2048;
  *   auto_font_size, auto_pace, smart_chunk, highlight_keywords.
  */
 function buildSettingsPayload(cfg, ttsEngine, omniVoiceId) {
+  // Voice slots cho Premium multi-voice. Chỉ gửi N slot đầu tiên (theo
+  // voiceCount). Slot rỗng = "" → backend hiểu là default voice cho speaker đó.
+  const voiceCount = cfg.voiceCount || 1;
+  const voiceSlots = (cfg.voiceSlots || [])
+    .slice(0, voiceCount)
+    .map((v) => v || "");
   return {
     tts_engine: ttsEngine,
     edge_voice: cfg.ttsModel === "standard" ? cfg.edgeVoice : null,
     voice_id: omniVoiceId,
+    voice_count: cfg.ttsModel === "premium" ? voiceCount : 1,
+    voice_slots: cfg.ttsModel === "premium" ? voiceSlots : [],
     source_language_input: cfg.sourceLang,
     target_language: cfg.targetLang,
     enable_dubbing: cfg.enableDubbing,
@@ -145,6 +153,12 @@ export default function StudioDubbingHomeV2() {
       // đã pick lần trước vì user nhầm voice clone là "default" — UX confusing.
       // User pick voice clone khi muốn (dropdown vẫn cho phép).
       voiceId: "",
+      // Số giọng dùng cho video (1-5). Default 1 = single voice cho mọi
+      // speaker. >1 → app hiện N slot, app sẽ map speaker (theo gender từ
+      // diarization) vào các slot. Voice clone tag gender → filter chính xác.
+      voiceCount: 1,
+      // Mapping slot index → voice_id. Index 0..N-1. Empty string = default.
+      voiceSlots: ["", "", "", "", ""],
       edgeVoice: tts.edgeVoice || "",
       emotion: tts.emotion || "normal",
       // subtitle styling (tạm lưu local, chưa wire backend)
@@ -1138,29 +1152,94 @@ function VoicePickerLayout({ count, children }) {
 
 function OmniVoicePicker({ cfg, set, voices }) {
   const t = useT();
-  // LUÔN có option "Giọng mặc định" (voiceId="") — backend nhận voice_id null
-  // sẽ tự fallback sang giọng built-in của OmniVoice. Tương tự TTS standalone.
-  // Sau đó list voices đã clone (filter theo targetLang).
+  // Filter voices theo targetLang trước (UI consistency).
   const matchedByLang = voices.filter((v) => voiceMatchesLang(v, cfg.targetLang));
-  // Nếu user có clone nhưng không match lang → vẫn show all (kèm hint)
   const userClones = matchedByLang.length > 0 ? matchedByLang : voices;
   const showingAll = matchedByLang.length === 0 && voices.length > 0;
-  const totalCount = userClones.length + 1; // +1 cho default voice
+
+  // Voice count UI: 1-5. Default 1.
+  const count = cfg.voiceCount || 1;
+  const slots = cfg.voiceSlots || ["", "", "", "", ""];
+
+  // Phân loại voices theo gender tag để app gợi ý nam/nữ cho từng slot.
+  // Voice tag chứa "male" / "female" / "nam" / "nữ" → match.
+  const genderOf = (v) => {
+    const tagsStr = (Array.isArray(v.tags) ? v.tags.join(",") : (v.tags || "")).toLowerCase();
+    if (/\b(female|nữ|nu)\b/.test(tagsStr)) return "female";
+    if (/\b(male|nam)\b/.test(tagsStr)) return "male";
+    return "any";
+  };
+  const maleVoices = userClones.filter((v) => genderOf(v) === "male");
+  const femaleVoices = userClones.filter((v) => genderOf(v) === "female");
+
+  // Suggest gender cho từng slot: slot 1 = male, slot 2 = female, slot 3+ = any
+  const slotGender = (i) => (i === 0 ? "male" : i === 1 ? "female" : "any");
+  const voicesForSlot = (i) => {
+    const g = slotGender(i);
+    if (g === "male" && maleVoices.length) return maleVoices;
+    if (g === "female" && femaleVoices.length) return femaleVoices;
+    return userClones;  // fallback: tất cả
+  };
+
+  const setSlot = (i, voiceId) => {
+    const next = [...slots];
+    next[i] = voiceId;
+    set({ voiceSlots: next });
+  };
+
+  const setCount = (n) => {
+    set({ voiceCount: n });
+  };
 
   return (
-    <VoicePickerLayout count={totalCount}>
-      <select
-        value={cfg.voiceId || ""}
-        onChange={(e) => set({ voiceId: e.target.value })}
-        style={selectStyle}
-      >
-        <option value="">★ {t("dub.defaultPremiumVoice")}</option>
-        {userClones.map((v) => (
-          <option key={v.id} value={v.id}>
-            {v.name || v.id}{v.tags ? ` · ${Array.isArray(v.tags) ? v.tags.join(", ") : v.tags}` : ""}
-          </option>
-        ))}
-      </select>
+    <VoicePickerLayout count={count + 1}>
+      {/* Số giọng */}
+      <div style={{ marginBottom: 10 }}>
+        <Label>{t("dub.voiceCountLabel")}</Label>
+        <select
+          value={count}
+          onChange={(e) => setCount(parseInt(e.target.value, 10))}
+          style={{ ...selectStyle, maxWidth: 140 }}
+        >
+          {[1, 2, 3, 4, 5].map((n) => (
+            <option key={n} value={n}>
+              {t("dub.voiceCountValue", { n })}
+            </option>
+          ))}
+        </select>
+        <div style={{ marginTop: 4, fontSize: 11, color: "var(--n-7)" }}>
+          {count === 1
+            ? t("dub.voiceCountHintSingle")
+            : t("dub.voiceCountHintMulti", { n: count })}
+        </div>
+      </div>
+
+      {/* N slot pickers */}
+      {Array.from({ length: count }).map((_, i) => {
+        const g = slotGender(i);
+        const slotVoices = voicesForSlot(i);
+        const slotLabel = count === 1
+          ? t("dub.slotSingle")
+          : t(`dub.slot.${g}`, { i: i + 1 });
+        return (
+          <div key={i} style={{ marginBottom: i < count - 1 ? 8 : 0 }}>
+            <Label>{slotLabel}</Label>
+            <select
+              value={slots[i] || ""}
+              onChange={(e) => setSlot(i, e.target.value)}
+              style={selectStyle}
+            >
+              <option value="">★ {t("dub.defaultPremiumVoice")}</option>
+              {slotVoices.map((v) => (
+                <option key={v.id} value={v.id}>
+                  {v.name || v.id}{v.tags ? ` · ${Array.isArray(v.tags) ? v.tags.join(", ") : v.tags}` : ""}
+                </option>
+              ))}
+            </select>
+          </div>
+        );
+      })}
+
       {voices.length === 0 && (
         <div style={{ marginTop: 6, fontSize: 11, color: "var(--n-7)" }}>
           ⓘ {t("dub.cloneHintShort")}

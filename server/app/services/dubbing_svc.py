@@ -41,6 +41,109 @@ EDGE_VOICE_MALE_VI = "vi-VN-NamMinhNeural"
 EDGE_VOICE_FEMALE_VI = "vi-VN-HoaiMyNeural"
 
 
+def _pick_omni_voice_id_for_segment(seg: dict, project: dict) -> str | None:
+    """Chọn voice_id cho OmniVoice TTS theo speaker (multi-voice support).
+
+    Priority:
+      1. seg.voice_id (override per-segment do user edit)
+      2. project.voice_slots (multi-voice mode):
+         - voice_count > 1 + speaker đã diarize → map speaker → slot theo
+           gender của speaker. SPK1/SPK2/... được đánh số ổn định bởi
+           Resemblyzer; chia theo gender → ưu tiên slot có gender khớp.
+      3. project.voice_id (legacy single-voice setting)
+      4. None → caller sẽ fallback sang giọng built-in (_get_default_voice)
+    """
+    # 1. Per-segment override
+    seg_voice = seg.get("voice_id")
+    if seg_voice:
+        return seg_voice
+
+    voice_slots = project.get("voice_slots") or []
+    voice_count = int(project.get("voice_count") or 1)
+
+    # 2. Multi-voice mode: map speaker → slot
+    if voice_count > 1 and voice_slots:
+        speaker = seg.get("speaker")
+        gender = (seg.get("speaker_gender") or "").lower()
+
+        # Build assignment map từ speaker → slot index dựa trên gender.
+        # Slot 0 = male, slot 1 = female, slot 2+ = any (theo UI hint).
+        # Algorithm: với mỗi speaker, tìm slot phù hợp theo gender; nếu hết
+        # slot phù hợp thì dùng slot any. Cache assignment để stable trong
+        # toàn bộ pipeline (khỏi gen lại mỗi segment).
+        assignments = project.get("_voice_assignments_cache")
+        if assignments is None:
+            assignments = _build_speaker_voice_assignments(project, voice_slots, voice_count)
+            project["_voice_assignments_cache"] = assignments
+
+        if speaker and speaker in assignments:
+            mapped = assignments[speaker]
+            if mapped:  # "" = default, return None để fallback
+                return mapped
+
+    # 3. Legacy single-voice
+    return project.get("voice_id") or None
+
+
+def _build_speaker_voice_assignments(project: dict, voice_slots: list, voice_count: int) -> dict:
+    """Map speaker_id → voice_id (slot value) theo gender match.
+
+    Slot convention (frontend):
+      - Slot 0: male voices
+      - Slot 1: female voices
+      - Slot 2-4: any voices
+
+    Algorithm:
+      Loop speaker_genders, ưu tiên slot có gender khớp. Nếu hết slot khớp
+      gender → dùng slot "any" còn lại. Slot rỗng "" giữ nguyên (fallback default).
+    """
+    speaker_genders = project.get("speaker_genders") or {}
+    if not speaker_genders:
+        return {}
+
+    # Slot index → gender hint
+    slot_genders = []
+    for i in range(voice_count):
+        if i == 0:
+            slot_genders.append("male")
+        elif i == 1:
+            slot_genders.append("female")
+        else:
+            slot_genders.append("any")
+
+    # Track slot đã assign để không gán cùng slot nhiều speaker
+    used_slots = set()
+    assignments = {}
+
+    # Pass 1: gender match exact
+    for speaker, gender in speaker_genders.items():
+        for i in range(voice_count):
+            if i in used_slots:
+                continue
+            if slot_genders[i] == gender:
+                assignments[speaker] = voice_slots[i] if i < len(voice_slots) else ""
+                used_slots.add(i)
+                break
+
+    # Pass 2: speaker chưa được assign → dùng slot "any" còn trống
+    for speaker in speaker_genders:
+        if speaker in assignments:
+            continue
+        for i in range(voice_count):
+            if i in used_slots:
+                continue
+            if slot_genders[i] == "any":
+                assignments[speaker] = voice_slots[i] if i < len(voice_slots) else ""
+                used_slots.add(i)
+                break
+        else:
+            # Hết slot → dùng slot 0 cycling (degraded but predictable)
+            assignments[speaker] = voice_slots[0] if voice_slots else ""
+
+    logger.info("Voice assignments: %s (slots=%s)", assignments, voice_slots)
+    return assignments
+
+
 def _pick_edge_voice_for_segment(seg: dict, project: dict) -> str | None:
     """Choose an Edge TTS voice for this segment.
 
@@ -1104,8 +1207,10 @@ def generate_segment(project_id: str, seg_id: str) -> dict:
             # ── OmniVoice (local GPU) ──
             voice_prompt = None
 
-            # Use saved voice or default BLV voice
-            voice_id = seg.get("voice_id") or project.get("voice_id")
+            # Multi-voice support: pick voice_id theo speaker (gender-aware).
+            # Fallback chain: seg.voice_id → project.voice_slots[speaker] →
+            #                 project.voice_id → built-in default voice.
+            voice_id = _pick_omni_voice_id_for_segment(seg, project)
             if voice_id:
                 voice_prompt = load_voice(voice_id)
             else:
@@ -2063,6 +2168,10 @@ def update_project_settings(project_id: str, settings: dict) -> dict:
         "translate_engine",
         # Topic hint + glossary để cải thiện chất lượng dịch
         "topic_hint", "glossary",
+        # Multi-voice Premium: số giọng + voice_id cho từng slot.
+        # voice_count: int 1-5. voice_slots: list[str] (voice_id hoặc "" = default).
+        # Backend map speaker (theo gender từ diarization) → slot khi generate.
+        "voice_count", "voice_slots",
     }
     nullable = {"edge_voice", "voice_id", "default_emotion", "topic_hint", "glossary"}
     for k, v in settings.items():
