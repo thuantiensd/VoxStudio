@@ -40,9 +40,13 @@ def generate(
 ) -> dict:
     """Generate TTS audio. Returns {"audio_url", "duration", "sample_rate"}."""
     if not OMNIVOICE_AVAILABLE:
+        # Generic message — không lộ tên model nội bộ ra UI.
+        # Code "PREMIUM_TTS_UNAVAILABLE" để frontend phát hiện + gợi ý chuyển
+        # sang Standard hoặc đổi server.
         raise RuntimeError(
-            "OmniVoice not installed. Run cell 3 in Colab notebook "
-            "(or: pip install -e /content/OmniVoice-master)"
+            "PREMIUM_TTS_UNAVAILABLE: Giọng Premium chưa khả dụng trên server "
+            "này. Hãy chuyển sang Standard (Edge) hoặc kết nối tới server có "
+            "GPU để dùng Premium."
         )
     steps = num_step or TTS_DEFAULT_STEPS
     logger.info("TTS generate: text=%r voice=%s steps=%d", text[:50], voice_id, steps)

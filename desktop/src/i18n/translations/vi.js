@@ -69,6 +69,11 @@ export default {
       title: "Dịch vụ tạm gián đoạn",
       hint: "Chúng tôi đang khắc phục. Vui lòng thử lại sau vài phút.",
     },
+    premiumUnavailable: {
+      title: "Giọng Premium chưa khả dụng",
+      message: "Server hiện tại chưa hỗ trợ giọng Premium.",
+      hint: "Hãy chuyển sang giọng Standard hoặc liên hệ hỗ trợ để bật Premium.",
+    },
     pipeline: {
       title: "Xử lý bị gián đoạn",
       hint: "Đã dừng giữa chừng — vui lòng thử lại.",
@@ -701,8 +706,8 @@ export default {
       },
       subtitle: {
         label: "Phụ đề tức thì",
-        desc: "Whisper AI nghe và viết phụ đề chính xác từng từ, xuất .srt sẵn sàng đăng ngay.",
-        tags: "100+ ngôn ngữ,Whisper,Word-level",
+        desc: "AI nghe và viết phụ đề chính xác từng từ, xuất .srt sẵn sàng đăng ngay.",
+        tags: "100+ ngôn ngữ,Word-level,Đa ngữ",
       },
       tts: {
         label: "Đọc văn bản như người thật",
@@ -870,7 +875,7 @@ export default {
     presetDesc: "Cấu hình batch",
     noVoicesPremium: "Chưa có giọng Premium nào.",
     usingDefaultPremium: "Sẽ dùng giọng Premium mặc định.",
-    defaultPremiumVoice: "Giọng mặc định (OmniVoice)",
+    defaultPremiumVoice: "Giọng mặc định",
     cloneHint: "Mẹo: clone giọng riêng ở Voice Library, hoặc",
     cloneHintShort: "Chưa có giọng clone — clone ở Voice Library để có giọng riêng.",
     showingAllVoices: "Đang hiện tất cả giọng (chưa có giọng nào tag {{lang}}). Vào Voice Library để set ngôn ngữ.",
@@ -906,7 +911,7 @@ export default {
     topicHintHelp: "1 câu mô tả ngắn giúp AI dịch đúng tone + văn phong. Bỏ trống nếu video chung chung.",
     glossaryLabel: "Từ điển (glossary)",
     glossaryPlaceholder: "ChatGPT=ChatGPT\nneural network=mạng nơ-ron\nGPU=keep\nClaude=keep",
-    glossaryHelp: "Mỗi dòng 1 cặp 'gốc=dịch'. Dùng 'keep' để giữ nguyên (không dịch). Áp dụng tốt nhất với LLM (Claude/GPT/Gemini/Qwen); engine free chỉ thay sau khi dịch.",
+    glossaryHelp: "Mỗi dòng 1 cặp 'gốc=dịch'. Dùng 'keep' để giữ nguyên (không dịch). Áp dụng tốt nhất với engine LLM (Claude/GPT/Gemini); engine free chỉ thay sau khi dịch.",
   },
   drawer: {
     project: "Dự án",

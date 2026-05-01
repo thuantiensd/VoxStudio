@@ -69,6 +69,11 @@ export default {
       title: "Service temporarily unavailable",
       hint: "We're working on it. Please try again in a few minutes.",
     },
+    premiumUnavailable: {
+      title: "Premium voice unavailable",
+      message: "The current server doesn't support Premium voice.",
+      hint: "Switch to Standard voice or contact support to enable Premium.",
+    },
     pipeline: {
       title: "Processing interrupted",
       hint: "Stopped mid-run. Please try again.",
@@ -701,8 +706,8 @@ export default {
       },
       subtitle: {
         label: "Instant captions",
-        desc: "Whisper AI transcribes word-perfect subtitles, exports .srt ready to publish.",
-        tags: "100+ languages,Whisper,Word-level",
+        desc: "AI transcribes word-perfect subtitles, exports .srt ready to publish.",
+        tags: "100+ languages,Word-level,Multilingual",
       },
       tts: {
         label: "Read text like a human",
@@ -870,7 +875,7 @@ export default {
     presetDesc: "Batch configuration",
     noVoicesPremium: "No Premium voices yet.",
     usingDefaultPremium: "Will use the default Premium voice.",
-    defaultPremiumVoice: "Default voice (OmniVoice)",
+    defaultPremiumVoice: "Default voice",
     cloneHint: "Tip: clone your own voice in Voice Library, or",
     cloneHintShort: "No cloned voices yet — clone in Voice Library for a personalized voice.",
     showingAllVoices: "Showing all voices (none tagged {{lang}}). Go to Voice Library to set language.",
@@ -906,7 +911,7 @@ export default {
     topicHintHelp: "One short sentence helps the AI nail the tone + style. Leave blank for generic content.",
     glossaryLabel: "Glossary",
     glossaryPlaceholder: "ChatGPT=ChatGPT\nneural network=mạng nơ-ron\nGPU=keep\nClaude=keep",
-    glossaryHelp: "One pair per line 'source=target'. Use 'keep' to leave term untranslated. Best with LLMs (Claude/GPT/Gemini/Qwen); free engines apply post-translation replacement only.",
+    glossaryHelp: "One pair per line 'source=target'. Use 'keep' to leave term untranslated. Best with LLM engines (Claude/GPT/Gemini); free engines apply post-translation replacement only.",
   },
   drawer: {
     project: "Project",

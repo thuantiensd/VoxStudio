@@ -96,6 +96,18 @@ function renderAppError(err, ctx, T) {
     variant: "error",
   };
 
+  // Special-case: backend báo Premium TTS chưa khả dụng (server không có GPU
+  // hoặc model chưa cài). Hiện UX gợi ý chuyển Standard cụ thể.
+  if (typeof err.message === "string" && err.message.includes("PREMIUM_TTS_UNAVAILABLE")) {
+    return {
+      ...base,
+      title: T("errors.premiumUnavailable.title"),
+      message: T("errors.premiumUnavailable.message"),
+      hint: T("errors.premiumUnavailable.hint"),
+      variant: "warn",
+    };
+  }
+
   switch (err.kind) {
     case "network":
       return { ...base,
