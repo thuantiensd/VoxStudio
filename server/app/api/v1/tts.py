@@ -1,20 +1,29 @@
-"""TTS API endpoints."""
+"""TTS API endpoints — signed URL + auth bảo vệ audio output."""
 
 import uuid
+from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import FileResponse, RedirectResponse
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.auth.audio_sig import signed_url, verify as verify_sig
+from app.auth.deps import get_current_user
 from app.auth.rate_limit import require_quota
 from app.config import AUDIO_OUTPUT_DIR, STORAGE_BACKEND
 from app.core.storage import get_audio_path, get_audio_url
 from app.db.models import User
+from app.db.session import get_session
 from app.models.schemas import TTSRequest, TTSResponse
 from app.services import tts_svc, edge_tts_svc, job_svc
 
 router = APIRouter(prefix="/tts", tags=["TTS"])
+
+
+def _signed_audio_url(file_id: str, user_id: int) -> str:
+    """Helper trả URL có HMAC sig — dán vào response 'audio_url'."""
+    return signed_url(file_id, user_id, ttl_seconds=3600)
 
 
 @router.post("/generate", response_model=TTSResponse)
@@ -22,11 +31,11 @@ async def generate(
     req: TTSRequest,
     ctx: dict = Depends(require_quota("tts")),
 ):
-    """Generate speech from text — qua GPU job queue để chống OOM."""
+    """Generate speech from text — qua GPU job queue."""
     user: User = ctx["user"]
     db: AsyncSession = ctx["db"]
     payload = {
-        "_owner_user_id": user.id,  # để handler check voice ownership
+        "_owner_user_id": user.id,
         "text": req.text,
         "voice_id": req.voice_id,
         "language": req.language,
@@ -45,13 +54,15 @@ async def generate(
     try:
         result = await job_svc.enqueue_and_wait(
             db, user_id=user.id, kind="tts", payload=payload,
-            timeout=600.0,  # TTS nhanh hơn, 10 phút đủ
+            timeout=600.0,
         )
-        # Strip usage info trước khi trả FE (FE không cần)
         result.pop("usage", None)
+        # Override audio_url với signed URL (handler trả raw /audio/{file_id})
+        file_id = (result.get("audio_url") or "").rsplit("/", 1)[-1]
+        if file_id:
+            result["audio_url"] = _signed_audio_url(file_id, user.id)
         return result
     except ValueError as e:
-        # Chứa các message quota/timeout — user-friendly, không phải 500
         raise HTTPException(status_code=400, detail=str(e))
 
 
@@ -63,7 +74,10 @@ class EdgeTTSRequest(BaseModel):
 
 
 @router.post("/edge-generate")
-async def edge_generate(req: EdgeTTSRequest):
+async def edge_generate(
+    req: EdgeTTSRequest,
+    user: User = Depends(get_current_user),
+):
     """Generate speech using VoxCloud (Edge TTS) — free, no GPU."""
     try:
         file_id = uuid.uuid4().hex[:12]
@@ -76,7 +90,6 @@ async def edge_generate(req: EdgeTTSRequest):
             voice=req.voice, speed=req.speed,
         )
 
-        # Convert mp3 → wav
         import ffmpeg
         (
             ffmpeg.input(str(mp3_path))
@@ -91,7 +104,7 @@ async def edge_generate(req: EdgeTTSRequest):
         duration = len(data) / sr
 
         return {
-            "audio_url": f"/api/v1/tts/audio/{file_id}",
+            "audio_url": _signed_audio_url(file_id, user.id),
             "duration": round(duration, 2),
             "sample_rate": sr,
         }
@@ -100,18 +113,35 @@ async def edge_generate(req: EdgeTTSRequest):
 
 
 @router.get("/audio/{file_id}")
-async def get_audio(file_id: str):
-    """Trả file audio output.
+async def get_audio(
+    file_id: str,
+    request: Request,
+    sig: Optional[str] = Query(None),
+    u: Optional[str] = Query(None),
+    exp: Optional[str] = Query(None),
+    user: User = Depends(get_current_user),
+):
+    """Trả file audio output. Yêu cầu signed URL (sig+u+exp) khớp user.
 
-    R2 mode: redirect 302 sang URL public R2 (CDN, không qua VPS bandwidth).
+    R2 mode: redirect 302 sang R2 public URL (sau khi verify sig).
     Local mode: stream file từ filesystem.
     """
+    # Verify HMAC signature trước — bảo vệ chống ai cũng tải bằng file_id
+    verify_sig(
+        file_id,
+        user_id_request=user.id,
+        sig=sig, u=u, exp=exp,
+        is_admin=(user.role == "admin"),
+    )
+
+    # Path traversal protection — file_id phải hex (12 chars), không slash/dot
+    if not file_id.isalnum() or len(file_id) > 32:
+        raise HTTPException(status_code=400, detail="Invalid file_id")
+
     if STORAGE_BACKEND == "r2":
         url = get_audio_url(file_id)
         if url:
             return RedirectResponse(url=url, status_code=302)
-        # Fallback: nếu R2 build URL fail, thử serve local (file vừa generate
-        # có thể chưa kịp upload xong).
     path = get_audio_path(file_id)
     if path is None:
         raise HTTPException(status_code=404, detail="Audio not found")

@@ -213,3 +213,44 @@ class Payment(Base):
 
 
 Index("idx_payment_user_status", Payment.user_id, Payment.status)
+
+
+# ── Dubbing project (per-user, DB-backed) ─────────────────────
+class DubbingProject(Base):
+    """Mỗi project lồng tiếng = 1 row trong DB (single source of truth).
+
+    Filesystem chỉ là blob storage tại:
+      dubbing_projects/<user_id>/<project_id>/{original.mp4, meta.json, ...}
+
+    Path luôn có user_id → không leak qua URL pattern, dễ filter/cleanup.
+    """
+    __tablename__ = "dubbing_projects"
+
+    id:           Mapped[str] = mapped_column(String(16), primary_key=True)
+    user_id:      Mapped[int] = mapped_column(
+                    ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    title:        Mapped[str] = mapped_column(String(255), default="")
+    # File gốc (chỉ filename, path = dubbing_projects/<user_id>/<id>/original.<ext>)
+    video_filename: Mapped[str] = mapped_column(String(255), default="")
+    duration_sec: Mapped[float] = mapped_column(Float, default=0.0)
+    file_size_bytes: Mapped[int] = mapped_column(Integer, default=0)
+
+    source_language: Mapped[str] = mapped_column(String(32), default="auto")
+    target_language: Mapped[str] = mapped_column(String(32), default="vietnamese")
+
+    # Pipeline status: created | transcribed | translated | dubbed | done | failed
+    status:       Mapped[str] = mapped_column(String(16), default="created", index=True)
+    error:        Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # Soft delete — giữ data 30 ngày trước khi xoá file. NULL = active.
+    deleted_at:   Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
+
+    created_at:   Mapped[datetime] = mapped_column(
+                    DateTime, default=datetime.utcnow, index=True)
+    updated_at:   Mapped[datetime] = mapped_column(
+                    DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+# Composite index cho list query: user + active + sort by recent
+Index("idx_dubproj_user_recent",
+      DubbingProject.user_id, DubbingProject.deleted_at, DubbingProject.created_at.desc())
