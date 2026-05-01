@@ -36,13 +36,11 @@ async def create_project(
     enable_subtitle: bool = Form(False),
 ):
     """Upload video and create dubbing project."""
-    import logging
-    _log = logging.getLogger("dubbing.create_project")
+    import sys, traceback
+    print(f"[DUBBING] >>> create_project filename={video.filename} target={target_language} source={source_language} dub={enable_dubbing} sub={enable_subtitle} voice={voice_id}", flush=True)
     try:
         data = await video.read()
-        _log.info("Creating project: filename=%s size=%d target=%s source=%s dub=%s sub=%s voice=%s",
-                  video.filename, len(data), target_language, source_language,
-                  enable_dubbing, enable_subtitle, voice_id)
+        print(f"[DUBBING] >>> read {len(data)} bytes from upload", flush=True)
         result = dubbing_svc.create_project(
             video_data=data,
             video_filename=video.filename,
@@ -52,12 +50,15 @@ async def create_project(
             enable_dubbing=enable_dubbing,
             enable_subtitle=enable_subtitle,
         )
+        print(f"[DUBBING] >>> SUCCESS project_id={result.get('id')}", flush=True)
         return result
     except ValueError as e:
-        _log.warning("Create project 400: %s", str(e))
+        print(f"[DUBBING] !!! 400 ValueError: {e}", flush=True)
+        traceback.print_exc(file=sys.stdout)
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        _log.exception("Create project 500: %s", str(e))
+        print(f"[DUBBING] !!! 500 Exception: {e}", flush=True)
+        traceback.print_exc(file=sys.stdout)
         raise HTTPException(status_code=500, detail=str(e))
 
 
