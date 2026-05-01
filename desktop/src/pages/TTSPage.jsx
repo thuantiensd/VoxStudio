@@ -160,6 +160,8 @@ async function autoSaveAudio({ audioUrl, folder, baseName, toast, t }) {
     if (savedPath) {
       toast.success(t('tts.autoSavedAt', { path: savedPath }), { duration: 6000 });
       // Báo server đã tải xong → server xoá file ngay (privacy + storage).
+      // Đã có file local nên user vẫn play preview được qua file:// URL
+      // (xem AudioPlayer: result.local_path được ưu tiên hơn audio_url).
       // Best-effort: lỗi confirm không ảnh hưởng user vì server có TTL cleanup.
       confirmAudioReceived(audioUrl).catch(() => {});
     }
@@ -450,13 +452,21 @@ function SingleMode({ s }) {
       } else {
         r = await generateTTS({ text, ...s.ttsParams() });
       }
+      // Set kết quả ngay (audio_url server) để player render — preview qua server
+      // trong khi đợi auto-save xong.
       setResult(r);
       // Auto-save về máy nếu user đã đặt outputFolder (Electron only).
+      // AWAIT để có local_path → update result → AudioPlayer play từ file local.
+      // Sau khi local có file → confirmAudioReceived xoá server (xảy ra trong autoSaveAudio).
       if (s.outputFolder && r?.audio_url) {
-        autoSaveAudio({
+        const savedPath = await autoSaveAudio({
           audioUrl: r.audio_url, folder: s.outputFolder,
           baseName: text.trim().slice(0, 40), toast, t,
         });
+        if (savedPath) {
+          // Update result với local_path → AudioPlayer auto-switch sang file://
+          setResult((prev) => prev ? { ...prev, local_path: savedPath } : prev);
+        }
       }
     } catch (e) {
       if (isQuotaError(e)) upgrade.open(e.message);
@@ -507,7 +517,9 @@ function SingleMode({ s }) {
       {result && (
         <div className="mt-5">
           <p className="text-sm mb-2" style={labelStyle}>{t('tts.duration')} {result.duration}s</p>
-          <AudioPlayer src={audioURL(result.audio_url)} />
+          <AudioPlayer src={result.local_path
+            ? `file://${result.local_path}`
+            : audioURL(result.audio_url)} />
         </div>
       )}
     </>
@@ -659,13 +671,19 @@ function BatchMode({ s }) {
           r = await generateTTS({ text: f.text, ...params });
         }
         setFiles(prev => prev.map(x => x.id === f.id ? { ...x, status: 'done', result: r } : x));
-        // Auto-save từng file batch nếu có outputFolder.
+        // Auto-save từng file batch nếu có outputFolder. AWAIT để có local_path
+        // → AudioPlayer batch dùng file:// (server đã xoá sau confirm).
         if (s.outputFolder && r?.audio_url) {
-          autoSaveAudio({
+          const savedPath = await autoSaveAudio({
             audioUrl: r.audio_url, folder: s.outputFolder,
             baseName: f.name?.replace(/\.[^.]+$/, '') || `tts_${i + 1}`,
             toast, t,
           });
+          if (savedPath) {
+            setFiles(prev => prev.map(x => x.id === f.id
+              ? { ...x, result: { ...x.result, local_path: savedPath } }
+              : x));
+          }
         }
       } catch (e) {
         if (isQuotaError(e)) {
@@ -745,7 +763,10 @@ function BatchMode({ s }) {
                     <p className="text-sm truncate">{f.name}</p>
                     <div className="flex items-center gap-1.5 flex-shrink-0 ml-2">
                       {f.status === 'done' && f.result && (
-                        <a href={audioURL(f.result.audio_url)} download={f.name.replace(/\.[^.]+$/, '.wav')}
+                        <a href={f.result.local_path
+                            ? `file://${f.result.local_path}`
+                            : audioURL(f.result.audio_url)}
+                          download={f.name.replace(/\.[^.]+$/, '.wav')}
                           className="p-1.5 rounded-lg hover:opacity-80" style={{ color: 'var(--accent)' }}>
                           <Download size={14} />
                         </a>
@@ -764,7 +785,10 @@ function BatchMode({ s }) {
                   </p>
                   {f.status === 'done' && f.result && (
                     <div className="mt-2">
-                      <AudioPlayer src={audioURL(f.result.audio_url)} filename={f.name.replace(/\.[^.]+$/, '.wav')} compact />
+                      <AudioPlayer src={f.result.local_path
+                          ? `file://${f.result.local_path}`
+                          : audioURL(f.result.audio_url)}
+                        filename={f.name.replace(/\.[^.]+$/, '.wav')} compact />
                     </div>
                   )}
                 </div>
@@ -798,7 +822,9 @@ function BatchMode({ s }) {
                     e.preventDefault();
                     files.filter(f => f.status === 'done' && f.result).forEach(f => {
                       const a = document.createElement('a');
-                      a.href = audioURL(f.result.audio_url);
+                      a.href = f.result.local_path
+                        ? `file://${f.result.local_path}`
+                        : audioURL(f.result.audio_url);
                       a.download = f.name.replace(/\.[^.]+$/, '.wav');
                       a.click();
                     });
