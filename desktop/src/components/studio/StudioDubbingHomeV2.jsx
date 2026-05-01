@@ -1218,9 +1218,14 @@ function OmniVoicePicker({ cfg, set, voices }) {
       {Array.from({ length: count }).map((_, i) => {
         const g = slotGender(i);
         const slotVoices = voicesForSlot(i);
+        // Map gender → i18n key (camelCase, không dùng dot trong key vì
+        // i18n resolve split dot thành nested object).
+        const slotKey = g === "male" ? "dub.slotMale"
+          : g === "female" ? "dub.slotFemale"
+          : "dub.slotAny";
         const slotLabel = count === 1
           ? t("dub.slotSingle")
-          : t(`dub.slot.${g}`, { i: i + 1 });
+          : t(slotKey, { i: i + 1 });
         return (
           <div key={i} style={{ marginBottom: i < count - 1 ? 8 : 0 }}>
             <Label>{slotLabel}</Label>
