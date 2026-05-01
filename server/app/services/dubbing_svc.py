@@ -2332,8 +2332,13 @@ def auto_dub(project_id: str, engine: str = "google", api_key: str | None = None
                 return
             if "_result" not in tick:
                 yield {"step": "translating", **{k: v for k, v in tick.items() if k != "step"}}
-        # Qwen rewrite: only on CUDA (7B model too heavy for MPS/CPU)
-        if IS_CUDA:
+        # Qwen rewrite: chỉ chạy khi engine KHÔNG phải LLM cloud.
+        # LLM cloud (gemini/openai/claude/qwen) đã polish sẵn rồi → Qwen rewrite
+        # thừa, tốn 5-6GB VRAM + thời gian + có thể làm tệ hơn.
+        # Chỉ áp dụng cho engine google_free / google_cloud / deepl (non-LLM).
+        eng_lower = (engine or "google_free").lower()
+        is_llm_cloud_engine = eng_lower in ("gemini", "openai", "claude", "qwen")
+        if IS_CUDA and not is_llm_cloud_engine:
             yield {"step": "translating", "label": "Đang tinh chỉnh lời thoại...", "progress": 42}
             try:
                 project = _load_meta(project_id)
@@ -2362,6 +2367,8 @@ def auto_dub(project_id: str, engine: str = "google", api_key: str | None = None
                 yield {"step": "translating", "label": "Đang dọn bộ nhớ...",
                        "progress": r_transl[1]}
                 gpu.unload_llm()
+        elif is_llm_cloud_engine:
+            logger.info("Skip Qwen rewrite — engine '%s' đã polish sẵn", eng_lower)
         else:
             logger.info("Skipping Qwen rewrite (no CUDA). Using Google Translate only.")
         yield {"step": "translating", "label": "Dịch thuật hoàn tất!", "progress": r_transl[1]}
