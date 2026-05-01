@@ -18,7 +18,7 @@ import soundfile as sf
 from app.config import DUBBING_DIR, VOICES_DIR, TTS_DEFAULT_GUIDANCE, TTS_DEFAULT_STEPS, IS_CUDA
 from app.core.gpu_manager import gpu
 from app.core.storage import load_voice
-from app.services import whisper_svc, translate_svc, llm_translate_svc, edge_tts_svc, vocal_separator_svc, gemini_translate_svc, diarize_svc, resemblyzer_diarize_svc
+from app.services import whisper_svc, translate_svc, llm_translate_svc, edge_tts_svc, vocal_separator_svc, gemini_translate_svc, diarize_svc, resemblyzer_diarize_svc, default_voices_svc
 from app.services.tts_svc import trim_silence
 
 logger = logging.getLogger(__name__)
@@ -817,28 +817,34 @@ def transcribe_project(project_id: str) -> dict:
     logger.info("Post-process: %d segments after merge-short (final)", len(merged))
 
     # ── Diarization: gán speaker + gender cho từng segment ──
-    # Default: Resemblyzer (no token, MIT, ~17MB).
-    # If HF_TOKEN is set AND DIARIZE_BACKEND=pyannote → use pyannote (better quality).
+    # CHỈ chạy khi voice_count > 1 — single voice mode dùng cùng giọng cho
+    # mọi segment, không cần tốn thời gian diarize/detect gender.
+    project_for_count = _load_meta(project_id) or {}
+    voice_count_meta = int(project_for_count.get("voice_count") or 1)
     speaker_genders = {}
-    diarize_backend = os.getenv("DIARIZE_BACKEND", "resemblyzer").lower()
-    use_pyannote = diarize_backend == "pyannote" and os.getenv("HF_TOKEN")
 
-    try:
-        diar_audio = str(vocals_path) if vocals_path.exists() else audio_path
-        if use_pyannote:
-            logger.info("Diarization backend: pyannote (HF_TOKEN set)")
-            diar_module = diarize_svc.diarize
-        else:
-            logger.info("Diarization backend: Resemblyzer (default, no token)")
-            diar_module = resemblyzer_diarize_svc.diarize
+    if voice_count_meta <= 1:
+        logger.info("Single voice mode (voice_count=1) → skip diarization")
+    else:
+        diarize_backend = os.getenv("DIARIZE_BACKEND", "resemblyzer").lower()
+        use_pyannote = diarize_backend == "pyannote" and os.getenv("HF_TOKEN")
 
-        diar_result = diar_module.diarize(diar_audio, min_speakers=1, max_speakers=6)
-        merged = diar_module.assign_speaker_to_segments(merged, diar_result["turns"])
-        speaker_genders = diar_result.get("speaker_genders", {})
-        logger.info("Diarization: %d speakers %s",
-                    len(diar_result["speakers"]), speaker_genders)
-    except Exception as e:
-        logger.warning("Diarization skipped (%s) — segments will have speaker=None", e)
+        try:
+            diar_audio = str(vocals_path) if vocals_path.exists() else audio_path
+            if use_pyannote:
+                logger.info("Diarization backend: pyannote (HF_TOKEN set)")
+                diar_module = diarize_svc.diarize
+            else:
+                logger.info("Diarization backend: Resemblyzer (default, no token)")
+                diar_module = resemblyzer_diarize_svc.diarize
+
+            diar_result = diar_module.diarize(diar_audio, min_speakers=1, max_speakers=6)
+            merged = diar_module.assign_speaker_to_segments(merged, diar_result["turns"])
+            speaker_genders = diar_result.get("speaker_genders", {})
+            logger.info("Diarization: %d speakers %s",
+                        len(diar_result["speakers"]), speaker_genders)
+        except Exception as e:
+            logger.warning("Diarization skipped (%s) — segments will have speaker=None", e)
 
     segments = []
     for i, seg in enumerate(merged):
@@ -1207,15 +1213,40 @@ def generate_segment(project_id: str, seg_id: str) -> dict:
             # ── OmniVoice (local GPU) ──
             voice_prompt = None
 
-            # Multi-voice support: pick voice_id theo speaker (gender-aware).
-            # Fallback chain: seg.voice_id → project.voice_slots[speaker] →
-            #                 project.voice_id → None (giọng built-in OmniVoice).
+            # Voice resolution chain (ưu tiên):
+            #   1. seg.voice_id (override per-segment)
+            #   2. project.voice_slots theo speaker gender (multi-voice)
+            #   3. project.voice_id (legacy single)
+            #   4. Multi-voice + slot rỗng → default pool theo speaker_id +
+            #      gender (deterministic → cùng speaker = cùng giọng).
+            #   5. Single-voice → voice_prompt=None (OmniVoice baseline).
             voice_id = _pick_omni_voice_id_for_segment(seg, project)
             if voice_id:
                 voice_prompt = load_voice(voice_id)
-            # else: voice_prompt = None → OmniVoice dùng giọng built-in thật,
-            # KHÔNG load BLV.pt nữa (user pick "Giọng mặc định" → nghĩa là
-            # không có embedding, để model tự sinh giọng baseline).
+            else:
+                # Slot empty case — phân biệt single vs multi voice
+                voice_count = int(project.get("voice_count") or 1)
+                if voice_count > 1:
+                    # Multi-voice + slot rỗng → pool deterministic theo speaker
+                    speaker_id = seg.get("speaker") or "unknown"
+                    gender = seg.get("speaker_gender")
+                    pool_path = default_voices_svc.get_default_voice_path_for_speaker(
+                        speaker_id, gender,
+                    )
+                    if pool_path:
+                        # Cache load tránh đọc lại .pt mỗi segment
+                        cache_key = f"_pool_voice_{pool_path.name}"
+                        cached = project.get(cache_key)
+                        if cached is None:
+                            import torch as _torch
+                            from omnivoice.models.omnivoice import VoiceClonePrompt
+                            _torch.serialization.add_safe_globals([VoiceClonePrompt])
+                            cached = _torch.load(str(pool_path), map_location="cpu",
+                                                 weights_only=True)
+                            project[cache_key] = cached
+                        voice_prompt = cached
+                # Single voice mode hoặc pool rỗng → voice_prompt = None
+                # → OmniVoice tự sinh giọng baseline.
 
             from omnivoice import OmniVoiceGenerationConfig
             # Match TTS preview params (no duration constraint, default guidance) —
