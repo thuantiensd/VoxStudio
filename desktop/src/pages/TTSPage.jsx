@@ -431,6 +431,17 @@ function SingleMode({ s }) {
 
   const generate = async () => {
     if (!text.trim() || text.length > CHAR_LIMIT) return;
+    // BẮT BUỘC chọn folder lưu trước khi generate (Electron only).
+    // Server sẽ xoá file ngay sau khi client tải về → cần folder hợp lệ.
+    const isElectron = !!window.voxstudio?.pickFolder;
+    if (isElectron && !s.outputFolder) {
+      const picked = await window.voxstudio.pickFolder();
+      if (!picked) {
+        toast.warn(t('tts.folderRequired'));
+        return;
+      }
+      s.setOutputFolder(picked);
+    }
     setLoading(true); setError(''); setResult(null);
     try {
       let r;
