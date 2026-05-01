@@ -36,8 +36,13 @@ async def create_project(
     enable_subtitle: bool = Form(False),
 ):
     """Upload video and create dubbing project."""
+    import logging
+    _log = logging.getLogger("dubbing.create_project")
     try:
         data = await video.read()
+        _log.info("Creating project: filename=%s size=%d target=%s source=%s dub=%s sub=%s voice=%s",
+                  video.filename, len(data), target_language, source_language,
+                  enable_dubbing, enable_subtitle, voice_id)
         result = dubbing_svc.create_project(
             video_data=data,
             video_filename=video.filename,
@@ -49,8 +54,10 @@ async def create_project(
         )
         return result
     except ValueError as e:
+        _log.warning("Create project 400: %s", str(e))
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
+        _log.exception("Create project 500: %s", str(e))
         raise HTTPException(status_code=500, detail=str(e))
 
 
