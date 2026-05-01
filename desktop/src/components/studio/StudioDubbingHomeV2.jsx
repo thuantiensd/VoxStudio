@@ -141,7 +141,10 @@ export default function StudioDubbingHomeV2() {
       // === TTS settings (đồng bộ với TTS page qua ttsSettings.js) ===
       ttsModel: tts.engine === "omnivoice" ? "premium" : "standard",
       voiceLang: tts.language || "auto",   // "auto" hoặc semantic (vietnamese/english/...)
-      voiceId: tts.voiceId || p.voiceId || "",
+      // Default LUÔN là "" (built-in default voice). Không auto-restore voice
+      // đã pick lần trước vì user nhầm voice clone là "default" — UX confusing.
+      // User pick voice clone khi muốn (dropdown vẫn cho phép).
+      voiceId: "",
       edgeVoice: tts.edgeVoice || "",
       emotion: tts.emotion || "normal",
       // subtitle styling (tạm lưu local, chưa wire backend)
