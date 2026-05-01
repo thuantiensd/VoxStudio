@@ -12,7 +12,7 @@ from app.auth.audio_sig import signed_url, verify as verify_sig
 from app.auth.deps import get_current_user
 from app.auth.rate_limit import require_quota
 from app.config import AUDIO_OUTPUT_DIR, STORAGE_BACKEND
-from app.core.storage import get_audio_path, get_audio_url
+from app.core.storage import get_audio_path, get_audio_url, delete_audio
 from app.db.models import User
 from app.db.session import get_session
 from app.models.schemas import TTSRequest, TTSResponse
@@ -110,6 +110,35 @@ async def edge_generate(
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/audio/{file_id}/confirm-received")
+async def confirm_audio_received(
+    file_id: str,
+    request: Request,
+    sig: Optional[str] = Query(None),
+    u: Optional[str] = Query(None),
+    exp: Optional[str] = Query(None),
+    user: User = Depends(get_current_user),
+):
+    """Client gọi sau khi đã download file về máy thành công.
+
+    Server xoá file audio_output ngay → tiết kiệm storage + tăng privacy
+    (file không nằm trên server lâu).
+
+    Verify HMAC signature như endpoint GET /audio để chỉ owner gọi được.
+    """
+    # Path traversal + signature verify
+    if not file_id.replace("-", "").replace("_", "").isalnum() or len(file_id) > 32:
+        raise HTTPException(status_code=400, detail="Invalid file_id")
+    verify_sig(
+        file_id,
+        user_id_request=user.id,
+        sig=sig, u=u, exp=exp,
+        is_admin=(user.role == "admin"),
+    )
+    deleted = delete_audio(file_id)
+    return {"ok": True, "deleted": deleted}
 
 
 @router.get("/audio/{file_id}")

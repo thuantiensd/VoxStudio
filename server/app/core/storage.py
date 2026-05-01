@@ -97,6 +97,29 @@ def get_audio_url(file_id: str) -> Optional[str]:
         return None
 
 
+def delete_audio(file_id: str) -> bool:
+    """Xoá file audio output theo file_id. Trả True nếu xoá được, False nếu
+    không tồn tại. Dùng khi client confirm đã tải xong → server không cần
+    giữ nữa, tiết kiệm storage + tăng privacy.
+
+    Path traversal protection: file_id phải hex/alnum, không có / hay ..
+    """
+    if not file_id or not file_id.replace("-", "").replace("_", "").isalnum():
+        return False
+    if len(file_id) > 32:
+        return False
+    path = AUDIO_OUTPUT_DIR / f"{file_id}.wav"
+    try:
+        if path.exists():
+            path.unlink()
+            logger.info("[storage] deleted audio %s after client confirm", file_id)
+            return True
+        return False
+    except Exception as e:
+        logger.warning("[storage] delete_audio %s failed: %s", file_id, e)
+        return False
+
+
 def cleanup_audio_output(ttl_sec: int = AUDIO_OUTPUT_TTL_SEC) -> int:
     """Xoá các file .wav local cũ hơn ttl_sec giây. Trả về số file đã xoá.
 
