@@ -1209,13 +1209,13 @@ def generate_segment(project_id: str, seg_id: str) -> dict:
 
             # Multi-voice support: pick voice_id theo speaker (gender-aware).
             # Fallback chain: seg.voice_id → project.voice_slots[speaker] →
-            #                 project.voice_id → built-in default voice.
+            #                 project.voice_id → None (giọng built-in OmniVoice).
             voice_id = _pick_omni_voice_id_for_segment(seg, project)
             if voice_id:
                 voice_prompt = load_voice(voice_id)
-            else:
-                # Auto-load default BLV voice from OmniVoice-master/voices/
-                voice_prompt = _get_default_voice()
+            # else: voice_prompt = None → OmniVoice dùng giọng built-in thật,
+            # KHÔNG load BLV.pt nữa (user pick "Giọng mặc định" → nghĩa là
+            # không có embedding, để model tự sinh giọng baseline).
 
             from omnivoice import OmniVoiceGenerationConfig
             # Match TTS preview params (no duration constraint, default guidance) —
