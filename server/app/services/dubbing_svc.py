@@ -1217,36 +1217,51 @@ def generate_segment(project_id: str, seg_id: str) -> dict:
             #   1. seg.voice_id (override per-segment)
             #   2. project.voice_slots theo speaker gender (multi-voice)
             #   3. project.voice_id (legacy single)
-            #   4. Multi-voice + slot rỗng → default pool theo speaker_id +
-            #      gender (deterministic → cùng speaker = cùng giọng).
-            #   5. Single-voice → voice_prompt=None (OmniVoice baseline).
+            #   4. Multi-voice + slot rỗng → default pool .pt theo speaker.
+            #   5. Pool rỗng / single mode → voice_prompt=None nhưng SET
+            #      torch.manual_seed deterministic theo speaker/project →
+            #      OmniVoice tự sinh giọng nhưng CONSISTENT cho cùng speaker.
             voice_id = _pick_omni_voice_id_for_segment(seg, project)
+            voice_count = int(project.get("voice_count") or 1)
+
             if voice_id:
                 voice_prompt = load_voice(voice_id)
-            else:
-                # Slot empty case — phân biệt single vs multi voice
-                voice_count = int(project.get("voice_count") or 1)
+            elif voice_count > 1:
+                # Multi-voice + slot rỗng → thử pool trước
+                speaker_id = seg.get("speaker") or "unknown"
+                gender = seg.get("speaker_gender")
+                pool_path = default_voices_svc.get_default_voice_path_for_speaker(
+                    speaker_id, gender,
+                )
+                if pool_path:
+                    cache_key = f"_pool_voice_{pool_path.name}"
+                    cached = project.get(cache_key)
+                    if cached is None:
+                        import torch as _torch
+                        from omnivoice.models.omnivoice import VoiceClonePrompt
+                        _torch.serialization.add_safe_globals([VoiceClonePrompt])
+                        cached = _torch.load(str(pool_path), map_location="cpu",
+                                             weights_only=True)
+                        project[cache_key] = cached
+                    voice_prompt = cached
+                # Else: voice_prompt stays None → fallback seed bên dưới
+
+            # Deterministic seed — đảm bảo giọng CONSISTENT khi voice_prompt=None.
+            # voice_count=1 → seed cố định theo project_id (1 giọng cả video).
+            # voice_count>1 → seed theo speaker_id (mỗi speaker giọng riêng,
+            # ổn định xuyên suốt). Set ngay trước generate_tts để OmniVoice
+            # sampling deterministic.
+            if voice_prompt is None:
+                import torch as _torch
+                import hashlib as _hashlib
                 if voice_count > 1:
-                    # Multi-voice + slot rỗng → pool deterministic theo speaker
-                    speaker_id = seg.get("speaker") or "unknown"
-                    gender = seg.get("speaker_gender")
-                    pool_path = default_voices_svc.get_default_voice_path_for_speaker(
-                        speaker_id, gender,
-                    )
-                    if pool_path:
-                        # Cache load tránh đọc lại .pt mỗi segment
-                        cache_key = f"_pool_voice_{pool_path.name}"
-                        cached = project.get(cache_key)
-                        if cached is None:
-                            import torch as _torch
-                            from omnivoice.models.omnivoice import VoiceClonePrompt
-                            _torch.serialization.add_safe_globals([VoiceClonePrompt])
-                            cached = _torch.load(str(pool_path), map_location="cpu",
-                                                 weights_only=True)
-                            project[cache_key] = cached
-                        voice_prompt = cached
-                # Single voice mode hoặc pool rỗng → voice_prompt = None
-                # → OmniVoice tự sinh giọng baseline.
+                    seed_key = (seg.get("speaker") or "unknown") + "|" + str(project_id)
+                else:
+                    seed_key = str(project_id)
+                seed = int.from_bytes(_hashlib.md5(seed_key.encode()).digest()[:4], "big")
+                _torch.manual_seed(seed)
+                if _torch.cuda.is_available():
+                    _torch.cuda.manual_seed_all(seed)
 
             from omnivoice import OmniVoiceGenerationConfig
             # Match TTS preview params (no duration constraint, default guidance) —
