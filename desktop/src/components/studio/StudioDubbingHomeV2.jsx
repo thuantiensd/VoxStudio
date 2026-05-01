@@ -1135,56 +1135,37 @@ function VoicePickerLayout({ count, children }) {
 
 function OmniVoicePicker({ cfg, set, voices }) {
   const t = useT();
-  // Khi user chưa clone giọng nào → vẫn cho dùng Premium với giọng mặc định
-  // của OmniVoice (backend nhận voice_id=null sẽ tự fallback sang giọng built-in).
-  // Đồng thời nhắc nhẹ + link mời clone để có giọng riêng.
-  if (!voices.length) {
-    // Force voiceId = "" để gửi default xuống backend
-    if (cfg.voiceId !== "") {
-      setTimeout(() => set({ voiceId: "" }), 0);
-    }
-    return (
-      <div style={{
-        padding: "12px 14px", background: "var(--n-1)",
-        border: "1px dashed var(--n-3)", borderRadius: 7,
-        color: "var(--n-8)", fontSize: 12.5, lineHeight: 1.5,
-      }}>
-        <b style={{ color: "var(--n-10)" }}>{t("dub.usingDefaultPremium")}</b>
-        <br />
-        {t("dub.cloneHint")}{" "}
-        <a
-          onClick={() => set({ ttsModel: "standard" })}
-          style={{
-            color: "var(--accent)", cursor: "pointer", fontWeight: 500,
-            textDecoration: "underline", textUnderlineOffset: 2,
-          }}
-        >{t("dub.switchToStandard")}</a>
-        {" " + t("dub.toUseEdgeHint")}
-      </div>
-    );
-  }
-  // Filter theo targetLang (set ở dropdown top-level "Ngôn ngữ đích").
-  // Fallback: nếu filtered rỗng (vd voice cũ chưa có language tag) → hiện
-  // toàn bộ giọng để user vẫn dùng được, kèm hint nhắc tag lại.
+  // LUÔN có option "Giọng mặc định" (voiceId="") — backend nhận voice_id null
+  // sẽ tự fallback sang giọng built-in của OmniVoice. Tương tự TTS standalone.
+  // Sau đó list voices đã clone (filter theo targetLang).
   const matchedByLang = voices.filter((v) => voiceMatchesLang(v, cfg.targetLang));
-  const filtered = matchedByLang.length > 0 ? matchedByLang : voices;
+  // Nếu user có clone nhưng không match lang → vẫn show all (kèm hint)
+  const userClones = matchedByLang.length > 0 ? matchedByLang : voices;
   const showingAll = matchedByLang.length === 0 && voices.length > 0;
-  if (filtered.length && !filtered.some((v) => v.id === cfg.voiceId)) {
-    setTimeout(() => set({ voiceId: filtered[0].id }), 0);
-  }
+  const totalCount = userClones.length + 1; // +1 cho default voice
+
   return (
-    <VoicePickerLayout count={filtered.length}>
-      <select value={cfg.voiceId || ""} onChange={(e) => set({ voiceId: e.target.value })} style={selectStyle}>
-        {filtered.map((v) => (
+    <VoicePickerLayout count={totalCount}>
+      <select
+        value={cfg.voiceId || ""}
+        onChange={(e) => set({ voiceId: e.target.value })}
+        style={selectStyle}
+      >
+        <option value="">★ {t("dub.defaultPremiumVoice")}</option>
+        {userClones.map((v) => (
           <option key={v.id} value={v.id}>
             {v.name || v.id}{v.tags ? ` · ${Array.isArray(v.tags) ? v.tags.join(", ") : v.tags}` : ""}
           </option>
         ))}
       </select>
+      {voices.length === 0 && (
+        <div style={{ marginTop: 6, fontSize: 11, color: "var(--n-7)" }}>
+          ⓘ {t("dub.cloneHintShort")}
+        </div>
+      )}
       {showingAll && (
         <div style={{ marginTop: 6, fontSize: 11, color: "var(--n-7)" }}>
-          ⓘ Đang hiện tất cả giọng (không có giọng nào tag {cfg.targetLang}).
-          Vào Voice Library → edit voice → set ngôn ngữ để filter chính xác.
+          ⓘ {t("dub.showingAllVoices", { lang: cfg.targetLang })}
         </div>
       )}
     </VoicePickerLayout>
