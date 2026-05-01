@@ -9,6 +9,7 @@ import { useToast } from "../ui/Toast";
 import { showError } from "../../services/errors";
 import ProjectCard from "./ProjectCard";
 import { useT } from "../../i18n/I18nContext";
+import useAuthedImage from "../../hooks/useAuthedImage";
 
 /**
  * ProjectDrawer — side panel trượt từ phải để xem nhanh dự án.
@@ -241,6 +242,11 @@ function Preview({ item, project, isDone }) {
       ? exportStreamURL(projectId)
       : dubbingVideoURL(projectId);
 
+  // Thumbnail cần auth header → fetch qua hook → blob URL
+  const { src: thumbSrc } = useAuthedImage(
+    !isDone && projectId ? thumbnailURL(projectId) : null
+  );
+
   return (
     <div style={{
       aspectRatio: "16/9",
@@ -260,16 +266,18 @@ function Preview({ item, project, isDone }) {
         />
       ) : (
         <>
-          <img
-            src={thumbnailURL(item.projectId)}
-            alt=""
-            style={{
-              position: "absolute", inset: 0,
-              width: "100%", height: "100%", objectFit: "cover",
-              opacity: 0.6,
-            }}
-            onError={(e) => { e.currentTarget.style.display = "none"; }}
-          />
+          {thumbSrc && (
+            <img
+              src={thumbSrc}
+              alt=""
+              style={{
+                position: "absolute", inset: 0,
+                width: "100%", height: "100%", objectFit: "cover",
+                opacity: 0.6,
+              }}
+              onError={(e) => { e.currentTarget.style.display = "none"; }}
+            />
+          )}
           <div style={{
             position: "absolute", inset: 0,
             display: "flex", alignItems: "center", justifyContent: "center",

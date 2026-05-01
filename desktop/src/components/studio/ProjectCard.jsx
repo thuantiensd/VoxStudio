@@ -9,6 +9,7 @@ import { useToast } from "../ui/Toast";
 import { thumbnailURL } from "../../services/api";
 import { showError } from "../../services/errors";
 import { useT } from "../../i18n/I18nContext";
+import useAuthedImage from "../../hooks/useAuthedImage";
 
 /**
  * ProjectCard — 1 card hiển thị 1 dự án trong grid.
@@ -100,6 +101,13 @@ export default function ProjectCard({ item, onOpen, onRetry }) {
     isDone     ? "var(--n-3)" :
     "var(--n-3)";
 
+  // Thumbnail cần auth header → fetch qua hook → blob URL.
+  // Chỉ load khi project đã có id và pipeline đủ tiến triển để có thumbnail.
+  const showThumb = !!item.projectId && (isRunning || isDone);
+  const { src: thumbSrc } = useAuthedImage(
+    showThumb ? thumbnailURL(item.projectId) : null
+  );
+
   return (
     <motion.div
       layout
@@ -127,15 +135,17 @@ export default function ProjectCard({ item, onOpen, onRetry }) {
           overflow: "hidden",
         }}
       >
-        <img
-          src={thumbnailURL(item.projectId)}
-          alt=""
-          style={{
-            position: "absolute", inset: 0,
-            width: "100%", height: "100%", objectFit: "cover",
-          }}
-          onError={(e) => { e.currentTarget.style.display = "none"; }}
-        />
+        {thumbSrc && (
+          <img
+            src={thumbSrc}
+            alt=""
+            style={{
+              position: "absolute", inset: 0,
+              width: "100%", height: "100%", objectFit: "cover",
+            }}
+            onError={(e) => { e.currentTarget.style.display = "none"; }}
+          />
+        )}
         {/* Fallback icon */}
         <div
           style={{
