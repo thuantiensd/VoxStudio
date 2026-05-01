@@ -134,7 +134,10 @@ export default function VoiceClonePage() {
     setSaving(true);
     setError('');
     try {
-      await cloneVoice(file, name.trim(), refText, '', consent);
+      // Pass language as tag → để OmniVoicePicker filter theo target language
+      // không bị skip (voiceMatchesLang đọc tags để khớp ngôn ngữ).
+      const tags = language ? language : '';
+      await cloneVoice(file, name.trim(), refText, tags, consent);
       setSaved(true);
       setSavedName(name.trim());
       setShowSave(false);

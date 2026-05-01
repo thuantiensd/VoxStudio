@@ -1163,23 +1163,29 @@ function OmniVoicePicker({ cfg, set, voices }) {
       </div>
     );
   }
-  // Filter theo targetLang (set ở dropdown top-level "Ngôn ngữ đích")
-  const filtered = voices.filter((v) => voiceMatchesLang(v, cfg.targetLang));
+  // Filter theo targetLang (set ở dropdown top-level "Ngôn ngữ đích").
+  // Fallback: nếu filtered rỗng (vd voice cũ chưa có language tag) → hiện
+  // toàn bộ giọng để user vẫn dùng được, kèm hint nhắc tag lại.
+  const matchedByLang = voices.filter((v) => voiceMatchesLang(v, cfg.targetLang));
+  const filtered = matchedByLang.length > 0 ? matchedByLang : voices;
+  const showingAll = matchedByLang.length === 0 && voices.length > 0;
   if (filtered.length && !filtered.some((v) => v.id === cfg.voiceId)) {
     setTimeout(() => set({ voiceId: filtered[0].id }), 0);
   }
   return (
     <VoicePickerLayout count={filtered.length}>
-      {filtered.length === 0 ? (
-        <div style={emptyVoiceStyle}>{t("dub.noVoiceForLang")}</div>
-      ) : (
-        <select value={cfg.voiceId || ""} onChange={(e) => set({ voiceId: e.target.value })} style={selectStyle}>
-          {filtered.map((v) => (
-            <option key={v.id} value={v.id}>
-              {v.name || v.id}{v.tags ? ` · ${Array.isArray(v.tags) ? v.tags.join(", ") : v.tags}` : ""}
-            </option>
-          ))}
-        </select>
+      <select value={cfg.voiceId || ""} onChange={(e) => set({ voiceId: e.target.value })} style={selectStyle}>
+        {filtered.map((v) => (
+          <option key={v.id} value={v.id}>
+            {v.name || v.id}{v.tags ? ` · ${Array.isArray(v.tags) ? v.tags.join(", ") : v.tags}` : ""}
+          </option>
+        ))}
+      </select>
+      {showingAll && (
+        <div style={{ marginTop: 6, fontSize: 11, color: "var(--n-7)" }}>
+          ⓘ Đang hiện tất cả giọng (không có giọng nào tag {cfg.targetLang}).
+          Vào Voice Library → edit voice → set ngôn ngữ để filter chính xác.
+        </div>
       )}
     </VoicePickerLayout>
   );
