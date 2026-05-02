@@ -1223,27 +1223,39 @@ def generate_segment(project_id: str, seg_id: str) -> dict:
             # ── OmniVoice (local GPU) ──
             voice_prompt = None
 
-            # Voice resolution chain (ưu tiên):
+            # Voice resolution chain (ưu tiên cao → thấp):
             #   1. seg.voice_id (override per-segment)
             #   2. project.voice_slots theo speaker gender (multi-voice)
             #   3. project.voice_id (legacy single)
-            #   4. Multi-voice + slot rỗng → default pool .pt theo speaker.
-            #   5. Pool rỗng / single mode → voice_prompt=None nhưng SET
-            #      torch.manual_seed deterministic theo speaker/project →
-            #      OmniVoice tự sinh giọng nhưng CONSISTENT cho cùng speaker.
+            #   4. Slot rỗng → CẢ 1-voice và multi-voice đều dùng pool .pt
+            #      (BLV/Châu Tinh Trì/Nữ) — ĐẢM BẢO consistent voice 100%.
+            #      OmniVoice không deterministic với manual_seed → phải có
+            #      embedding (.pt) để output ổn định giữa các segment.
+            #   5. Pool RỖNG (chưa có file .pt nào) → fallback seed (best
+            #      effort, OmniVoice có thể vẫn lệch nhẹ).
             voice_id = _pick_omni_voice_id_for_segment(seg, project)
             voice_count = int(project.get("voice_count") or 1)
 
             if voice_id:
                 voice_prompt = load_voice(voice_id)
-            elif voice_count > 1:
-                # Multi-voice + slot rỗng → thử pool trước
-                speaker_id = seg.get("speaker") or "unknown"
-                gender = seg.get("speaker_gender")
+            else:
+                # Slot empty — CẢ single + multi đều thử pool để đảm bảo
+                # consistent. Single voice: cùng giọng cho cả video.
+                # Multi voice: cùng speaker → cùng giọng xuyên suốt.
+                if voice_count > 1:
+                    speaker_id = seg.get("speaker") or "default"
+                    gender = seg.get("speaker_gender")
+                else:
+                    # voice_count=1 → 1 giọng cho cả project. Dùng project_id
+                    # làm "speaker key" để pool pick deterministic.
+                    speaker_id = f"single_{project_id}"
+                    gender = None  # any gender từ pool
+
                 pool_path = default_voices_svc.get_default_voice_path_for_speaker(
                     speaker_id, gender,
                 )
                 if pool_path:
+                    # Cache load .pt — tránh đọc disk mỗi segment
                     cache_key = f"_pool_voice_{pool_path.name}"
                     cached = project.get(cache_key)
                     if cached is None:
@@ -1254,13 +1266,9 @@ def generate_segment(project_id: str, seg_id: str) -> dict:
                                              weights_only=True)
                         project[cache_key] = cached
                     voice_prompt = cached
-                # Else: voice_prompt stays None → fallback seed bên dưới
 
-            # Deterministic seed — đảm bảo giọng CONSISTENT khi voice_prompt=None.
-            # voice_count=1 → seed cố định theo project_id (1 giọng cả video).
-            # voice_count>1 → seed theo speaker_id (mỗi speaker giọng riêng,
-            # ổn định xuyên suốt). Set ngay trước generate_tts để OmniVoice
-            # sampling deterministic.
+            # Last resort: pool rỗng → seed deterministic. OmniVoice có thể
+            # vẫn không 100% consistent nhưng better than full random.
             if voice_prompt is None:
                 import torch as _torch
                 import hashlib as _hashlib
