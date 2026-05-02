@@ -1223,44 +1223,26 @@ def generate_segment(project_id: str, seg_id: str) -> dict:
             # ── OmniVoice (local GPU) ──
             voice_prompt = None
 
-            # Voice resolution chain (ưu tiên cao → thấp):
-            #   1. seg.voice_id — user override per-segment.
-            #   2. project.voice_slots — user pick voice clone cho slot.
-            #   3. Multi-voice + slot rỗng + pool có .pt → pool theo speaker.
-            #   4. SLOT RỖNG (cả single và multi pool rỗng) → voice_prompt=None
-            #      + ALL-source deterministic seed (torch + numpy + python random
-            #      + cuDNN deterministic mode) → OmniVoice tự sinh giọng baseline,
-            #      consistent xuyên suốt video, KHÔNG dùng embedding nào.
+            # Voice resolution — chỉ 2 trường hợp:
+            #   1. User PICK voice clone trong slot → load .pt embedding đó
+            #   2. User KHÔNG pick gì → voice_prompt=None + all-source seed
+            #      (system tự sinh giọng baseline, consistent qua seed)
+            #
+            # voice_count=1 + no pick: 1 giọng baseline cố định cho cả video
+            # voice_count>1 + no pick: mỗi speaker 1 seed riêng → mỗi speaker
+            #    1 giọng baseline khác nhau, ổn định xuyên suốt.
+            #
+            # KHÔNG auto-load pool .pt (BLV/Châu Tinh Trì/Nữ) — user đã nói
+            # "không dùng giọng clone" khi không pick. Pool .pt là clone đã
+            # bake sẵn, dùng auto sẽ vi phạm UX.
             voice_id = _pick_omni_voice_id_for_segment(seg, project)
             voice_count = int(project.get("voice_count") or 1)
 
             if voice_id:
                 voice_prompt = load_voice(voice_id)
-            elif voice_count > 1:
-                # Multi-voice + slot empty → pool theo speaker (nếu có)
-                speaker_id = seg.get("speaker") or "default"
-                gender = seg.get("speaker_gender")
-                pool_path = default_voices_svc.get_default_voice_path_for_speaker(
-                    speaker_id, gender,
-                )
-                if pool_path:
-                    cache_key = f"_pool_voice_{pool_path.name}"
-                    cached = project.get(cache_key)
-                    if cached is None:
-                        import torch as _torch
-                        from omnivoice.models.omnivoice import VoiceClonePrompt
-                        _torch.serialization.add_safe_globals([VoiceClonePrompt])
-                        cached = _torch.load(str(pool_path), map_location="cpu",
-                                             weights_only=True)
-                        project[cache_key] = cached
-                    voice_prompt = cached
-                # else: voice_prompt stays None → seed-only fallback bên dưới
-            # voice_count=1: KHÔNG dùng embedding/clone — voice_prompt=None.
-
-            # Strong deterministic seeding khi voice_prompt=None.
-            # Set TẤT CẢ random sources để OmniVoice output stable giữa các
-            # segment (tránh "mỗi segment 1 giọng" do CUDA/numpy randomness).
-            if voice_prompt is None:
+            else:
+                # Strong deterministic seeding — tất cả random source.
+                # Cùng seed_key + cùng text → cùng output → giọng nhất quán.
                 import torch as _torch
                 import numpy as _np
                 import random as _rand
@@ -1275,9 +1257,9 @@ def generate_segment(project_id: str, seg_id: str) -> dict:
                 _rand.seed(seed)
                 if _torch.cuda.is_available():
                     _torch.cuda.manual_seed_all(seed)
-                # cuDNN deterministic — bắt buộc cho output stable trên GPU
                 _torch.backends.cudnn.deterministic = True
                 _torch.backends.cudnn.benchmark = False
+                voice_prompt = None  # explicit — OmniVoice tự sinh giọng baseline
 
             from omnivoice import OmniVoiceGenerationConfig
             # Match TTS preview params (no duration constraint, default guidance) —
