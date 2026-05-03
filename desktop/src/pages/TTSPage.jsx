@@ -13,6 +13,7 @@ import { userStorage } from '../services/userScope';
 import { FolderOpen } from 'lucide-react';
 import { SERVER_URL } from '../services/api';
 import { WHISPER_LANGUAGES } from '../services/ttsSettings';
+import LanguagePicker from '../components/ui/LanguagePicker';
 
 // Edge TTS — chỉ list ngôn ngữ Microsoft cloud hỗ trợ (subset).
 const LANGUAGE_VALUES_EDGE = [
@@ -344,12 +345,11 @@ function SettingsPanel({ s }) {
         </div>
         <div className="flex-1">
           <label className={labelClass} style={labelStyle}>{t('tts.language')}</label>
-          <select value={s.language} onChange={e => s.setLanguage(e.target.value)}
-            className="w-full p-2.5 rounded-lg text-sm" style={selectStyle}>
-            {languages.map(l => (
-              <option key={l.value} value={l.value}>{l.label}</option>
-            ))}
-          </select>
+          <LanguagePicker
+            options={languages}
+            value={s.language}
+            onChange={(v) => s.setLanguage(v)}
+          />
         </div>
       </div>
 
