@@ -84,39 +84,6 @@ function capitalize(s) {
   return s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
 }
 
-/**
- * PauseToolbar — buttons chèn pause marker vào textarea.
- * Format: [pause:Nms] hoặc [p:Ns] — backend parse + chèn silence.
- */
-function PauseToolbar({ onInsert }) {
-  const t = useT();
-  const presets = [
-    { label: t('tts.pause05'), marker: '[pause:500]' },
-    { label: t('tts.pause1'), marker: '[pause:1000]' },
-    { label: t('tts.pause2'), marker: '[pause:2000]' },
-  ];
-  return (
-    <div className="flex items-center gap-1.5 mb-1.5 flex-wrap">
-      <span className="text-xs mr-1" style={{ color: 'var(--text-secondary)' }}>
-        {t('tts.insertPause')}:
-      </span>
-      {presets.map((p) => (
-        <button key={p.marker} type="button"
-          onClick={() => onInsert(p.marker)}
-          className="px-2.5 py-1 rounded-md text-xs"
-          style={{ background: 'var(--bg-card)', border: '1px solid #2a2a40',
-                   color: 'var(--text-primary)', cursor: 'pointer' }}
-          title={p.marker}>
-          ⏸ {p.label}
-        </button>
-      ))}
-      <span className="text-xs ml-auto" style={{ color: 'var(--text-secondary)' }}>
-        {t('tts.pauseHint')}
-      </span>
-    </div>
-  );
-}
-
 const CHAR_LIMIT = 1000;
 const CHAR_WARN = 500;
 const SPEED_PRESETS = [0.5, 0.75, 1.0, 1.25, 1.5];
@@ -517,7 +484,6 @@ function SingleMode({ s }) {
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
   const [error, setError] = useState('');
-  const textareaRef = useRef(null);
 
   const charColor = text.length > CHAR_LIMIT
     ? 'var(--danger)'
@@ -569,24 +535,9 @@ function SingleMode({ s }) {
 
   return (
     <>
-      {/* Text input + pause toolbar */}
+      {/* Text input */}
       <label className={labelClass} style={labelStyle}>{t('tts.text')}</label>
-      <PauseToolbar onInsert={(marker) => {
-        const ta = textareaRef.current;
-        if (!ta) { setText(t => t + marker); return; }
-        const start = ta.selectionStart || 0;
-        const end = ta.selectionEnd || 0;
-        const before = text.slice(0, start);
-        const after = text.slice(end);
-        const next = before + marker + after;
-        setText(next);
-        // Restore cursor sau marker
-        setTimeout(() => {
-          ta.focus();
-          ta.setSelectionRange(start + marker.length, start + marker.length);
-        }, 0);
-      }} />
-      <textarea ref={textareaRef} value={text} onChange={e => setText(e.target.value)}
+      <textarea value={text} onChange={e => setText(e.target.value)}
         placeholder={t('tts.textPlaceholder')}
         rows={8} className="w-full p-3 rounded-lg mb-1 text-sm resize-none"
         style={{ background: 'var(--bg-card)', border: '1px solid #2a2a40', color: 'var(--text-primary)' }} />
