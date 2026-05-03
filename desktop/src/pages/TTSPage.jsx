@@ -12,21 +12,109 @@ import { useUpgrade } from '../components/UpgradeContext';
 import { userStorage } from '../services/userScope';
 import { FolderOpen } from 'lucide-react';
 import { SERVER_URL } from '../services/api';
+import { WHISPER_LANGUAGES } from '../services/ttsSettings';
 
-// value khớp locale backend — label dịch qua useT() + useLanguages()
-const LANGUAGE_VALUES = [
+// Edge TTS — chỉ list ngôn ngữ Microsoft cloud hỗ trợ (subset).
+const LANGUAGE_VALUES_EDGE = [
   'auto', 'vietnamese', 'english', 'chinese', 'japanese', 'korean',
   'french', 'spanish', 'german', 'portuguese', 'russian', 'thai',
   'arabic', 'hindi', 'italian', 'dutch', 'turkish', 'polish',
   'indonesian', 'malay',
 ];
 
-function useLanguages() {
+// Premium (OmniVoice) — full list 99 ngôn ngữ Whisper hỗ trợ.
+// Reuse từ ttsSettings → consistent với STT/Dubbing.
+const LANGUAGE_VALUES_PREMIUM = ['auto', ...WHISPER_LANGUAGES];
+
+// Flag emoji map — value khớp locale backend.
+// Ngôn ngữ không có flag mặc định → 🌐 globe.
+const LANGUAGE_FLAGS = {
+  auto: '🌐',
+  // Châu Á
+  vietnamese: '🇻🇳', chinese: '🇨🇳', cantonese: '🇭🇰', japanese: '🇯🇵',
+  korean: '🇰🇷', thai: '🇹🇭', lao: '🇱🇦', khmer: '🇰🇭', burmese: '🇲🇲',
+  indonesian: '🇮🇩', malay: '🇲🇾', tagalog: '🇵🇭', javanese: '🇮🇩',
+  sundanese: '🇮🇩', tibetan: '🏔️', mongolian: '🇲🇳',
+  // Nam Á
+  hindi: '🇮🇳', bengali: '🇧🇩', tamil: '🇮🇳', telugu: '🇮🇳',
+  marathi: '🇮🇳', urdu: '🇵🇰', punjabi: '🇮🇳', gujarati: '🇮🇳',
+  kannada: '🇮🇳', malayalam: '🇮🇳', sinhala: '🇱🇰', nepali: '🇳🇵',
+  pashto: '🇦🇫', persian: '🇮🇷', sindhi: '🇵🇰', assamese: '🇮🇳',
+  sanskrit: '🇮🇳',
+  // Trung Đông + Bắc Phi
+  arabic: '🇸🇦', hebrew: '🇮🇱', turkish: '🇹🇷', azerbaijani: '🇦🇿',
+  armenian: '🇦🇲', georgian: '🇬🇪', kazakh: '🇰🇿', uzbek: '🇺🇿',
+  turkmen: '🇹🇲', tajik: '🇹🇯', kyrgyz: '🇰🇬', bashkir: '🇷🇺',
+  tatar: '🇷🇺',
+  // Châu Âu Tây
+  english: '🇺🇸', french: '🇫🇷', spanish: '🇪🇸', german: '🇩🇪',
+  italian: '🇮🇹', portuguese: '🇵🇹', dutch: '🇳🇱', greek: '🇬🇷',
+  catalan: '🇪🇸', galician: '🇪🇸', basque: '🇪🇸', breton: '🇫🇷',
+  occitan: '🇫🇷', welsh: '🏴󠁧󠁢󠁷󠁬󠁳󠁿', irish: '🇮🇪', maltese: '🇲🇹',
+  // Châu Âu Bắc
+  swedish: '🇸🇪', norwegian: '🇳🇴', nynorsk: '🇳🇴', danish: '🇩🇰',
+  finnish: '🇫🇮', icelandic: '🇮🇸', faroese: '🇫🇴', estonian: '🇪🇪',
+  latvian: '🇱🇻', lithuanian: '🇱🇹',
+  // Slavic
+  russian: '🇷🇺', polish: '🇵🇱', czech: '🇨🇿', slovak: '🇸🇰',
+  ukrainian: '🇺🇦', belarusian: '🇧🇾', bulgarian: '🇧🇬', serbian: '🇷🇸',
+  croatian: '🇭🇷', slovenian: '🇸🇮', bosnian: '🇧🇦', macedonian: '🇲🇰',
+  // Khác EU
+  hungarian: '🇭🇺', romanian: '🇷🇴', albanian: '🇦🇱', luxembourgish: '🇱🇺',
+  // Châu Phi
+  swahili: '🇹🇿', amharic: '🇪🇹', somali: '🇸🇴', hausa: '🇳🇬',
+  yoruba: '🇳🇬', shona: '🇿🇼', afrikaans: '🇿🇦', malagasy: '🇲🇬',
+  lingala: '🇨🇩',
+  // Hawaii / Oceania
+  hawaiian: '🇺🇸', maori: '🇳🇿',
+  // Khác
+  haitian: '🇭🇹', latin: '🏛️', yiddish: '✡️',
+};
+
+function useLanguages(values = LANGUAGE_VALUES_EDGE) {
   const t = useT();
-  return LANGUAGE_VALUES.map((v) => ({
+  return values.map((v) => ({
     value: v === 'auto' ? '' : v,
-    label: t(`langs.${v}`),
+    label: `${LANGUAGE_FLAGS[v] || '🌐'} ${t(`langs.${v}`) === `langs.${v}` ? capitalize(v) : t(`langs.${v}`)}`.trim(),
+    flag: LANGUAGE_FLAGS[v] || '🌐',
   }));
+}
+
+function capitalize(s) {
+  return s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
+}
+
+/**
+ * PauseToolbar — buttons chèn pause marker vào textarea.
+ * Format: [pause:Nms] hoặc [p:Ns] — backend parse + chèn silence.
+ */
+function PauseToolbar({ onInsert }) {
+  const t = useT();
+  const presets = [
+    { label: t('tts.pause05'), marker: '[pause:500]' },
+    { label: t('tts.pause1'), marker: '[pause:1000]' },
+    { label: t('tts.pause2'), marker: '[pause:2000]' },
+  ];
+  return (
+    <div className="flex items-center gap-1.5 mb-1.5 flex-wrap">
+      <span className="text-xs mr-1" style={{ color: 'var(--text-secondary)' }}>
+        {t('tts.insertPause')}:
+      </span>
+      {presets.map((p) => (
+        <button key={p.marker} type="button"
+          onClick={() => onInsert(p.marker)}
+          className="px-2.5 py-1 rounded-md text-xs"
+          style={{ background: 'var(--bg-card)', border: '1px solid #2a2a40',
+                   color: 'var(--text-primary)', cursor: 'pointer' }}
+          title={p.marker}>
+          ⏸ {p.label}
+        </button>
+      ))}
+      <span className="text-xs ml-auto" style={{ color: 'var(--text-secondary)' }}>
+        {t('tts.pauseHint')}
+      </span>
+    </div>
+  );
 }
 
 const CHAR_LIMIT = 1000;
@@ -230,8 +318,11 @@ function FolderPickerSection({ s }) {
 // ── Shared settings UI ──
 function SettingsPanel({ s }) {
   const t = useT();
-  const languages = useLanguages();
   const isCloud = s.engine === 'edge';
+  // Premium = full 99 ngôn ngữ Whisper. Standard = subset Edge cloud.
+  const languages = useLanguages(
+    isCloud ? LANGUAGE_VALUES_EDGE : LANGUAGE_VALUES_PREMIUM,
+  );
 
   return (
     <>
@@ -426,6 +517,7 @@ function SingleMode({ s }) {
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
   const [error, setError] = useState('');
+  const textareaRef = useRef(null);
 
   const charColor = text.length > CHAR_LIMIT
     ? 'var(--danger)'
@@ -477,9 +569,24 @@ function SingleMode({ s }) {
 
   return (
     <>
-      {/* Text input */}
+      {/* Text input + pause toolbar */}
       <label className={labelClass} style={labelStyle}>{t('tts.text')}</label>
-      <textarea value={text} onChange={e => setText(e.target.value)}
+      <PauseToolbar onInsert={(marker) => {
+        const ta = textareaRef.current;
+        if (!ta) { setText(t => t + marker); return; }
+        const start = ta.selectionStart || 0;
+        const end = ta.selectionEnd || 0;
+        const before = text.slice(0, start);
+        const after = text.slice(end);
+        const next = before + marker + after;
+        setText(next);
+        // Restore cursor sau marker
+        setTimeout(() => {
+          ta.focus();
+          ta.setSelectionRange(start + marker.length, start + marker.length);
+        }, 0);
+      }} />
+      <textarea ref={textareaRef} value={text} onChange={e => setText(e.target.value)}
         placeholder={t('tts.textPlaceholder')}
         rows={8} className="w-full p-3 rounded-lg mb-1 text-sm resize-none"
         style={{ background: 'var(--bg-card)', border: '1px solid #2a2a40', color: 'var(--text-primary)' }} />

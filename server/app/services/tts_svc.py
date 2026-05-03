@@ -8,6 +8,7 @@ import torch
 from app.config import TTS_DEFAULT_GUIDANCE, TTS_DEFAULT_STEPS
 from app.core.gpu_manager import gpu
 from app.core.storage import load_voice, save_audio
+from app.services import text_markup_svc
 
 logger = logging.getLogger(__name__)
 
@@ -92,7 +93,15 @@ def generate(
     elif speed and speed != 1.0:
         kwargs["speed"] = speed
 
-    waveform = gpu.generate_tts(text, voice_prompt=voice_prompt, **kwargs)
+    # Pause marker support: parse [pause:Nms] / [p:Ns] → generate từng chunk
+    # rồi concat với silence chèn giữa. Nếu không có marker → 1 lần generate.
+    chunks = text_markup_svc.parse_markers(text)
+    if len(chunks) > 1 or (chunks and chunks[0][1] > 0):
+        # Có marker → generate từng chunk + chèn silence
+        waveform = _generate_with_pauses(chunks, voice_prompt, kwargs, gpu.sampling_rate)
+    else:
+        # Không marker → flow cũ
+        waveform = gpu.generate_tts(text, voice_prompt=voice_prompt, **kwargs)
 
     # Trim leading/trailing silence — OmniVoice thường để khoảng lặng
     # ~0.3-0.5s đầu/cuối do voice prompt + padding generation. User cảm
@@ -111,6 +120,39 @@ def generate(
         "duration": round(duration, 2),
         "sample_rate": gpu.sampling_rate,
     }
+
+
+def _generate_with_pauses(chunks, voice_prompt, kwargs, sample_rate):
+    """Generate TTS cho từng chunk + chèn silence theo pause_ms.
+
+    chunks: list of (text, pause_after_ms) từ text_markup_svc.parse_markers.
+    Trả về 1 tensor concatenated.
+
+    Empty chunk (text="") → bỏ qua phần generate, chỉ chèn silence.
+    Tensor trim_silence từng chunk để tránh khoảng lặng overlap.
+    """
+    parts = []
+    for chunk_text, pause_ms in chunks:
+        # Generate audio cho chunk text (nếu non-empty)
+        if chunk_text:
+            wave = gpu.generate_tts(chunk_text, voice_prompt=voice_prompt, **kwargs)
+            wave = trim_silence(wave, sample_rate)
+            parts.append(wave)
+        # Chèn silence sau chunk này
+        if pause_ms > 0:
+            silence_samples = int(sample_rate * pause_ms / 1000)
+            if silence_samples > 0 and parts:
+                # Tạo silence tensor cùng dtype/device với chunk vừa generate
+                ref = parts[-1]
+                silence = torch.zeros(silence_samples, dtype=ref.dtype, device=ref.device)
+                if ref.dim() > 1:
+                    # Multi-channel — broadcast
+                    silence = silence.unsqueeze(0).expand(ref.shape[:-1] + (silence_samples,))
+                parts.append(silence)
+    if not parts:
+        # All chunks empty → tránh return tensor rỗng (caller crash)
+        return torch.zeros(int(sample_rate * 0.5))
+    return torch.cat(parts, dim=-1)
 
 
 def trim_silence(waveform, sample_rate, threshold_db=-50, pad_ms=80):
