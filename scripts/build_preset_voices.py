@@ -514,6 +514,9 @@ def main():
         slug = preset["slug"]
         display_name = preset["display_name"]
         gender = preset["gender"]
+        # language: read từ preset, fallback "vietnamese" cho VN presets cũ
+        # không define field này (backward compat).
+        language = preset.get("language", "vietnamese")
         description = preset["description"]
         instruct = preset["instruct"]
         sample_text = preset["sample_text"]
@@ -571,7 +574,7 @@ def main():
             "slug": slug,
             "display_name": display_name,
             "gender": gender,
-            "language": "vietnamese",
+            "language": language,
             "description": description,
             "instruct": instruct,
             "sample_text": sample_text,
