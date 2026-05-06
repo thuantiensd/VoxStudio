@@ -1,0 +1,20 @@
+{
+  "slug": "en_sophia",
+  "display_name": "Sophia",
+  "gender": "female",
+  "language": "vietnamese",
+  "description": "Documentary narrator — measured, mature, contemplative",
+  "instruct": "female, middle-aged, low pitch, american accent",
+  "sample_text": "Beneath the surface of the deep ocean, life flourishes in ways we are only beginning to understand. Creatures that have remained unchanged for millions of years quietly hold the secrets of our planet.",
+  "params": {
+    "num_step": 32,
+    "guidance_scale": 2.5,
+    "position_temperature": 4.5,
+    "class_temperature": 0.0,
+    "t_shift": 0.1
+  },
+  "seed": 1753791328,
+  "model": "k2-fsa/OmniVoice",
+  "sample_rate": 24000,
+  "built_at": "2026-05-06 12:40:56"
+}

@@ -1,0 +1,20 @@
+{
+  "slug": "jp_yuki",
+  "display_name": "ゆき",
+  "gender": "female",
+  "language": "vietnamese",
+  "description": "日本語女性 · 落ち着いた朗読 — オーディオブック、ナレーション",
+  "instruct": "female, young adult, moderate pitch",
+  "sample_text": "静かな夜、月明かりが窓辺に差し込む。彼女はゆっくりとページをめくり、長い間忘れていた言葉を読み返した。それは、遠い昔の自分への手紙だった。",
+  "params": {
+    "num_step": 32,
+    "guidance_scale": 2.5,
+    "position_temperature": 4.5,
+    "class_temperature": 0.0,
+    "t_shift": 0.1
+  },
+  "seed": 558785842,
+  "model": "k2-fsa/OmniVoice",
+  "sample_rate": 24000,
+  "built_at": "2026-05-06 12:40:59"
+}

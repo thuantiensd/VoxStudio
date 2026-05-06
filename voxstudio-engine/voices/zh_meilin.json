@@ -1,0 +1,20 @@
+{
+  "slug": "zh_meilin",
+  "display_name": "美琳",
+  "gender": "female",
+  "language": "vietnamese",
+  "description": "中文女声 · 温暖播音员 — 适合新闻、纪录片",
+  "instruct": "female, young adult, moderate pitch",
+  "sample_text": "各位观众朋友们晚上好，欢迎收看今天的新闻报道。今天我们将带您了解国内外最新动态，请您关注接下来的详细内容。",
+  "params": {
+    "num_step": 32,
+    "guidance_scale": 2.5,
+    "position_temperature": 4.5,
+    "class_temperature": 0.0,
+    "t_shift": 0.1
+  },
+  "seed": 3377467157,
+  "model": "k2-fsa/OmniVoice",
+  "sample_rate": 24000,
+  "built_at": "2026-05-06 12:40:57"
+}

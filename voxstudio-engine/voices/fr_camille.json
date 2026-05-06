@@ -1,0 +1,20 @@
+{
+  "slug": "fr_camille",
+  "display_name": "Camille",
+  "gender": "female",
+  "language": "vietnamese",
+  "description": "Voix française chaleureuse — narration, livre audio",
+  "instruct": "female, young adult, moderate pitch",
+  "sample_text": "Le matin se levait doucement sur la ville endormie. Les rues, encore vides, semblaient retenir leur souffle, comme si elles attendaient le retour des pas familiers.",
+  "params": {
+    "num_step": 32,
+    "guidance_scale": 2.5,
+    "position_temperature": 4.5,
+    "class_temperature": 0.0,
+    "t_shift": 0.1
+  },
+  "seed": 488743777,
+  "model": "k2-fsa/OmniVoice",
+  "sample_rate": 24000,
+  "built_at": "2026-05-06 12:41:02"
+}

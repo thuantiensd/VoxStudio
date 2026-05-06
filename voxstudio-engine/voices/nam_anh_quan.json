@@ -1,0 +1,20 @@
+{
+  "slug": "nam_anh_quan",
+  "display_name": "Anh Quân",
+  "gender": "male",
+  "language": "vietnamese",
+  "description": "Nam trung niên ấm — DJ radio, MC sự kiện",
+  "instruct": "male, middle-aged, moderate pitch",
+  "sample_text": "Chào quý vị thính giả đang lắng nghe sóng phát thanh. Đêm nay, chúng ta sẽ cùng nhau dành ít phút lắng đọng để cảm nhận những giai điệu đẹp nhất, nhẹ nhàng nhất của một ngày dài đã qua.",
+  "params": {
+    "num_step": 32,
+    "guidance_scale": 2.5,
+    "position_temperature": 4.5,
+    "class_temperature": 0.0,
+    "t_shift": 0.1
+  },
+  "seed": 2126279670,
+  "model": "k2-fsa/OmniVoice",
+  "sample_rate": 24000,
+  "built_at": "2026-05-06 12:40:51"
+}

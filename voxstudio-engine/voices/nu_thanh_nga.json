@@ -1,0 +1,20 @@
+{
+  "slug": "nu_thanh_nga",
+  "display_name": "Thanh Nga",
+  "gender": "female",
+  "language": "vietnamese",
+  "description": "Nữ trung niên ấm — narrator audiobook, đọc văn",
+  "instruct": "female, middle-aged, moderate pitch",
+  "sample_text": "Em đứng đó rất lâu, nhìn con đường mòn nắng đọng trên những đám lá khô, lòng bồi hồi nhớ về mùa hè năm ấy — mùa hè cuối cùng của tuổi thơ. Tiếng ve hôm đó dài đến lạ.",
+  "params": {
+    "num_step": 32,
+    "guidance_scale": 2.5,
+    "position_temperature": 4.5,
+    "class_temperature": 0.0,
+    "t_shift": 0.1
+  },
+  "seed": 3013180068,
+  "model": "k2-fsa/OmniVoice",
+  "sample_rate": 24000,
+  "built_at": "2026-05-06 12:40:48"
+}

@@ -1,0 +1,20 @@
+{
+  "slug": "en_emma",
+  "display_name": "Emma",
+  "gender": "female",
+  "language": "vietnamese",
+  "description": "Warm female podcaster — American accent, polished delivery",
+  "instruct": "female, young adult, moderate pitch, american accent",
+  "sample_text": "Welcome back to another episode of our show. Today, we have a fascinating topic to explore together — one that touches on creativity, focus, and the small habits that shape who we become.",
+  "params": {
+    "num_step": 32,
+    "guidance_scale": 2.5,
+    "position_temperature": 4.5,
+    "class_temperature": 0.0,
+    "t_shift": 0.1
+  },
+  "seed": 2738470801,
+  "model": "k2-fsa/OmniVoice",
+  "sample_rate": 24000,
+  "built_at": "2026-05-06 12:40:53"
+}

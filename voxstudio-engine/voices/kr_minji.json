@@ -1,0 +1,20 @@
+{
+  "slug": "kr_minji",
+  "display_name": "민지",
+  "gender": "female",
+  "language": "vietnamese",
+  "description": "한국어 여성 · 따뜻한 내레이션 — 오디오북, 다큐멘터리",
+  "instruct": "female, young adult, moderate pitch",
+  "sample_text": "조용한 새벽, 거리는 아직 잠들어 있다. 그는 따뜻한 커피 한 잔을 손에 쥐고 창밖을 바라보며 오늘 하루 무엇을 이루고 싶은지 천천히 떠올린다.",
+  "params": {
+    "num_step": 32,
+    "guidance_scale": 2.5,
+    "position_temperature": 4.5,
+    "class_temperature": 0.0,
+    "t_shift": 0.1
+  },
+  "seed": 2749718328,
+  "model": "k2-fsa/OmniVoice",
+  "sample_rate": 24000,
+  "built_at": "2026-05-06 12:41:01"
+}

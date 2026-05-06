@@ -1,0 +1,20 @@
+{
+  "slug": "nu_phuong_anh",
+  "display_name": "Phương Anh",
+  "gender": "female",
+  "language": "vietnamese",
+  "description": "Nữ thanh niên ấm — radio host đêm khuya, gần gũi",
+  "instruct": "female, young adult, moderate pitch",
+  "sample_text": "Chào quý vị thính giả đang lắng nghe sóng phát thanh. Đêm nay, chúng ta sẽ cùng nhau dành ít phút lắng đọng để cảm nhận những giai điệu đẹp nhất, nhẹ nhàng nhất của một ngày dài đã qua.",
+  "params": {
+    "num_step": 32,
+    "guidance_scale": 2.5,
+    "position_temperature": 4.5,
+    "class_temperature": 0.0,
+    "t_shift": 0.1
+  },
+  "seed": 870362570,
+  "model": "k2-fsa/OmniVoice",
+  "sample_rate": 24000,
+  "built_at": "2026-05-06 12:40:49"
+}

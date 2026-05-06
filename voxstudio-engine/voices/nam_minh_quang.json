@@ -1,0 +1,20 @@
+{
+  "slug": "nam_minh_quang",
+  "display_name": "Minh Quang",
+  "gender": "male",
+  "language": "vietnamese",
+  "description": "Nam thanh niên ấm — YouTuber, narrator content educational",
+  "instruct": "male, young adult, moderate pitch",
+  "sample_text": "Chào các bạn, hôm nay chúng ta sẽ cùng tìm hiểu về một khái niệm thú vị trong cuộc sống. Mình sẽ giải thích thật đơn giản, dễ hiểu, các bạn chỉ cần thư giãn và lắng nghe.",
+  "params": {
+    "num_step": 32,
+    "guidance_scale": 2.5,
+    "position_temperature": 4.5,
+    "class_temperature": 0.0,
+    "t_shift": 0.1
+  },
+  "seed": 2277053923,
+  "model": "k2-fsa/OmniVoice",
+  "sample_rate": 24000,
+  "built_at": "2026-05-06 12:40:52"
+}
