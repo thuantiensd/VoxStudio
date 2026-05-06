@@ -78,15 +78,23 @@ fi
 
 cd "$REPO_DIR/server"
 
-# ── 3) Python deps (skip nếu đã cài qua sentinel) ────────────────
-if [ ! -f "$DEPS_SENTINEL" ] || [ "$1" = "--reinstall" ]; then
-    echo "→ Installing Python deps (5-10 phút lần đầu)..."
+# ── 3) Python deps trong venv ON Network Volume ──────────────────
+# Cài vào /workspace/.venv để persist qua pod destroy. Container disk
+# bị xoá khi destroy → deps trong system Python sẽ mất; venv ở
+# Network Volume → deps an toàn forever.
+VENV_DIR="$WS/.venv"
+if [ ! -f "$VENV_DIR/bin/activate" ] || [ "$1" = "--reinstall" ]; then
+    echo "→ Creating venv at $VENV_DIR + installing deps (5-10 phút lần đầu)..."
+    python -m venv "$VENV_DIR"
+    source "$VENV_DIR/bin/activate"
+    pip install --no-cache-dir --upgrade pip
     pip install --no-cache-dir -r requirements.txt
     pip install --no-cache-dir -e ../voxstudio-engine
     touch "$DEPS_SENTINEL"
-    echo "  ✓ Deps installed (sentinel: $DEPS_SENTINEL)"
+    echo "  ✓ Venv ready (persistent forever via Network Volume)"
 else
-    echo "→ Deps OK (sentinel exists). Use --reinstall để cài lại."
+    echo "→ Venv exists at $VENV_DIR (skip install)."
+    source "$VENV_DIR/bin/activate"
 fi
 
 # ── 4) Generate .env từ env vars Pod (auth/DB/etc) ───────────────
