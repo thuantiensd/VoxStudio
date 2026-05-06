@@ -24,9 +24,14 @@ from typing import Any, Optional
 logger = logging.getLogger(__name__)
 
 
-# Slugs preset luôn bắt đầu nu_ (nữ) hoặc nam_ (nam). UUID clone là hex 12 char.
+# Slugs preset có prefix theo ngôn ngữ. UUID clone là hex 12 char (ko underscore).
 # Phân biệt rõ ràng để storage layer route đúng pool.
-_PREMIUM_SLUG_PREFIXES = ("nu_", "nam_")
+#   nu_/nam_ : Vietnamese (legacy + main pool)
+#   en_/zh_/jp_/kr_/fr_/es_/de_/ru_/it_/pt_ : multi-language presets
+_PREMIUM_SLUG_PREFIXES = (
+    "nu_", "nam_",
+    "en_", "zh_", "jp_", "kr_", "fr_", "es_", "de_", "ru_", "it_", "pt_",
+)
 
 
 # Path tới folder voices của voxstudio-engine. Search nhiều location để work
