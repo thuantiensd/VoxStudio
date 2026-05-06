@@ -1,4 +1,11 @@
-"""Voice management API — per-user isolation."""
+"""Voice management API — per-user isolation.
+
+Endpoints chia 2 nhóm:
+  • Premium voices (preset, shared) — `GET /voices/premium`,
+    `GET /voices/premium/{slug}/preview`. Public read, không cần verify email.
+  • User clones (private) — `GET /voices`, `POST /voices/clone`,
+    `DELETE /voices/{id}`. Per-user isolation.
+"""
 
 import os as _os
 import shutil
@@ -6,15 +13,22 @@ import tempfile
 import uuid
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
+from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.auth.audio_sig import signed_url
 from app.auth.deps import get_current_user, require_verified
 from app.auth.rate_limit import require_quota
 from app.config import STORAGE_BACKEND, TTS_DEFAULT_GUIDANCE, TTS_DEFAULT_STEPS
 from app.db.models import User
 from app.db.session import get_session
-from app.models.schemas import VoiceInfo, VoiceListResponse
-from app.services import job_svc, plan_svc, voice_svc
+from app.models.schemas import (
+    PremiumVoiceInfo,
+    PremiumVoiceListResponse,
+    VoiceInfo,
+    VoiceListResponse,
+)
+from app.services import job_svc, plan_svc, premium_voice_svc, voice_svc
 
 router = APIRouter(prefix="/voices", tags=["Voices"])
 
@@ -104,6 +118,15 @@ async def preview_voice(
             },
         )
         result.pop("usage", None)
+        # Worker trả audio_url dạng "/api/v1/tts/audio/<file_id>" chưa sign.
+        # Endpoint /tts/audio yêu cầu signed URL (sig+u+exp) — wrap để
+        # <audio> element load được mà không cần Auth header.
+        # Đây từng là bug: preview audio fail "The element has no supported sources"
+        # vì audio_url thiếu signature.
+        raw_url = result.get("audio_url") or ""
+        file_id = raw_url.rsplit("/", 1)[-1] if raw_url else ""
+        if file_id:
+            result["audio_url"] = signed_url(file_id, user.id, ttl_seconds=3600)
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -179,6 +202,38 @@ async def list_voices(
     """List giọng của user hiện tại (admin thấy hết)."""
     voices = await voice_svc.get_all(db, user.id, is_admin=(user.role == "admin"))
     return {"voices": voices, "total": len(voices)}
+
+
+# ── Premium preset voices ────────────────────────────
+# Đặt TRƯỚC `/{voice_id}` route để FastAPI match path literal trước param.
+@router.get("/premium", response_model=PremiumVoiceListResponse)
+async def list_premium_voices():
+    """List built-in preset voices. Public — không cần auth.
+
+    User dùng các slug này (vd `nu_mai_anh`) làm `voice_id` khi gọi TTS/dub
+    giống như UUID của clone — backend tự route sang premium pool.
+    """
+    voices = premium_voice_svc.list_premium()
+    return {"voices": voices, "total": len(voices)}
+
+
+@router.get("/premium/{slug}/preview")
+async def get_premium_voice_preview(slug: str):
+    """Stream audio mẫu của preset voice. Public — để user click play
+    nghe thử trong dropdown trước khi chọn.
+
+    Cache 1 ngày (immutable) — preview chỉ regen khi dev rebuild.
+    """
+    if not premium_voice_svc.is_premium_slug(slug):
+        raise HTTPException(404, "Preset không tồn tại")
+    path = premium_voice_svc.get_preview_path(slug)
+    if path is None or not path.exists():
+        raise HTTPException(404, "Preview chưa được build cho giọng này")
+    return FileResponse(
+        path,
+        media_type="audio/wav",
+        headers={"Cache-Control": "public, max-age=86400, immutable"},
+    )
 
 
 @router.get("/{voice_id}", response_model=VoiceInfo)

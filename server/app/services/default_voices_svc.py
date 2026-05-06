@@ -1,13 +1,13 @@
 """Default voice pool — fallback giọng built-in cho multi-voice mode.
 
-Khi user dub 2+ giọng nhưng chưa có voice clone riêng cho speaker, hệ thống
-gán giọng từ pool này. Đảm bảo:
+Khi dub 2+ giọng nhưng user chưa pick voice clone riêng cho speaker, hệ
+thống gán giọng từ pool này. Đảm bảo:
   - Cùng speaker_id → cùng giọng XUYÊN SUỐT VIDEO (deterministic via hash)
   - Match gender: speaker nam → giọng nam, speaker nữ → giọng nữ
-  - Giọng built-in pool đa dạng (≥2 nam, ≥2 nữ) để 2+ speaker cùng gender
-    không bị trùng giọng
+  - Pool đa dạng (≥2 nam, ≥2 nữ) → 2+ speaker cùng gender không trùng giọng
 
-Voice pool source: OmniVoice-master/voices/*.pt (đã clone sẵn).
+Voice pool source: voxstudio-engine/voices/<slug>.pt — share chung pool với
+premium_voice_svc. Nguồn của truth là `.json` sidecar (gender field).
 """
 
 from __future__ import annotations
@@ -17,65 +17,22 @@ import logging
 from pathlib import Path
 from typing import Optional
 
+from app.services.premium_voice_svc import _get_cache
+
 logger = logging.getLogger(__name__)
 
 
-# Path tới folder voices của OmniVoice-master (chứa file .pt đã clone sẵn).
-# Search nhiều location để work cả Mac local + RunPod.
-_VOICE_SEARCH_PATHS = [
-    Path("/content/OmniVoice-master/voices"),
-    Path(__file__).parent.parent.parent.parent / "OmniVoice-master" / "voices",
-]
-
-
-# Phân loại giọng theo gender. Tên file ánh xạ thủ công vì OmniVoice không
-# lưu metadata gender trong .pt. Khi thêm giọng mới, update map này.
-_VOICE_POOL = {
-    "male": [
-        "BLV_Bóng_Đá",       # giọng bình luận viên thể thao nam
-        "Châu_Tinh_Trì",     # giọng diễn viên nam
-    ],
-    "female": [
-        "Nữ",                # giọng nữ chuẩn
-    ],
-}
-
-
-_voice_pool_cache: dict[str, list[Path]] | None = None
-
-
 def _resolve_voice_pool() -> dict[str, list[Path]]:
-    """Tìm physical .pt files cho từng tên trong _VOICE_POOL.
-    Cached sau lần đầu scan."""
-    global _voice_pool_cache
-    if _voice_pool_cache is not None:
-        return _voice_pool_cache
-
-    # Tìm voices_dir tồn tại
-    voices_dir = None
-    for p in _VOICE_SEARCH_PATHS:
-        if p.exists() and p.is_dir():
-            voices_dir = p
-            break
-
-    if voices_dir is None:
-        logger.warning("Default voice pool: OmniVoice voices folder not found")
-        _voice_pool_cache = {"male": [], "female": []}
-        return _voice_pool_cache
-
-    resolved: dict[str, list[Path]] = {"male": [], "female": []}
-    for gender, names in _VOICE_POOL.items():
-        for name in names:
-            p = voices_dir / f"{name}.pt"
-            if p.exists():
-                resolved[gender].append(p)
-            else:
-                logger.warning("Default voice pool: missing %s.pt", name)
-
-    logger.info("Default voice pool resolved: male=%d female=%d (dir=%s)",
-                len(resolved["male"]), len(resolved["female"]), voices_dir)
-    _voice_pool_cache = resolved
-    return resolved
+    """Group premium voices theo gender. Reuse cache của premium_voice_svc
+    để khỏi scan folder 2 lần."""
+    cache = _get_cache()
+    by_slug = cache["by_slug"]
+    pool: dict[str, list[Path]] = {"male": [], "female": []}
+    for slug, meta in by_slug.items():
+        g = (meta.get("gender") or "").lower()
+        if g in ("male", "female"):
+            pool[g].append(meta["_pt_path"])
+    return pool
 
 
 def get_default_voice_path_for_speaker(
@@ -90,19 +47,18 @@ def get_default_voice_path_for_speaker(
 
     Returns:
       Path tới .pt, hoặc None nếu pool rỗng → caller fallback sang
-      voice_prompt=None (OmniVoice tự sinh giọng baseline).
+      voice_prompt=None (Vox Premium tự sinh giọng baseline).
     """
     pool = _resolve_voice_pool()
     g = (gender or "").lower()
 
-    # Pick pool theo gender (fallback "any" → male nếu không có gender info)
     if g == "female" and pool["female"]:
         candidates = pool["female"]
     elif g == "male" and pool["male"]:
         candidates = pool["male"]
     else:
-        # Không có gender → ưu tiên male (BLV phổ biến hơn cho narrator).
-        # Hoặc gender không match (vd unknown) → male làm fallback.
+        # Không có gender info hoặc gender lạ → fallback male (narrator
+        # thường nam), nếu pool nam rỗng thì lấy nữ.
         candidates = pool["male"] or pool["female"]
 
     if not candidates:

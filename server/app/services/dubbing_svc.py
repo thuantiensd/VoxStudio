@@ -32,7 +32,7 @@ def _detect_tts_engine() -> str:
         import omnivoice
         return "omnivoice"
     except ImportError:
-        logger.info("OmniVoice not installed, falling back to Edge TTS")
+        logger.info("Vox Premium engine not installed, falling back to Edge TTS")
         return "edge"
 
 
@@ -51,7 +51,8 @@ def _pick_omni_voice_id_for_segment(seg: dict, project: dict) -> str | None:
            gender của speaker. SPK1/SPK2/... được đánh số ổn định bởi
            Resemblyzer; chia theo gender → ưu tiên slot có gender khớp.
       3. project.voice_id (legacy single-voice setting)
-      4. None → caller sẽ fallback sang giọng built-in (_get_default_voice)
+      4. None → caller fallback (worker xử lý: load voice_prompt=None hoặc
+         pick từ default_voices_svc theo gender của speaker)
     """
     # 1. Per-segment override
     seg_voice = seg.get("voice_id")
@@ -167,31 +168,9 @@ def _pick_edge_voice_for_segment(seg: dict, project: dict) -> str | None:
     return None
 
 
-_default_voice_cache = None
-
-def _get_default_voice():
-    """Load BLV_Bóng_Đá voice as default. Cached after first load."""
-    global _default_voice_cache
-    if _default_voice_cache is not None:
-        return _default_voice_cache
-
-    # Search for BLV voice in known locations
-    import torch as _torch
-    from omnivoice.models.omnivoice import VoiceClonePrompt
-    _torch.serialization.add_safe_globals([VoiceClonePrompt])
-    search_paths = [
-        Path("/content/OmniVoice-master/voices/BLV_Bóng_Đá.pt"),
-        Path(__file__).parent.parent.parent.parent / "OmniVoice-master" / "voices" / "BLV_Bóng_Đá.pt",
-        VOICES_DIR / "BLV_Bóng_Đá.pt",
-    ]
-    for p in search_paths:
-        if p.exists():
-            _default_voice_cache = _torch.load(str(p), map_location="cpu", weights_only=True)
-            logger.info("Loaded default voice: %s", p.name)
-            return _default_voice_cache
-
-    logger.warning("Default BLV voice not found, using no voice prompt")
-    return None
+# Legacy `_get_default_voice` (hardcode BLV_Bóng_Đá) đã xoá khi rebrand sang
+# 12 preset Vox Premium. Worker giờ pick voice qua default_voices_svc
+# theo gender + speaker_id. Pool source: voxstudio-engine/voices/<slug>.pt.
 
 
 def _extract_segment_audio(source_path: str, out_path: str, start: float, end: float):
@@ -1292,7 +1271,7 @@ def generate_segment(project_id: str, seg_id: str) -> dict:
                 # Speed factor luôn trong [MIN, MAX]. Nếu reason=overflow_clamped
                 # → segment sẽ overflow nhẹ vào silence kế (chấp nhận được).
                 if speed_factor > 1.0 + 0.03:
-                    logger.info("[dub] OmniVoice speed-match: actual=%.2fs target=%.2fs "
+                    logger.info("[dub] Vox Premium speed-match: actual=%.2fs target=%.2fs "
                                 "speed=%.2fx reason=%s",
                                 actual_dur, target_duration, speed_factor, reason)
                     seg_dir = _segments_dir(project_id)
@@ -1306,12 +1285,12 @@ def generate_segment(project_id: str, seg_id: str) -> dict:
                         raw_wav.unlink(missing_ok=True)
                         stretched_wav.unlink(missing_ok=True)
                 if reason == "overflow_clamped":
-                    logger.warning("[dub] OmniVoice segment %s overflow: clamped to "
+                    logger.warning("[dub] Vox Premium segment %s overflow: clamped to "
                                    "%.2fx — dub will be %.0fms longer than slot",
                                    seg.get("id", "?"), MAX_SPEED_FACTOR,
                                    (actual_dur / MAX_SPEED_FACTOR - target_duration) * 1000)
             elif actual_dur < target_duration * 0.9:
-                logger.info("OmniVoice short-fill: actual=%.2fs target=%.2fs (silence padding)",
+                logger.info("Vox Premium short-fill: actual=%.2fs target=%.2fs (silence padding)",
                             actual_dur, target_duration)
 
         # Tier 1.2: Insert internal pauses để giữ rhythm gốc

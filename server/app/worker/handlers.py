@@ -228,19 +228,23 @@ async def tts_handler(payload: dict, *, job_id: str, progress_cb) -> dict:
     if not text.strip():
         raise ValueError("Nội dung trống.")
 
-    # Check voice ownership nếu có voice_id
+    # Check voice ownership nếu có voice_id.
+    # Premium preset (slug `nu_*`/`nam_*`) là pool shared — bypass check,
+    # ai cũng dùng được. Chỉ user clones (UUID) cần verify ownership qua DB.
     voice_id = payload.get("voice_id")
     owner_id = payload.get("_owner_user_id")
     if voice_id and owner_id:
-        from app.db.session import AsyncSessionLocal
-        from app.db.models import User
-        from app.services import voice_svc as _vs
-        async with AsyncSessionLocal() as db:
-            user = await db.get(User, owner_id)
-            is_admin = bool(user and user.role == "admin")
-            v = await _vs.check_ownership(db, voice_id, owner_id, is_admin=is_admin)
-            if v is None:
-                raise ValueError("Bạn không có quyền sử dụng giọng này.")
+        from app.services.premium_voice_svc import is_premium_slug
+        if not is_premium_slug(voice_id):
+            from app.db.session import AsyncSessionLocal
+            from app.db.models import User
+            from app.services import voice_svc as _vs
+            async with AsyncSessionLocal() as db:
+                user = await db.get(User, owner_id)
+                is_admin = bool(user and user.role == "admin")
+                v = await _vs.check_ownership(db, voice_id, owner_id, is_admin=is_admin)
+                if v is None:
+                    raise ValueError("Bạn không có quyền sử dụng giọng này.")
 
     await progress_cb(step="generating", progress=10)
     result = await asyncio.to_thread(

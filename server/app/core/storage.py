@@ -253,8 +253,16 @@ def save_voice(voice_id: str, name: str, prompt, ref_text: str = None,
 
 
 def load_voice(voice_id: str, owner_id: int | str | None = None):
-    """Load voice prompt tensor. Tìm file qua _resolve_voice_path
-    (auto pull từ R2 nếu local cache miss)."""
+    """Load voice prompt tensor. Routing 2 pools:
+      • voice_id dạng `nu_*` / `nam_*` → premium preset (shared, ko gắn user)
+      • voice_id UUID → user clone (folder per user, fallback R2)
+    """
+    # Premium preset — không cần owner_id, không có DB row
+    from app.services.premium_voice_svc import is_premium_slug, load_premium_prompt
+    if is_premium_slug(voice_id):
+        return load_premium_prompt(voice_id)
+
+    # User clone path
     path = _resolve_voice_path(voice_id, "pt", owner_id)
     if path is None:
         return None

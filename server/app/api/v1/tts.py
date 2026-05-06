@@ -148,24 +148,35 @@ async def get_audio(
     sig: Optional[str] = Query(None),
     u: Optional[str] = Query(None),
     exp: Optional[str] = Query(None),
-    user: User = Depends(get_current_user),
 ):
-    """Trả file audio output. Yêu cầu signed URL (sig+u+exp) khớp user.
+    """Trả file audio output. Auth qua signed URL (sig+u+exp) — HMAC SHA-256
+    với JWT_SECRET. KHÔNG yêu cầu Bearer token vì:
+      • <audio> HTML element không thể add custom headers (CORS limitation).
+      • Signed URL đã contain user_id + expiry + HMAC-tampered-proof —
+        đủ strong để chống share/leak. TTL 1h ngắn hơn JWT (7d).
 
     R2 mode: redirect 302 sang R2 public URL (sau khi verify sig).
     Local mode: stream file từ filesystem.
     """
-    # Verify HMAC signature trước — bảo vệ chống ai cũng tải bằng file_id
-    verify_sig(
-        file_id,
-        user_id_request=user.id,
-        sig=sig, u=u, exp=exp,
-        is_admin=(user.role == "admin"),
-    )
-
-    # Path traversal protection — file_id phải hex (12 chars), không slash/dot
+    # Path traversal protection — file_id phải hex/alnum, không slash/dot
     if not file_id.isalnum() or len(file_id) > 32:
         raise HTTPException(status_code=400, detail="Invalid file_id")
+
+    # Verify signed URL — sig contains user_id binding + expiry. Truyền
+    # u_int (từ URL) làm user_id_request để skip user-mismatch check
+    # (signed URL itself proves ownership intent).
+    if not sig or not u or not exp:
+        raise HTTPException(status_code=403, detail="Missing signature")
+    try:
+        u_int = int(u)
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=403, detail="Invalid signature")
+    verify_sig(
+        file_id,
+        user_id_request=u_int,
+        sig=sig, u=u, exp=exp,
+        is_admin=False,
+    )
 
     if STORAGE_BACKEND == "r2":
         url = get_audio_url(file_id)

@@ -51,6 +51,22 @@ class VoiceListResponse(BaseModel):
     total: int
 
 
+class PremiumVoiceInfo(BaseModel):
+    """Built-in preset voice — không gắn với user, ai cũng dùng được."""
+    slug: str                           # ID dạng nu_*/nam_* thay vì UUID
+    display_name: str                   # Tên hiển thị (vd "Mai Anh")
+    gender: str                         # "male" | "female"
+    language: str = "vietnamese"        # Ngôn ngữ giọng được train/tối ưu cho
+    description: str = ""               # Mô tả ngắn cho UI tooltip
+    instruct: str = ""                  # Voice design attributes (debug)
+    preview_url: Optional[str] = None   # Endpoint trả audio mẫu, None nếu chưa build
+
+
+class PremiumVoiceListResponse(BaseModel):
+    voices: List[PremiumVoiceInfo]
+    total: int
+
+
 # ── Transcribe ───────────────────────────────────────
 class Segment(BaseModel):
     start: float
