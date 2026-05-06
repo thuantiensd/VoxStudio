@@ -45,16 +45,35 @@ if ! command -v ffmpeg >/dev/null 2>&1; then
 fi
 
 # ── 2) Clone repo (lần đầu) hoặc pull (lần sau) ──────────────────
+# Inject GITHUB_PAT vào URL nếu repo private. Format:
+#   https://github.com/...  →  https://<PAT>@github.com/...
+_inject_pat() {
+    local url="$1"
+    if [ -n "$GITHUB_PAT" ] && [[ "$url" == https://github.com/* ]]; then
+        echo "${url/https:\/\/github.com\//https:\/\/${GITHUB_PAT}@github.com\/}"
+    else
+        echo "$url"
+    fi
+}
+
 if [ ! -d "$REPO_DIR/.git" ]; then
     if [ -z "$GIT_REPO_URL" ]; then
         echo "✗ GIT_REPO_URL chưa set. Set env var rồi chạy lại."
         exit 1
     fi
-    echo "→ Cloning $GIT_REPO_URL → $REPO_DIR (lần đầu, 1-2 phút)..."
-    git clone --branch "$GIT_BRANCH" --depth 1 "$GIT_REPO_URL" "$REPO_DIR"
+    AUTH_URL=$(_inject_pat "$GIT_REPO_URL")
+    echo "→ Cloning repo → $REPO_DIR (lần đầu, 1-2 phút)..."
+    git clone --branch "$GIT_BRANCH" --depth 1 "$AUTH_URL" "$REPO_DIR"
 else
     echo "→ Repo exists, pulling latest..."
-    cd "$REPO_DIR" && git pull --ff-only origin "$GIT_BRANCH" || echo "  ⚠ pull fail, dùng version hiện tại"
+    cd "$REPO_DIR"
+    # Update remote URL với PAT (idempotent — chạy lại nhiều lần OK)
+    if [ -n "$GITHUB_PAT" ]; then
+        CURR_URL=$(git remote get-url origin)
+        AUTH_URL=$(_inject_pat "$CURR_URL")
+        [ "$CURR_URL" != "$AUTH_URL" ] && git remote set-url origin "$AUTH_URL"
+    fi
+    git pull --ff-only origin "$GIT_BRANCH" || echo "  ⚠ pull fail, dùng version hiện tại"
 fi
 
 cd "$REPO_DIR/server"
