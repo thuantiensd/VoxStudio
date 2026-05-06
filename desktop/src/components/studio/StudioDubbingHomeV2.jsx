@@ -16,7 +16,7 @@ import ProjectGrid from "./ProjectGrid";
 import ProjectDrawer from "./ProjectDrawer";
 import {
   createDubbingProject, updateProjectSettings, updateSubtitleStyle,
-  listVoices, listEdgeVoices,
+  listVoices, listEdgeVoices, listPremiumVoices,
 } from "../../services/api";
 import { showError } from "../../services/errors";
 import { getActivePreset, saveCustomPreset } from "../../services/preset";
@@ -221,12 +221,28 @@ export default function StudioDubbingHomeV2() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Load voice lists once
+  // Load voice lists once.
+  // OmniVoice voices = premium presets (31, shared) + user clones (per-user).
+  // Premium được normalize về shape giống user clone để OmniVoicePicker
+  // không cần code branching: {id, name, tags, language, gender, isPremium}.
   useEffect(() => {
-    listVoices().then((data) => {
-      const list = Array.isArray(data) ? data : (data?.voices || []);
-      setVoicesOmni(list);
-    }).catch(() => {});
+    Promise.all([
+      listPremiumVoices().then(d => d?.voices || []).catch(() => []),
+      listVoices().then(d => Array.isArray(d) ? d : (d?.voices || [])).catch(() => []),
+    ]).then(([premium, clones]) => {
+      const normalizedPremium = premium.map(v => ({
+        id: v.slug,
+        name: v.display_name,
+        language: v.language,
+        gender: v.gender,
+        // tags chứa language + gender → voiceMatchesLang + genderOf hoạt
+        // động bình thường cho cả premium + clone (cùng pipeline).
+        tags: [v.language, v.gender, "premium"].filter(Boolean),
+        isPremium: true,
+        preview_url: v.preview_url,
+      }));
+      setVoicesOmni([...normalizedPremium, ...clones]);
+    });
     listEdgeVoices().then((data) => {
       const list = Array.isArray(data) ? data : (data?.voices || []);
       setVoicesEdge(list);
@@ -1235,11 +1251,19 @@ function OmniVoicePicker({ cfg, set, voices }) {
               style={selectStyle}
             >
               <option value="">★ {t("dub.defaultPremiumVoice")}</option>
-              {slotVoices.map((v) => (
-                <option key={v.id} value={v.id}>
-                  {v.name || v.id}{v.tags ? ` · ${Array.isArray(v.tags) ? v.tags.join(", ") : v.tags}` : ""}
-                </option>
-              ))}
+              {slotVoices.map((v) => {
+                // Premium preset prefix với ✨ để user phân biệt khỏi
+                // clone của mình. Clone voice giữ format cũ {name · tags}.
+                const prefix = v.isPremium ? "✨ " : "";
+                const meta = v.isPremium
+                  ? (v.language || "")
+                  : (v.tags ? (Array.isArray(v.tags) ? v.tags.join(", ") : v.tags) : "");
+                return (
+                  <option key={v.id} value={v.id}>
+                    {prefix}{v.name || v.id}{meta ? ` · ${meta}` : ""}
+                  </option>
+                );
+              })}
             </select>
           </div>
         );
