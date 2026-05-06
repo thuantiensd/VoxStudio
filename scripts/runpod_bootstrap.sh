@@ -91,8 +91,22 @@ fi
 
 # ── 4) Generate .env từ env vars Pod (auth/DB/etc) ───────────────
 mkdir -p "$WS/dubbing_projects" "$WS/voices" "$WS/audio_output" "$HF_DIR"
+
+# DATABASE_URL: nếu user chưa set (no VPS Postgres) → bỏ qua, backend
+# fallback sang SQLite file. VOX_DB_PATH set ở env Pod sẽ lưu .db vào
+# Network Volume, persistent qua restart.
+DB_LINE=""
+if [ -n "$DATABASE_URL" ]; then
+    DB_LINE="DATABASE_URL=${DATABASE_URL}"
+fi
+DB_PATH_LINE=""
+if [ -n "$VOX_DB_PATH" ]; then
+    DB_PATH_LINE="VOX_DB_PATH=${VOX_DB_PATH}"
+fi
+
 cat > "$REPO_DIR/server/.env" <<EOF
-DATABASE_URL=${DATABASE_URL}
+$DB_LINE
+$DB_PATH_LINE
 WORKER_ENABLED=true
 DEVICE=cuda
 
