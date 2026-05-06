@@ -98,6 +98,7 @@ DEFAULT_PLANS = [
             "dubbing_min_month": 10,
             "stt_min_month": 30,
             "tts_chars_month": 5_000,
+            "tts_max_chars_request": 1_000,    # 1k/lần — free user thử
             "voice_clone_max": 1,
             "project_max": 5,
         },
@@ -124,6 +125,7 @@ DEFAULT_PLANS = [
             "dubbing_min_month": 300,
             "stt_min_month": 1_000,
             "tts_chars_month": 200_000,
+            "tts_max_chars_request": 25_000,   # 25k/lần — pro: text dài (sách, kịch bản)
             "voice_clone_max": 10,
             "project_max": 50,
         },
@@ -148,6 +150,7 @@ DEFAULT_PLANS = [
             "dubbing_min_month": 1_500,
             "stt_min_month": -1,
             "tts_chars_month": -1,
+            "tts_max_chars_request": -1,        # studio: ko giới hạn/lần (vẫn show counter)
             "voice_clone_max": 50,
             "project_max": -1,
         },
@@ -183,14 +186,19 @@ async def _seed_plans(db: AsyncSession):
                     cur_limits, cur_features = {}, {}
                 merged_limits = {**spec["limits"], **cur_limits}
                 merged_features = {**spec["features"], **cur_features}
-                # Nếu key mới (daily_downloads, video_download) chưa có
-                # trong existing → bổ sung
+                # Nếu key mới (daily_downloads, video_download,
+                # tts_max_chars_request) chưa có trong existing → bổ sung.
+                # Pattern này cho phép thêm field mới vào plan limits mà
+                # không phá pricing admin đã chỉnh tay.
                 changed = False
                 if "daily_downloads" not in cur_limits:
                     merged_limits["daily_downloads"] = spec["limits"]["daily_downloads"]
                     changed = True
                 if "video_download" not in cur_features:
                     merged_features["video_download"] = spec["features"]["video_download"]
+                    changed = True
+                if "tts_max_chars_request" not in cur_limits:
+                    merged_limits["tts_max_chars_request"] = spec["limits"]["tts_max_chars_request"]
                     changed = True
                 if changed:
                     existing.limits_json = json.dumps(merged_limits, ensure_ascii=False)

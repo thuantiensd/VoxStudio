@@ -14,6 +14,7 @@ import { FolderOpen } from 'lucide-react';
 import { SERVER_URL } from '../services/api';
 import { WHISPER_LANGUAGES } from '../services/ttsSettings';
 import LanguagePicker from '../components/ui/LanguagePicker';
+import { useAuth } from '../auth/AuthContext';
 
 // Edge TTS — chỉ list ngôn ngữ Microsoft cloud hỗ trợ (subset).
 const LANGUAGE_VALUES_EDGE = [
@@ -1135,17 +1136,26 @@ function SingleMode({ s }) {
   const t = useT();
   const toast = useToast();
   const upgrade = useUpgrade();
+  const { auth } = useAuth();
   const [text, setText] = useState('');
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
   const [error, setError] = useState('');
 
-  const charColor = text.length > CHAR_LIMIT
+  // Per-request char limit theo plan từ /auth/me. -1 = unlimited (Studio).
+  // Free fallback CHAR_LIMIT (1000) nếu plan chưa load (vd lúc khởi động).
+  const planLimit = auth?.plan?.limits?.tts_max_chars_request;
+  const isUnlimited = planLimit === -1;
+  const effectiveLimit = isUnlimited ? Infinity : (planLimit ?? CHAR_LIMIT);
+  const overLimit = text.length > effectiveLimit;
+  const charColor = overLimit
     ? 'var(--danger)'
-    : text.length >= CHAR_WARN ? '#f0a030' : 'var(--text-secondary)';
+    : (!isUnlimited && text.length >= effectiveLimit * 0.5)
+        ? '#f0a030'
+        : 'var(--text-secondary)';
 
   const generate = async () => {
-    if (!text.trim() || text.length > CHAR_LIMIT) return;
+    if (!text.trim() || overLimit) return;
     // BẮT BUỘC chọn folder lưu trước khi generate (Electron only).
     // Server sẽ xoá file ngay sau khi client tải về → cần folder hợp lệ.
     const isElectron = !!window.voxstudio?.pickFolder;
@@ -1198,14 +1208,17 @@ function SingleMode({ s }) {
         style={{ background: 'var(--bg-card)', border: '1px solid #2a2a40', color: 'var(--text-primary)' }} />
       <div className="flex justify-between text-xs mb-5">
         <span style={{ color: charColor }}>
-          {t('tts.charCount', { n: text.length, max: CHAR_LIMIT })}
-          {text.length > CHAR_LIMIT && ' — ' + t('tts.charOver')}
+          {/* Studio (unlimited): chỉ show count, không có / max. Free/Pro: show n / max */}
+          {isUnlimited
+            ? `${text.length.toLocaleString()} ${t('tts.chars')}`
+            : t('tts.charCount', { n: text.length, max: effectiveLimit })}
+          {overLimit && ' — ' + t('tts.charOver')}
         </span>
       </div>
 
       <SettingsPanel s={s} />
 
-      <button onClick={generate} disabled={loading || !text.trim() || text.length > CHAR_LIMIT}
+      <button onClick={generate} disabled={loading || !text.trim() || overLimit}
         className="w-full py-3 rounded-lg font-medium text-white flex items-center justify-center gap-2 transition-opacity disabled:opacity-50"
         style={{ background: 'var(--accent)' }}>
         {loading ? (

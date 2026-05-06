@@ -82,7 +82,14 @@ export function AuthProvider({ children }) {
           setAuth(null);  // token invalid/expired → logout silently
         } else if (res.ok) {
           const data = await res.json();
-          if (data?.user) setAuth((a) => ({ ...a, user: data.user }));
+          // Store user + plan + usage. Plan có limits dict (vd
+          // tts_max_chars_request) cần cho UI gating.
+          if (data?.user) setAuth((a) => ({
+            ...a,
+            user: data.user,
+            plan: data.plan || null,
+            usage_month: data.usage_month || null,
+          }));
         }
       } catch {
         // Network error — giữ nguyên session, thử lại sau
@@ -161,7 +168,14 @@ export function AuthProvider({ children }) {
       if (!res.ok) return null;
       const data = await res.json();
       if (data?.user) {
-        const next = { ...auth, user: data.user };
+        // Refresh cả plan + usage để UI gating (char limit) update
+        // ngay sau khi user nâng cấp gói qua billing flow.
+        const next = {
+          ...auth,
+          user: data.user,
+          plan: data.plan || auth.plan || null,
+          usage_month: data.usage_month || auth.usage_month || null,
+        };
         writeStored(next);
         setAuth(next);
         return data.user;

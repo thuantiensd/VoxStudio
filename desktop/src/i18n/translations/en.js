@@ -293,6 +293,7 @@ export default {
     text: "Text",
     textPlaceholder: "Enter the text to read…",
     charCount: "{n} / {max} characters",
+    chars: "characters",
     charOver: "exceeds limit",
     generate: "Generate Audio",
     generating: "Generating audio",

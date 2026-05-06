@@ -34,6 +34,21 @@ async def generate(
     """Generate speech from text — qua GPU job queue."""
     user: User = ctx["user"]
     db: AsyncSession = ctx["db"]
+
+    # Per-request char limit theo plan. -1 = unlimited (Studio).
+    # Chống bypass bằng cách gọi API trực tiếp (frontend đã check trước,
+    # nhưng phải verify lại server-side).
+    from app.services import plan_svc
+    plan = await plan_svc.get_plan(db, user.plan or "free")
+    max_chars = plan_svc.get_limit(plan, "tts_max_chars_request", 1_000)
+    text_len = len(req.text or "")
+    if max_chars != -1 and text_len > max_chars:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Text {text_len} ký tự vượt giới hạn {max_chars} của gói "
+                   f"{plan.name if plan else 'hiện tại'}. Nâng cấp gói hoặc chia text ngắn hơn.",
+        )
+
     payload = {
         "_owner_user_id": user.id,
         "text": req.text,

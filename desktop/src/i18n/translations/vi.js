@@ -293,6 +293,7 @@ export default {
     text: "Nội dung",
     textPlaceholder: "Nhập nội dung cần đọc…",
     charCount: "{n} / {max} ký tự",
+    chars: "ký tự",
     charOver: "vượt giới hạn",
     generate: "Tạo audio",
     generating: "Đang tạo audio",
