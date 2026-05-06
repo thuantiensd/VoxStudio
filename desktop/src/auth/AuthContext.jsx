@@ -95,8 +95,26 @@ export function AuthProvider({ children }) {
         // Network error — giữ nguyên session, thử lại sau
       }
     })();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  // Re-run khi token đổi (vd login mới) để fetch /me lấy plan + usage.
+  // /login endpoint chỉ trả {user, token}, KHÔNG có plan → cần /me bù.
+  }, [auth?.token]);
+
+  /** Fetch /auth/me và merge plan + usage_month vào auth state. Helper
+   *  này gọi cả lúc mount + sau login để lấy plan ngay. */
+  const _fetchPlanAndUsage = async (token) => {
+    try {
+      const res = await fetch(`${SERVER_URL}/api/v1/auth/me`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "ngrok-skip-browser-warning": "true",
+        },
+      });
+      if (!res.ok) return null;
+      return await res.json();
+    } catch {
+      return null;
+    }
+  };
 
   const login = useCallback(async ({ email, password }) => {
     setLoading(true);
@@ -104,10 +122,17 @@ export function AuthProvider({ children }) {
       const data = await callAuth("/login", { email, password });
       console.log("[AuthContext] login response keys:", Object.keys(data || {}),
                   "token:", typeof data?.token, "len:", data?.token?.length || 0);
-      // Persist NGAY (sync) trước khi setAuth — tránh race với child effects
-      // (QuotaMonitor v.v.) đọc localStorage trước khi useEffect[auth] kịp ghi.
-      writeStored({ user: data.user, token: data.token });
-      setAuth({ user: data.user, token: data.token });
+      // Fetch /me ngay để lấy plan limits — login response thiếu plan,
+      // không lấy thì char limit + feature gating hỏng cho user mới login.
+      const me = await _fetchPlanAndUsage(data.token);
+      const fullAuth = {
+        user: data.user,
+        token: data.token,
+        plan: me?.plan || null,
+        usage_month: me?.usage_month || null,
+      };
+      writeStored(fullAuth);
+      setAuth(fullAuth);
       return data.user;
     } finally {
       setLoading(false);
@@ -118,8 +143,15 @@ export function AuthProvider({ children }) {
     setLoading(true);
     try {
       const data = await callAuth("/register", { email, password, name });
-      writeStored({ user: data.user, token: data.token });  // sync persist
-      setAuth({ user: data.user, token: data.token });
+      const me = await _fetchPlanAndUsage(data.token);
+      const fullAuth = {
+        user: data.user,
+        token: data.token,
+        plan: me?.plan || null,
+        usage_month: me?.usage_month || null,
+      };
+      writeStored(fullAuth);
+      setAuth(fullAuth);
       return data.user;
     } finally {
       setLoading(false);
