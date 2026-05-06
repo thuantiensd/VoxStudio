@@ -27,4 +27,7 @@ examples/download*
 examples/exp*/
 .claude/
 *.wav
+# Whitelist preview audio cho 12 preset premium voices (committed làm
+# production asset). Pattern *_preview.wav match nu_co_ba_preview.wav etc.
+!voices/*_preview.wav
 *.jsonl
