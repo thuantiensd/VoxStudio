@@ -1,0 +1,20 @@
+{
+  "slug": "nam_hoang_phuc",
+  "display_name": "Hoàng Phúc",
+  "gender": "male",
+  "language": "vietnamese",
+  "description": "Nam thiếu niên giọng cao — content hài hước, năng động",
+  "instruct": "male, teenager, very high pitch",
+  "sample_text": "Ê các bạn ơi, hôm nay mình mới khám phá ra một mẹo hay cực kỳ luôn nha! Cái này bảo đảm xài xong là phải bấm theo dõi liền cho coi. Lẹ lên nào, chuẩn bị bị wow ngay đây.",
+  "params": {
+    "num_step": 32,
+    "guidance_scale": 2.0,
+    "position_temperature": 5.0,
+    "class_temperature": 0.0,
+    "t_shift": 0.1
+  },
+  "seed": 2649646352,
+  "model": "k2-fsa/OmniVoice",
+  "sample_rate": 24000,
+  "built_at": "2026-05-05 17:31:35"
+}

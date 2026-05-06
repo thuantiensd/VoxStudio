@@ -1,0 +1,20 @@
+{
+  "slug": "nam_bac_tu",
+  "display_name": "Bác Tư",
+  "gender": "male",
+  "language": "vietnamese",
+  "description": "Nam lớn tuổi giọng cực trầm — ông kể chuyện cổ",
+  "instruct": "male, elderly, very low pitch",
+  "sample_text": "Cháu của ông ơi, lại đây ông kể cho mà nghe. Ngày xưa, khi ông còn trẻ như tụi bây bây giờ, làng mình chưa có điện, chưa có đường nhựa, chỉ toàn cây xanh và đồng lúa thôi.",
+  "params": {
+    "num_step": 32,
+    "guidance_scale": 2.0,
+    "position_temperature": 5.0,
+    "class_temperature": 0.0,
+    "t_shift": 0.1
+  },
+  "seed": 2646734249,
+  "model": "k2-fsa/OmniVoice",
+  "sample_rate": 24000,
+  "built_at": "2026-05-05 17:32:29"
+}

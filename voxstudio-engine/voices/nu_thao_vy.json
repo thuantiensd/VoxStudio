@@ -1,0 +1,20 @@
+{
+  "slug": "nu_thao_vy",
+  "display_name": "Thảo Vy",
+  "gender": "female",
+  "language": "vietnamese",
+  "description": "Nữ thì thầm — ASMR, thiền chánh niệm",
+  "instruct": "female, young adult, low pitch, whisper",
+  "sample_text": "Hít thở sâu nào, thả lỏng vai và cằm. Hãy để mọi suy nghĩ trôi đi như đám mây trên bầu trời. Bây giờ bạn đang ở một nơi rất an toàn và yên bình.",
+  "params": {
+    "num_step": 32,
+    "guidance_scale": 1.8,
+    "position_temperature": 5.0,
+    "class_temperature": 0.0,
+    "t_shift": 0.1
+  },
+  "seed": 3580117302,
+  "model": "k2-fsa/OmniVoice",
+  "sample_rate": 24000,
+  "built_at": "2026-05-05 17:31:22"
+}

@@ -1,0 +1,20 @@
+{
+  "slug": "nu_bao_chau",
+  "display_name": "Bảo Châu",
+  "gender": "female",
+  "language": "vietnamese",
+  "description": "Nữ trẻ giọng cao vừa — host podcast, gần gũi",
+  "instruct": "female, young adult, high pitch",
+  "sample_text": "Chào mọi người, lại là mình đây trong tập podcast tuần này. Hôm nay tụi mình sẽ cùng nhau bàn về một chủ đề rất thú vị, đó là cách quản lý thời gian sao cho hiệu quả nhất.",
+  "params": {
+    "num_step": 32,
+    "guidance_scale": 2.0,
+    "position_temperature": 5.0,
+    "class_temperature": 0.0,
+    "t_shift": 0.1
+  },
+  "seed": 2302309155,
+  "model": "k2-fsa/OmniVoice",
+  "sample_rate": 24000,
+  "built_at": "2026-05-05 17:30:27"
+}

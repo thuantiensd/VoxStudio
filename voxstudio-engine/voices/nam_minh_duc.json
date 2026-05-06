@@ -1,0 +1,20 @@
+{
+  "slug": "nam_minh_duc",
+  "display_name": "Minh Đức",
+  "gender": "male",
+  "language": "vietnamese",
+  "description": "Nam thanh niên giọng trầm — narrator sách nói, audiobook nhẹ nhàng",
+  "instruct": "male, young adult, low pitch",
+  "sample_text": "Chương một. Buổi sáng mùa thu se lạnh, sương mỏng phủ trên những mái nhà cũ. Hắn bước ra hiên, châm điếu thuốc đầu tiên trong ngày, lặng nhìn con đường vắng tanh trước mặt.",
+  "params": {
+    "num_step": 32,
+    "guidance_scale": 2.0,
+    "position_temperature": 5.0,
+    "class_temperature": 0.0,
+    "t_shift": 0.1
+  },
+  "seed": 3304155411,
+  "model": "k2-fsa/OmniVoice",
+  "sample_rate": 24000,
+  "built_at": "2026-05-05 20:29:45"
+}

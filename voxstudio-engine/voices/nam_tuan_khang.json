@@ -1,0 +1,20 @@
+{
+  "slug": "nam_tuan_khang",
+  "display_name": "Tuấn Khang",
+  "gender": "male",
+  "language": "vietnamese",
+  "description": "Nam thanh niên giọng cao vừa — vlogger du lịch",
+  "instruct": "male, young adult, high pitch",
+  "sample_text": "Xin chào mọi người, hôm nay mình sẽ dắt các bạn đi một chuyến khám phá Đà Lạt thật khác lạ. Chuẩn bị máy ảnh, áo khoác và tinh thần thật thoải mái nhé.",
+  "params": {
+    "num_step": 32,
+    "guidance_scale": 2.0,
+    "position_temperature": 5.0,
+    "class_temperature": 0.0,
+    "t_shift": 0.1
+  },
+  "seed": 2071336103,
+  "model": "k2-fsa/OmniVoice",
+  "sample_rate": 24000,
+  "built_at": "2026-05-05 17:31:49"
+}

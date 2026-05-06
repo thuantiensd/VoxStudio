@@ -1,0 +1,20 @@
+{
+  "slug": "nam_quoc_bao",
+  "display_name": "Quốc Bảo",
+  "gender": "male",
+  "language": "vietnamese",
+  "description": "Nam trung niên giọng trung — MC truyền hình chững chạc",
+  "instruct": "male, middle-aged, moderate pitch",
+  "sample_text": "Quý vị thân mến, chương trình của chúng ta hôm nay sẽ mang đến những câu chuyện đầy cảm xúc và ý nghĩa. Xin mời quý vị bước vào hành trình cùng chúng tôi.",
+  "params": {
+    "num_step": 32,
+    "guidance_scale": 2.0,
+    "position_temperature": 5.0,
+    "class_temperature": 0.0,
+    "t_shift": 0.1
+  },
+  "seed": 543367327,
+  "model": "k2-fsa/OmniVoice",
+  "sample_rate": 24000,
+  "built_at": "2026-05-05 17:32:02"
+}

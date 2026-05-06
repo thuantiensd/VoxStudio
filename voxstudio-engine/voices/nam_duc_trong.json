@@ -1,0 +1,20 @@
+{
+  "slug": "nam_duc_trong",
+  "display_name": "Đức Trọng",
+  "gender": "male",
+  "language": "vietnamese",
+  "description": "Nam trung niên giọng cực trầm — doanh nhân uy nghi, phát biểu",
+  "instruct": "male, middle-aged, very low pitch",
+  "sample_text": "Trong bối cảnh thị trường hiện nay, doanh nghiệp cần xác định rõ chiến lược dài hạn. Sự bền vững và đổi mới sẽ là hai trụ cột đưa chúng ta vượt qua mọi thách thức.",
+  "params": {
+    "num_step": 32,
+    "guidance_scale": 2.0,
+    "position_temperature": 5.0,
+    "class_temperature": 0.0,
+    "t_shift": 0.1
+  },
+  "seed": 2469546629,
+  "model": "k2-fsa/OmniVoice",
+  "sample_rate": 24000,
+  "built_at": "2026-05-05 20:29:32"
+}

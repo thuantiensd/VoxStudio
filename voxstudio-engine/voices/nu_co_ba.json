@@ -1,0 +1,20 @@
+{
+  "slug": "nu_co_ba",
+  "display_name": "Cô Ba",
+  "gender": "female",
+  "language": "vietnamese",
+  "description": "Nữ lớn tuổi giọng cực trầm — bà kể chuyện cổ tích",
+  "instruct": "female, elderly, very low pitch",
+  "sample_text": "Ngày xửa ngày xưa, ở một ngôi làng nhỏ ven sông, có một cô bé tên là Tấm. Cô sống cùng dì ghẻ và cô em cùng cha khác mẹ. Tấm phải làm việc vất vả từ sáng đến tối.",
+  "params": {
+    "num_step": 32,
+    "guidance_scale": 2.0,
+    "position_temperature": 5.0,
+    "class_temperature": 0.0,
+    "t_shift": 0.1
+  },
+  "seed": 564941428,
+  "model": "k2-fsa/OmniVoice",
+  "sample_rate": 24000,
+  "built_at": "2026-05-05 17:31:09"
+}

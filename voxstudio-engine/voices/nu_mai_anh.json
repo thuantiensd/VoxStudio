@@ -1,0 +1,20 @@
+{
+  "slug": "nu_mai_anh",
+  "display_name": "Mai Anh",
+  "gender": "female",
+  "language": "vietnamese",
+  "description": "Nữ thiếu niên giọng cao — tươi trẻ, năng động",
+  "instruct": "female, teenager, very high pitch",
+  "sample_text": "Kính chào quý vị và các bạn, đây là bản tin thời sự lúc bảy giờ tối. Hôm nay có nhiều sự kiện quan trọng diễn ra trong và ngoài nước. Mời quý vị cùng theo dõi chi tiết ngay sau đây.",
+  "params": {
+    "num_step": 32,
+    "guidance_scale": 2.0,
+    "position_temperature": 5.0,
+    "class_temperature": 0.0,
+    "t_shift": 0.1
+  },
+  "seed": 139573046,
+  "model": "k2-fsa/OmniVoice",
+  "sample_rate": 24000,
+  "built_at": "2026-05-05 20:29:18"
+}

@@ -1,0 +1,20 @@
+{
+  "slug": "nu_thu_lan",
+  "display_name": "Thu Lan",
+  "gender": "female",
+  "language": "vietnamese",
+  "description": "Nữ trung niên giọng trầm — narrator phim tài liệu",
+  "instruct": "female, middle-aged, low pitch",
+  "sample_text": "Sâu trong lòng đại dương, có những loài sinh vật chưa từng được khoa học khám phá. Chúng tồn tại lặng lẽ qua hàng triệu năm, lưu giữ những bí mật của hành tinh chúng ta.",
+  "params": {
+    "num_step": 32,
+    "guidance_scale": 2.0,
+    "position_temperature": 5.0,
+    "class_temperature": 0.0,
+    "t_shift": 0.1
+  },
+  "seed": 862761646,
+  "model": "k2-fsa/OmniVoice",
+  "sample_rate": 24000,
+  "built_at": "2026-05-05 17:30:55"
+}

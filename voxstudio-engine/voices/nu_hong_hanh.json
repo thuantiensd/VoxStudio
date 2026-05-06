@@ -1,0 +1,20 @@
+{
+  "slug": "nu_hong_hanh",
+  "display_name": "Hồng Hạnh",
+  "gender": "female",
+  "language": "vietnamese",
+  "description": "Nữ trung niên giọng trung — phát thanh viên ấm",
+  "instruct": "female, middle-aged, moderate pitch",
+  "sample_text": "Xin chào các bạn thính giả thân mến. Một ngày mới lại bắt đầu với thật nhiều niềm vui và năng lượng tích cực. Hãy cùng nhau lan tỏa những điều tốt đẹp nhé.",
+  "params": {
+    "num_step": 32,
+    "guidance_scale": 2.0,
+    "position_temperature": 5.0,
+    "class_temperature": 0.0,
+    "t_shift": 0.1
+  },
+  "seed": 4176497370,
+  "model": "k2-fsa/OmniVoice",
+  "sample_rate": 24000,
+  "built_at": "2026-05-05 17:30:41"
+}
