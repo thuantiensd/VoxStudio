@@ -394,7 +394,10 @@ PRESETS = [
         "gender": "female",
         "language": "english",
         "description": "Documentary narrator — measured, mature, contemplative",
-        "instruct": "female, middle-aged, low pitch, american accent",
+        # NOTE: trước đây dùng "low pitch + american accent" → OmniVoice
+        # sinh noise (tách tách) cho combo này. Chuyển sang "moderate pitch"
+        # + bỏ accent để dùng baseline English voice — ổn định hơn.
+        "instruct": "female, middle-aged, moderate pitch",
         "sample_text": TEXT_EN_DOCUMENTARY,
         "params": WARM_STUDIO_PARAMS,
     },
