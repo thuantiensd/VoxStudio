@@ -221,6 +221,8 @@ export function AuthProvider({ children }) {
       value={{
         user: auth?.user || null,
         token: auth?.token || null,
+        plan: auth?.plan || null,             // {id, name, features, limits, ...}
+        usage_month: auth?.usage_month || null, // {tts_chars, dubbing_min, ...}
         isAuthenticated: !!auth?.user,
         loading,
         login,

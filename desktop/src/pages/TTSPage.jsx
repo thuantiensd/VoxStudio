@@ -1136,7 +1136,7 @@ function SingleMode({ s }) {
   const t = useT();
   const toast = useToast();
   const upgrade = useUpgrade();
-  const { auth } = useAuth();
+  const { plan } = useAuth();
   const [text, setText] = useState('');
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
@@ -1144,7 +1144,7 @@ function SingleMode({ s }) {
 
   // Per-request char limit theo plan từ /auth/me. -1 = unlimited (Studio).
   // Free fallback CHAR_LIMIT (1000) nếu plan chưa load (vd lúc khởi động).
-  const planLimit = auth?.plan?.limits?.tts_max_chars_request;
+  const planLimit = plan?.limits?.tts_max_chars_request;
   const isUnlimited = planLimit === -1;
   const effectiveLimit = isUnlimited ? Infinity : (planLimit ?? CHAR_LIMIT);
   const overLimit = text.length > effectiveLimit;
