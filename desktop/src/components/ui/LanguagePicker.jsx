@@ -1,14 +1,17 @@
 /**
- * LanguagePicker — searchable dropdown thay native <select>.
+ * LanguagePicker — searchable dropdown match style của PremiumVoicePicker.
  *
- * Lý do: 99 ngôn ngữ Whisper trong native select rất khó scroll/tìm.
- * Component này có ô search filter realtime theo:
+ * Visual: trigger card 36px flag-in-circle + name + locale meta + chevron.
+ * Panel: rounded-xl, shadow-lg, search + scrollable list của row cards
+ * có flag-circle trái + name/code phải.
+ *
+ * Search filter realtime theo:
  *   - Tên hiển thị (vd "Tiếng Việt", "Vietnamese")
  *   - Code locale (vd "vietnamese", "vi")
  *   - Flag emoji (vd 🇻🇳)
  *
- * Props:
- *   options: [{value, label, flag?}]   — danh sách ngôn ngữ
+ * Props (giữ tương thích API cũ):
+ *   options: [{value, label, flag?}]   — list ngôn ngữ; label đã prepend flag
  *   value:   string                     — selected value
  *   onChange:(newValue) => void
  *   placeholder?: string
@@ -16,8 +19,61 @@
  */
 
 import { useState, useEffect, useRef, useMemo } from "react";
-import { ChevronDown, Search, X } from "lucide-react";
+import { ChevronDown, Search, X, Globe } from "lucide-react";
 import { useT } from "../../i18n/I18nContext";
+
+
+// Tách flag khỏi label "🇻🇳 Tiếng Việt" → "Tiếng Việt".
+// useLanguages() hiện ghép sẵn flag vào đầu label, ta strip để render
+// flag trong circle riêng + name plain.
+function stripFlag(label, flag) {
+  if (!label) return "";
+  if (flag && label.startsWith(flag)) {
+    return label.slice(flag.length).trim();
+  }
+  return label.replace(/^[\p{Extended_Pictographic}‍️]+\s*/u, "").trim();
+}
+
+function FlagCircle({ flag, size = 36 }) {
+  return (
+    <div className="flex items-center justify-center flex-shrink-0"
+      style={{
+        width: size, height: size, borderRadius: "50%",
+        background: "var(--bg-surface)",
+        border: "1px solid #2a2a40",
+        fontSize: size * 0.5,
+        lineHeight: 1,
+      }}>
+      {flag || <Globe size={size * 0.45} style={{ color: "var(--text-secondary)" }} />}
+    </div>
+  );
+}
+
+function LanguageRow({ option, isSelected, onSelect }) {
+  const name = stripFlag(option.label, option.flag);
+  const code = option.value || "auto";
+  return (
+    <div onClick={onSelect}
+      className="flex items-center gap-3 px-3 py-2 rounded-lg cursor-pointer transition-colors"
+      style={{
+        background: isSelected ? "color-mix(in srgb, var(--accent) 14%, transparent)" : "transparent",
+        border: `1px solid ${isSelected ? "color-mix(in srgb, var(--accent) 40%, transparent)" : "transparent"}`,
+      }}
+      onMouseEnter={(e) => { if (!isSelected) e.currentTarget.style.background = "var(--bg-surface)"; }}
+      onMouseLeave={(e) => { if (!isSelected) e.currentTarget.style.background = "transparent"; }}>
+      <FlagCircle flag={option.flag} size={36} />
+      <div className="flex-1 min-w-0">
+        <div className="font-medium text-sm truncate" style={{ color: "var(--text-primary)" }}>
+          {name}
+        </div>
+        <div className="text-xs truncate" style={{ color: "var(--text-secondary)" }}>
+          {code}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 
 export default function LanguagePicker({
   options = [],
@@ -54,21 +110,23 @@ export default function LanguagePicker({
     }
   }, [open]);
 
-  // Filter options theo query (search trong label + value + flag)
+  // Filter — match label/value/flag, ignore diacritics để type "tieng" match "Tiếng".
+  const norm = (s) => (s || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
   const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
+    const q = norm(query.trim());
     if (!q) return options;
-    return options.filter((opt) => {
-      const label = (opt.label || "").toLowerCase();
-      const val = (opt.value || "").toLowerCase();
-      const flag = (opt.flag || "").toLowerCase();
-      return label.includes(q) || val.includes(q) || flag.includes(q);
-    });
+    return options.filter((opt) =>
+      norm(opt.label).includes(q) ||
+      norm(opt.value).includes(q) ||
+      (opt.flag || "").includes(query.trim())
+    );
   }, [options, query]);
 
-  // Hiển thị label của value đang chọn
   const selectedOpt = options.find((o) => o.value === value);
-  const displayLabel = selectedOpt?.label || placeholder || t("common.select");
+  const triggerName = selectedOpt
+    ? stripFlag(selectedOpt.label, selectedOpt.flag)
+    : (placeholder || t("common.select"));
+  const triggerCode = selectedOpt ? (selectedOpt.value || "auto") : "—";
 
   const handleSelect = (val) => {
     onChange?.(val);
@@ -78,125 +136,95 @@ export default function LanguagePicker({
 
   return (
     <div ref={wrapRef} className={`relative ${className}`} style={style}>
-      {/* Trigger button */}
-      <button
-        type="button"
+      {/* Trigger — match PremiumVoicePicker visual rhythm */}
+      <button type="button"
         onClick={() => !disabled && setOpen((v) => !v)}
         disabled={disabled}
-        className="w-full p-2.5 rounded-lg text-sm flex items-center justify-between"
+        className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors"
         style={{
           background: "var(--bg-card)",
-          border: "1px solid #2a2a40",
+          border: `1px solid ${open ? "var(--accent)" : "#2a2a40"}`,
           color: "var(--text-primary)",
           cursor: disabled ? "not-allowed" : "pointer",
           opacity: disabled ? 0.5 : 1,
           textAlign: "left",
-        }}
-      >
-        <span className="truncate">{displayLabel}</span>
-        <ChevronDown size={14} style={{ flexShrink: 0, opacity: 0.6 }} />
+        }}>
+        <FlagCircle flag={selectedOpt?.flag} size={36} />
+        <div className="flex-1 min-w-0">
+          <div className="font-medium text-sm truncate" style={{ color: "var(--text-primary)" }}>
+            {triggerName}
+          </div>
+          <div className="text-xs truncate" style={{ color: "var(--text-secondary)" }}>
+            {triggerCode}
+          </div>
+        </div>
+        <ChevronDown size={16} style={{
+          color: "var(--text-secondary)",
+          transition: "transform 150ms",
+          transform: open ? "rotate(180deg)" : "none",
+          flexShrink: 0,
+        }} />
       </button>
 
-      {/* Dropdown panel */}
+      {/* Panel */}
       {open && (
-        <div
-          className="absolute z-50 mt-1 rounded-lg shadow-lg overflow-hidden"
+        <div className="absolute left-0 right-0 mt-2 rounded-xl overflow-hidden z-20"
           style={{
-            width: "100%",
             background: "var(--bg-card)",
-            border: "1px solid #3a3a50",
-            maxHeight: 320,
-            display: "flex",
-            flexDirection: "column",
-          }}
-        >
-          {/* Search input */}
-          <div
-            className="flex items-center gap-2 p-2"
-            style={{ borderBottom: "1px solid #2a2a40" }}
-          >
-            <Search size={14} style={{ opacity: 0.5, flexShrink: 0 }} />
-            <input
-              ref={inputRef}
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder={t("common.searchLang")}
-              className="flex-1 bg-transparent outline-none text-sm"
-              style={{ color: "var(--text-primary)" }}
-              onKeyDown={(e) => {
-                if (e.key === "Escape") {
-                  setOpen(false);
-                  setQuery("");
-                } else if (e.key === "Enter" && filtered.length > 0) {
-                  handleSelect(filtered[0].value);
-                }
-              }}
-            />
-            {query && (
-              <button
-                type="button"
-                onClick={() => setQuery("")}
-                className="p-0.5 rounded"
-                style={{ color: "var(--text-secondary)", cursor: "pointer" }}
-              >
-                <X size={14} />
-              </button>
-            )}
+            border: "1px solid #2a2a40",
+            boxShadow: "0 10px 40px rgba(0,0,0,0.4)",
+          }}>
+          {/* Search */}
+          <div className="p-3 pb-2">
+            <div className="flex items-center gap-2 px-3 py-2 rounded-lg"
+              style={{ background: "var(--bg-surface)", border: "1px solid #2a2a40" }}>
+              <Search size={14} style={{ color: "var(--text-secondary)" }} />
+              <input ref={inputRef}
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder={t("common.searchLang")}
+                className="flex-1 bg-transparent outline-none text-sm"
+                style={{ color: "var(--text-primary)" }}
+                onKeyDown={(e) => {
+                  if (e.key === "Escape") {
+                    setOpen(false);
+                    setQuery("");
+                  } else if (e.key === "Enter" && filtered.length > 0) {
+                    handleSelect(filtered[0].value);
+                  }
+                }} />
+              {query && (
+                <button type="button" onClick={() => setQuery("")}
+                  className="text-xs" style={{ color: "var(--text-secondary)" }}>
+                  <X size={14} />
+                </button>
+              )}
+            </div>
           </div>
 
-          {/* Options list */}
-          <div className="overflow-y-auto" style={{ flex: 1 }}>
+          {/* Divider */}
+          <div style={{ height: 1, background: "#2a2a40" }} />
+
+          {/* List */}
+          <div className="px-2 py-2 max-h-80 overflow-y-auto flex flex-col gap-1">
             {filtered.length === 0 ? (
-              <div
-                className="p-3 text-xs text-center"
-                style={{ color: "var(--text-secondary)" }}
-              >
+              <div className="px-3 py-8 text-center text-sm"
+                style={{ color: "var(--text-secondary)" }}>
                 {t("common.noResults")}
               </div>
             ) : (
-              filtered.map((opt) => {
-                const isSelected = opt.value === value;
-                return (
-                  <button
-                    key={opt.value || "auto"}
-                    type="button"
-                    onClick={() => handleSelect(opt.value)}
-                    className="w-full px-3 py-2 text-left text-sm flex items-center"
-                    style={{
-                      background: isSelected
-                        ? "rgba(124, 92, 255, 0.15)"
-                        : "transparent",
-                      color: "var(--text-primary)",
-                      cursor: "pointer",
-                      borderLeft: isSelected
-                        ? "2px solid var(--accent)"
-                        : "2px solid transparent",
-                    }}
-                    onMouseEnter={(e) => {
-                      if (!isSelected)
-                        e.currentTarget.style.background =
-                          "rgba(255, 255, 255, 0.04)";
-                    }}
-                    onMouseLeave={(e) => {
-                      if (!isSelected)
-                        e.currentTarget.style.background = "transparent";
-                    }}
-                  >
-                    <span className="truncate">{opt.label}</span>
-                  </button>
-                );
-              })
+              filtered.map((opt) => (
+                <LanguageRow key={opt.value || "auto"} option={opt}
+                  isSelected={opt.value === value}
+                  onSelect={() => handleSelect(opt.value)} />
+              ))
             )}
           </div>
 
-          {/* Footer count */}
-          <div
-            className="px-3 py-1.5 text-xs"
-            style={{
-              borderTop: "1px solid #2a2a40",
-              color: "var(--text-secondary)",
-            }}
-          >
+          {/* Footer */}
+          <div style={{ height: 1, background: "#2a2a40" }} />
+          <div className="px-3 py-1.5 text-xs"
+            style={{ color: "var(--text-secondary)" }}>
             {filtered.length}/{options.length} {t("common.languages")}
           </div>
         </div>

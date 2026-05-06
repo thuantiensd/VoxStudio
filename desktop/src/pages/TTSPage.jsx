@@ -1,6 +1,6 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
-import { Loader2, User, ChevronDown, ChevronUp, FolderUp, X, Check, Download, FileText, Cloud, Cpu } from 'lucide-react';
-import { generateTTS, generateEdgeTTS, listVoices, listEdgeVoices, audioURL, confirmAudioReceived } from '../services/api';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { Loader2, User, ChevronDown, ChevronUp, FolderUp, X, Check, Download, FileText, Cloud, Cpu, Play, Pause, Sparkles, Search } from 'lucide-react';
+import { generateTTS, generateEdgeTTS, listVoices, listPremiumVoices, premiumPreviewUrl, listEdgeVoices, audioURL, confirmAudioReceived } from '../services/api';
 import AudioPlayer from '../components/AudioPlayer';
 import SpeedKnob from '../components/SpeedKnob';
 import PageHeader, { Page, PageContent } from '../components/ui/PageHeader';
@@ -94,6 +94,661 @@ const selectStyle = { background: 'var(--bg-card)', border: '1px solid #2a2a40',
 const labelClass = "block text-sm mb-1.5";
 const labelStyle = { color: 'var(--text-secondary)' };
 
+// ── Voice picker (panel-based, ElevenLabs-style) ──────────────────────
+// Trigger button hiển thị giọng đang chọn (avatar + name + meta). Click →
+// expand panel có search + chips Tất cả/Nam/Nữ + list voice card có avatar
+// gradient + nút ▶ play preview inline (không cần đóng panel).
+//
+// User clones cũng vào cùng list (group "Giọng của tôi" cuối) — avatar dùng
+// initials từ name, gradient grey-tone để phân biệt với premium colorful.
+//
+// Audio singleton: 1 lúc chỉ 1 voice phát. Click play khác = stop cũ + play mới.
+
+// Palette gradient cho avatar premium — 12 cặp HSL hue-shifted, đẹp + đa dạng.
+// Pick deterministic theo hash(slug) → cùng giọng luôn cùng màu.
+const AVATAR_PALETTES = [
+  ['#8B5CF6', '#6366F1'], // violet → indigo
+  ['#06B6D4', '#3B82F6'], // cyan   → blue
+  ['#10B981', '#14B8A6'], // emerald → teal
+  ['#F59E0B', '#EF4444'], // amber  → red
+  ['#EC4899', '#F43F5E'], // pink   → rose
+  ['#A855F7', '#EC4899'], // purple → pink
+  ['#3B82F6', '#06B6D4'], // blue   → cyan
+  ['#14B8A6', '#10B981'], // teal   → emerald
+  ['#F97316', '#F59E0B'], // orange → amber
+  ['#D946EF', '#A855F7'], // fuchsia → purple
+  ['#0EA5E9', '#6366F1'], // sky    → indigo
+  ['#EAB308', '#F97316'], // yellow → orange
+];
+
+function _hashSlug(s) {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
+  return Math.abs(h);
+}
+
+// Lấy 2 chữ initials từ display_name (vd "Mai Anh" → "MA", "Bảo Châu" → "BC").
+function _initials(name) {
+  if (!name) return '??';
+  const parts = name.trim().split(/\s+/);
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
+
+function VoiceAvatar({ name, slug, isPremium, size = 40 }) {
+  const colors = isPremium
+    ? AVATAR_PALETTES[_hashSlug(slug) % AVATAR_PALETTES.length]
+    : ['#3a3a4a', '#2a2a3a']; // user clones — neutral grey
+  return (
+    <div className="flex items-center justify-center font-semibold text-white flex-shrink-0"
+      style={{
+        width: size, height: size, borderRadius: '50%',
+        background: `linear-gradient(135deg, ${colors[0]} 0%, ${colors[1]} 100%)`,
+        fontSize: size * 0.32,
+        letterSpacing: 0.5,
+      }}>
+      {_initials(name)}
+    </div>
+  );
+}
+
+// Icon-only round play button. Reuse cho cả trigger header + voice rows.
+function PlayDot({ playing, onClick, size = 36, label }) {
+  return (
+    <button type="button" onClick={(e) => { e.stopPropagation(); onClick(); }}
+      aria-label={label || (playing ? 'Pause' : 'Play')}
+      className="flex items-center justify-center transition-all flex-shrink-0"
+      style={{
+        width: size, height: size, borderRadius: '50%',
+        background: playing ? 'var(--accent)' : 'var(--bg-card)',
+        border: `1px solid ${playing ? 'var(--accent)' : '#2a2a40'}`,
+        color: playing ? '#fff' : 'var(--text-primary)',
+        boxShadow: playing ? '0 0 0 4px color-mix(in srgb, var(--accent) 20%, transparent)' : 'none',
+        transform: playing ? 'scale(1.04)' : 'scale(1)',
+      }}>
+      {playing
+        ? <Pause size={size * 0.4} fill="currentColor" />
+        : <Play size={size * 0.4} fill="currentColor" style={{ marginLeft: 1 }} />}
+    </button>
+  );
+}
+
+// Resolve language code → human label qua i18n. Reuse `langs.*` keys
+// đã có sẵn (langs.vietnamese, langs.english, ...) để khỏi maintain map riêng.
+function _langLabel(code, t) {
+  if (!code) return '';
+  const key = `langs.${code}`;
+  const translated = t(key);
+  // I18nContext trả lại key gốc nếu missing → fallback capitalize code.
+  if (translated === key) return code.charAt(0).toUpperCase() + code.slice(1);
+  return translated;
+}
+function _genderLabel(g, t) {
+  if (g === 'female') return t('tts.genderFemale');
+  if (g === 'male') return t('tts.genderMale');
+  return '';
+}
+
+function VoiceRow({ voice, isPremium, isSelected, isPlaying, onSelect, onPlay, hasPreview, t }) {
+  const name = isPremium ? voice.display_name : voice.name;
+  const slug = isPremium ? voice.slug : voice.id;
+  const langLabel = isPremium ? _langLabel(voice.language, t) : t('tts.userVoiceMeta');
+  const genderLabel = _genderLabel(voice.gender, t);
+  const meta = [langLabel, genderLabel].filter(Boolean).join(' · ');
+  return (
+    <div onClick={onSelect}
+      className="flex items-center gap-3 px-3 py-2 rounded-lg cursor-pointer transition-colors"
+      style={{
+        background: isSelected ? 'color-mix(in srgb, var(--accent) 14%, transparent)' : 'transparent',
+        border: `1px solid ${isSelected ? 'color-mix(in srgb, var(--accent) 40%, transparent)' : 'transparent'}`,
+      }}
+      onMouseEnter={(e) => { if (!isSelected) e.currentTarget.style.background = 'var(--bg-surface)'; }}
+      onMouseLeave={(e) => { if (!isSelected) e.currentTarget.style.background = 'transparent'; }}>
+      <VoiceAvatar name={name} slug={slug} isPremium={isPremium} size={40} />
+      <div className="flex-1 min-w-0">
+        <div className="font-medium text-sm truncate" style={{ color: 'var(--text-primary)' }}>
+          {name}
+        </div>
+        <div className="text-xs truncate" style={{ color: 'var(--text-secondary)' }}>
+          {meta}
+        </div>
+      </div>
+      {hasPreview
+        ? <PlayDot playing={isPlaying} onClick={onPlay} size={36}
+            label={isPlaying ? t('tts.previewPause') : t('tts.previewPlay')} />
+        : <div style={{ width: 36, height: 36 }} aria-hidden />}
+    </div>
+  );
+}
+
+function PremiumVoicePicker({
+  voiceId, setVoiceId, premiumVoices, userVoices, language, t,
+}) {
+  const audioRef = useRef(null);
+  const containerRef = useRef(null);
+  const [playingId, setPlayingId] = useState('');
+  const [isOpen, setIsOpen] = useState(false);
+  const [search, setSearch] = useState('');
+  const [genderFilter, setGenderFilter] = useState('all');
+
+  // Stop audio khi đóng panel hoặc đổi voice ngoài picker.
+  const stopAudio = () => {
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current = null;
+    }
+    setPlayingId('');
+  };
+
+  // Click outside → close panel.
+  useEffect(() => {
+    if (!isOpen) return;
+    const onClick = (e) => {
+      if (containerRef.current && !containerRef.current.contains(e.target)) {
+        setIsOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', onClick);
+    return () => document.removeEventListener('mousedown', onClick);
+  }, [isOpen]);
+
+  const playPreview = (voice) => {
+    const id = voice.slug || voice.id;
+    if (audioRef.current && playingId === id) {
+      stopAudio();
+      return;
+    }
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current = null;
+    }
+    const url = voice.preview_url ? premiumPreviewUrl(voice.slug) : null;
+    if (!url) return;
+    const a = new Audio(url);
+    a.onended = () => { setPlayingId(''); audioRef.current = null; };
+    a.onerror = () => { setPlayingId(''); audioRef.current = null; };
+    a.play().then(() => {
+      audioRef.current = a;
+      setPlayingId(id);
+    }).catch(() => {});
+  };
+
+  // Filter — language khớp picker (rỗng = show all), gender filter chip,
+  // search match display_name/name (case-insensitive, normalize accent).
+  const langKey = (language || '').toLowerCase();
+  const norm = (s) => (s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+  const q = norm(search.trim());
+  const matchSearch = (label) => !q || norm(label).includes(q);
+
+  const visiblePremium = useMemo(() => premiumVoices.filter(v =>
+    (!langKey || v.language === langKey) &&
+    (genderFilter === 'all' || v.gender === genderFilter) &&
+    matchSearch(v.display_name)
+  ), [premiumVoices, langKey, genderFilter, q]);
+
+  const visibleUser = useMemo(() => userVoices.filter(v =>
+    matchSearch(v.name)
+    // user clones không có gender → chỉ show khi filter='all'
+    && genderFilter === 'all'
+  ), [userVoices, genderFilter, q]);
+
+  const femalePremium = visiblePremium.filter(v => v.gender === 'female');
+  const malePremium = visiblePremium.filter(v => v.gender === 'male');
+
+  const selectedPremium = premiumVoices.find(v => v.slug === voiceId);
+  const selectedUser = userVoices.find(v => v.id === voiceId);
+  const selected = selectedPremium || selectedUser;
+  const selectedIsPremium = !!selectedPremium;
+  const triggerName = selected
+    ? (selectedIsPremium ? selected.display_name : selected.name)
+    : t('tts.voiceDefault');
+  const triggerMeta = selected
+    ? (selectedIsPremium
+        ? [_langLabel(selected.language, t), _genderLabel(selected.gender, t)].filter(Boolean).join(' · ')
+        : t('tts.userVoiceMeta'))
+    : t('tts.voiceAutoOption');
+  const triggerHasPreview = !!(selectedPremium && selectedPremium.preview_url);
+
+  const isEmpty = visiblePremium.length === 0 && visibleUser.length === 0;
+
+  return (
+    <div ref={containerRef} className="relative">
+      {/* Trigger card — luôn hiển thị giọng đang chọn */}
+      <button type="button" onClick={() => setIsOpen(o => !o)}
+        className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors"
+        style={{
+          background: 'var(--bg-card)',
+          border: `1px solid ${isOpen ? 'var(--accent)' : '#2a2a40'}`,
+          textAlign: 'left',
+        }}>
+        {selected ? (
+          <VoiceAvatar
+            name={selectedIsPremium ? selected.display_name : selected.name}
+            slug={selectedIsPremium ? selected.slug : selected.id}
+            isPremium={selectedIsPremium} size={36} />
+        ) : (
+          <div className="flex items-center justify-center flex-shrink-0"
+            style={{
+              width: 36, height: 36, borderRadius: '50%',
+              background: 'var(--bg-surface)', border: '1px dashed #3a3a4a',
+            }}>
+            <Sparkles size={16} style={{ color: 'var(--text-secondary)' }} />
+          </div>
+        )}
+        <div className="flex-1 min-w-0">
+          <div className="font-medium text-sm truncate" style={{ color: 'var(--text-primary)' }}>
+            {triggerName}
+          </div>
+          <div className="text-xs truncate" style={{ color: 'var(--text-secondary)' }}>
+            {triggerMeta}
+          </div>
+        </div>
+        {triggerHasPreview && (
+          <PlayDot playing={playingId === selected.slug}
+            onClick={() => playPreview(selected)} size={32}
+            label={playingId === selected.slug ? t('tts.previewPause') : t('tts.previewPlay')} />
+        )}
+        <ChevronDown size={16} style={{
+          color: 'var(--text-secondary)',
+          transition: 'transform 150ms',
+          transform: isOpen ? 'rotate(180deg)' : 'none',
+        }} />
+      </button>
+
+      {/* Panel — search + chips + list */}
+      {isOpen && (
+        <div className="absolute left-0 right-0 mt-2 rounded-xl overflow-hidden z-20"
+          style={{
+            background: 'var(--bg-card)',
+            border: '1px solid #2a2a40',
+            boxShadow: '0 10px 40px rgba(0,0,0,0.4)',
+          }}>
+          {/* Search */}
+          <div className="p-3 pb-2">
+            <div className="flex items-center gap-2 px-3 py-2 rounded-lg"
+              style={{ background: 'var(--bg-surface)', border: '1px solid #2a2a40' }}>
+              <Search size={14} style={{ color: 'var(--text-secondary)' }} />
+              <input value={search} onChange={(e) => setSearch(e.target.value)}
+                placeholder={t('tts.searchVoice')}
+                className="flex-1 bg-transparent outline-none text-sm"
+                style={{ color: 'var(--text-primary)' }} />
+              {search && (
+                <button onClick={() => setSearch('')}
+                  className="text-xs" style={{ color: 'var(--text-secondary)' }}>
+                  <X size={14} />
+                </button>
+              )}
+            </div>
+          </div>
+          {/* Filter chips — pill style match reference design */}
+          <div className="px-3 pb-2 flex gap-2">
+            {[
+              { value: 'all',    label: t('tts.filterAll') },
+              { value: 'female', label: t('tts.filterFemale') },
+              { value: 'male',   label: t('tts.filterMale') },
+            ].map(opt => {
+              const active = genderFilter === opt.value;
+              return (
+                <button key={opt.value} type="button"
+                  onClick={() => setGenderFilter(opt.value)}
+                  className="px-3.5 py-1 rounded-full text-xs font-medium transition-colors"
+                  style={{
+                    background: active ? 'color-mix(in srgb, var(--accent) 14%, transparent)' : 'transparent',
+                    border: `1px solid ${active ? 'var(--accent)' : '#2a2a40'}`,
+                    color: active ? 'var(--accent)' : 'var(--text-secondary)',
+                  }}>
+                  {opt.label}
+                </button>
+              );
+            })}
+          </div>
+          {/* Divider */}
+          <div style={{ height: 1, background: '#2a2a40' }} />
+          {/* List */}
+          <div className="px-2 py-2 max-h-80 overflow-y-auto flex flex-col gap-1">
+            {/* Default option */}
+            <div onClick={() => { setVoiceId(''); setIsOpen(false); }}
+              className="flex items-center gap-3 px-3 py-2 rounded-lg cursor-pointer transition-colors"
+              style={{
+                background: !voiceId ? 'color-mix(in srgb, var(--accent) 14%, transparent)' : 'transparent',
+                border: `1px solid ${!voiceId ? 'color-mix(in srgb, var(--accent) 40%, transparent)' : 'transparent'}`,
+              }}
+              onMouseEnter={(e) => { if (voiceId) e.currentTarget.style.background = 'var(--bg-surface)'; }}
+              onMouseLeave={(e) => { if (voiceId) e.currentTarget.style.background = 'transparent'; }}>
+              <div className="flex items-center justify-center flex-shrink-0"
+                style={{
+                  width: 40, height: 40, borderRadius: '50%',
+                  background: 'var(--bg-surface)', border: '1px dashed #3a3a4a',
+                }}>
+                <Sparkles size={18} style={{ color: 'var(--text-secondary)' }} />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="font-medium text-sm" style={{ color: 'var(--text-primary)' }}>
+                  {t('tts.voiceAutoOption')}
+                </div>
+                <div className="text-xs" style={{ color: 'var(--text-secondary)' }}>
+                  {t('tts.voiceAutoMeta')}
+                </div>
+              </div>
+            </div>
+
+            {/* Premium voices */}
+            {femalePremium.length > 0 && (
+              <>
+                <div className="px-3 pt-2 pb-1 text-[11px] uppercase tracking-wider"
+                  style={{ color: 'var(--text-secondary)' }}>
+                  {t('tts.premiumGroupFemale')}
+                </div>
+                {femalePremium.map(v => (
+                  <VoiceRow key={v.slug} voice={v} isPremium t={t}
+                    isSelected={voiceId === v.slug}
+                    isPlaying={playingId === v.slug}
+                    hasPreview={!!v.preview_url}
+                    onSelect={() => { setVoiceId(v.slug); setIsOpen(false); stopAudio(); }}
+                    onPlay={() => playPreview(v)} />
+                ))}
+              </>
+            )}
+            {malePremium.length > 0 && (
+              <>
+                <div className="px-3 pt-2 pb-1 text-[11px] uppercase tracking-wider"
+                  style={{ color: 'var(--text-secondary)' }}>
+                  {t('tts.premiumGroupMale')}
+                </div>
+                {malePremium.map(v => (
+                  <VoiceRow key={v.slug} voice={v} isPremium t={t}
+                    isSelected={voiceId === v.slug}
+                    isPlaying={playingId === v.slug}
+                    hasPreview={!!v.preview_url}
+                    onSelect={() => { setVoiceId(v.slug); setIsOpen(false); stopAudio(); }}
+                    onPlay={() => playPreview(v)} />
+                ))}
+              </>
+            )}
+
+            {/* User clones */}
+            {visibleUser.length > 0 && (
+              <>
+                <div className="px-3 pt-2 pb-1 text-[11px] uppercase tracking-wider"
+                  style={{ color: 'var(--text-secondary)' }}>
+                  {t('tts.userVoicesGroup')}
+                </div>
+                {visibleUser.map(v => (
+                  <VoiceRow key={v.id} voice={v} isPremium={false} t={t}
+                    isSelected={voiceId === v.id}
+                    isPlaying={false}
+                    hasPreview={false}
+                    onSelect={() => { setVoiceId(v.id); setIsOpen(false); stopAudio(); }}
+                    onPlay={() => {}} />
+                ))}
+              </>
+            )}
+
+            {isEmpty && (
+              <div className="px-3 py-8 text-center text-sm" style={{ color: 'var(--text-secondary)' }}>
+                {t('tts.noVoicesFound')}
+                {q && <div className="text-xs mt-1">{t('tts.tryAdjustFilter')}</div>}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+// ── EdgeVoicePicker (VoxCloud / Standard mode) ────────────────────────
+// Match visual rhythm với PremiumVoicePicker — cùng trigger card +
+// dropdown panel + voice cards có avatar gradient. Edge voices dùng
+// neutral grey gradient (không có gender-color như premium).
+//
+// Edge voices đã filter sẵn theo language ở SettingsPanel level
+// (filteredEdgeVoices), picker chỉ apply gender filter + search.
+
+// Map override để hiển thị tên giọng Edge tử tế thay vì raw "vi-VN-HoaiMyNeural".
+// Ưu tiên đúng dấu tiếng Việt cho Vietnamese voices. Voice nào không có
+// trong map sẽ fallback sang _humanizeEdgeName() (strip locale + split CamelCase).
+const EDGE_VOICE_DISPLAY_OVERRIDES = {
+  // Tiếng Việt
+  'vi-VN-HoaiMyNeural': 'Hoài My',
+  'vi-VN-NamMinhNeural': 'Nam Minh',
+};
+
+function _humanizeEdgeName(rawName) {
+  if (!rawName) return '';
+  if (EDGE_VOICE_DISPLAY_OVERRIDES[rawName]) return EDGE_VOICE_DISPLAY_OVERRIDES[rawName];
+  // Bỏ suffix "Neural" + locale prefix (vd "en-US-", "fr-FR-", "zh-CN-").
+  let s = rawName.replace(/Neural$/, '').trim();
+  s = s.replace(/^[a-z]{2,3}-[A-Z]{2,4}-/, '');
+  // Split CamelCase: "HoaiMy" → "Hoai My", "AndrewMultilingual" → "Andrew Multilingual".
+  s = s.replace(/([a-z])([A-Z])/g, '$1 $2');
+  return s;
+}
+
+// Backward-compat alias — _stripNeural() được dùng vài chỗ; giờ delegate sang
+// humanize cho consistent.
+const _stripNeural = _humanizeEdgeName;
+
+function EdgeVoiceRow({ voice, isSelected, onSelect, t }) {
+  const display = _stripNeural(voice.name);
+  // Locale code (vd "vi-VN-HoaiMyNeural" → "vi-VN") + gender
+  const locale = voice.locale || (voice.name?.split("-").slice(0, 2).join("-")) || "";
+  const genderKey = (voice.gender || '').toLowerCase();
+  const gender = genderKey === 'female' ? t('tts.genderFemale')
+    : genderKey === 'male' ? t('tts.genderMale') : '';
+  const meta = [locale, gender].filter(Boolean).join(" · ");
+  return (
+    <div onClick={onSelect}
+      className="flex items-center gap-3 px-3 py-2 rounded-lg cursor-pointer transition-colors"
+      style={{
+        background: isSelected ? "color-mix(in srgb, var(--accent) 14%, transparent)" : "transparent",
+        border: `1px solid ${isSelected ? "color-mix(in srgb, var(--accent) 40%, transparent)" : "transparent"}`,
+      }}
+      onMouseEnter={(e) => { if (!isSelected) e.currentTarget.style.background = "var(--bg-surface)"; }}
+      onMouseLeave={(e) => { if (!isSelected) e.currentTarget.style.background = "transparent"; }}>
+      <VoiceAvatar name={display} slug={voice.name} isPremium={false} size={40} />
+      <div className="flex-1 min-w-0">
+        <div className="font-medium text-sm truncate" style={{ color: "var(--text-primary)" }}>
+          {display}
+        </div>
+        <div className="text-xs truncate" style={{ color: "var(--text-secondary)" }}>
+          {meta}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function EdgeVoicePicker({ voiceName, setVoiceName, edgeVoices, t }) {
+  const containerRef = useRef(null);
+  const [isOpen, setIsOpen] = useState(false);
+  const [search, setSearch] = useState('');
+  const [genderFilter, setGenderFilter] = useState('all');
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const onClick = (e) => {
+      if (containerRef.current && !containerRef.current.contains(e.target)) {
+        setIsOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', onClick);
+    return () => document.removeEventListener('mousedown', onClick);
+  }, [isOpen]);
+
+  const norm = (s) => (s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+  const q = norm(search.trim());
+
+  const visible = useMemo(() => edgeVoices.filter(v => {
+    if (genderFilter !== 'all' && (v.gender || '').toLowerCase() !== genderFilter) return false;
+    if (!q) return true;
+    return norm(v.name).includes(q) || norm(v.locale || '').includes(q);
+  }), [edgeVoices, genderFilter, q]);
+
+  const female = visible.filter(v => (v.gender || '').toLowerCase() === 'female');
+  const male = visible.filter(v => (v.gender || '').toLowerCase() === 'male');
+
+  const selected = edgeVoices.find(v => v.name === voiceName);
+  const triggerName = selected ? _stripNeural(selected.name) : t('tts.autoVoice');
+  const selGenderKey = (selected?.gender || '').toLowerCase();
+  const selGenderLabel = selGenderKey === 'female' ? t('tts.genderFemale')
+    : selGenderKey === 'male' ? t('tts.genderMale') : '';
+  const triggerMeta = selected
+    ? [(selected.locale || ''), selGenderLabel].filter(Boolean).join(' · ')
+    : t('tts.edgeAutoMeta');
+
+  return (
+    <div ref={containerRef} className="relative">
+      <button type="button" onClick={() => setIsOpen(o => !o)}
+        className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors"
+        style={{
+          background: 'var(--bg-card)',
+          border: `1px solid ${isOpen ? 'var(--accent)' : '#2a2a40'}`,
+          textAlign: 'left',
+        }}>
+        {selected ? (
+          <VoiceAvatar name={_stripNeural(selected.name)} slug={selected.name} isPremium={false} size={36} />
+        ) : (
+          <div className="flex items-center justify-center flex-shrink-0"
+            style={{
+              width: 36, height: 36, borderRadius: '50%',
+              background: 'var(--bg-surface)', border: '1px dashed #3a3a4a',
+            }}>
+            <Cloud size={16} style={{ color: 'var(--text-secondary)' }} />
+          </div>
+        )}
+        <div className="flex-1 min-w-0">
+          <div className="font-medium text-sm truncate" style={{ color: 'var(--text-primary)' }}>
+            {triggerName}
+          </div>
+          <div className="text-xs truncate" style={{ color: 'var(--text-secondary)' }}>
+            {triggerMeta}
+          </div>
+        </div>
+        <ChevronDown size={16} style={{
+          color: 'var(--text-secondary)',
+          transition: 'transform 150ms',
+          transform: isOpen ? 'rotate(180deg)' : 'none',
+        }} />
+      </button>
+
+      {isOpen && (
+        <div className="absolute left-0 right-0 mt-2 rounded-xl overflow-hidden z-20"
+          style={{
+            background: 'var(--bg-card)',
+            border: '1px solid #2a2a40',
+            boxShadow: '0 10px 40px rgba(0,0,0,0.4)',
+          }}>
+          {/* Search */}
+          <div className="p-3 pb-2">
+            <div className="flex items-center gap-2 px-3 py-2 rounded-lg"
+              style={{ background: 'var(--bg-surface)', border: '1px solid #2a2a40' }}>
+              <Search size={14} style={{ color: 'var(--text-secondary)' }} />
+              <input value={search} onChange={(e) => setSearch(e.target.value)}
+                placeholder={t('tts.searchVoice')}
+                className="flex-1 bg-transparent outline-none text-sm"
+                style={{ color: 'var(--text-primary)' }} />
+              {search && (
+                <button onClick={() => setSearch('')}
+                  className="text-xs" style={{ color: 'var(--text-secondary)' }}>
+                  <X size={14} />
+                </button>
+              )}
+            </div>
+          </div>
+          {/* Filter chips */}
+          <div className="px-3 pb-2 flex gap-2">
+            {[
+              { value: 'all',    label: t('tts.filterAll') },
+              { value: 'female', label: t('tts.filterFemale') },
+              { value: 'male',   label: t('tts.filterMale') },
+            ].map(opt => {
+              const active = genderFilter === opt.value;
+              return (
+                <button key={opt.value} type="button"
+                  onClick={() => setGenderFilter(opt.value)}
+                  className="px-3.5 py-1 rounded-full text-xs font-medium transition-colors"
+                  style={{
+                    background: active ? 'color-mix(in srgb, var(--accent) 14%, transparent)' : 'transparent',
+                    border: `1px solid ${active ? 'var(--accent)' : '#2a2a40'}`,
+                    color: active ? 'var(--accent)' : 'var(--text-secondary)',
+                  }}>
+                  {opt.label}
+                </button>
+              );
+            })}
+          </div>
+          <div style={{ height: 1, background: '#2a2a40' }} />
+          {/* List */}
+          <div className="px-2 py-2 max-h-80 overflow-y-auto flex flex-col gap-1">
+            {/* Auto option */}
+            <div onClick={() => { setVoiceName(''); setIsOpen(false); }}
+              className="flex items-center gap-3 px-3 py-2 rounded-lg cursor-pointer transition-colors"
+              style={{
+                background: !voiceName ? 'color-mix(in srgb, var(--accent) 14%, transparent)' : 'transparent',
+                border: `1px solid ${!voiceName ? 'color-mix(in srgb, var(--accent) 40%, transparent)' : 'transparent'}`,
+              }}
+              onMouseEnter={(e) => { if (voiceName) e.currentTarget.style.background = 'var(--bg-surface)'; }}
+              onMouseLeave={(e) => { if (voiceName) e.currentTarget.style.background = 'transparent'; }}>
+              <div className="flex items-center justify-center flex-shrink-0"
+                style={{
+                  width: 40, height: 40, borderRadius: '50%',
+                  background: 'var(--bg-surface)', border: '1px dashed #3a3a4a',
+                }}>
+                <Cloud size={18} style={{ color: 'var(--text-secondary)' }} />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="font-medium text-sm" style={{ color: 'var(--text-primary)' }}>
+                  {t('tts.autoVoice')}
+                </div>
+                <div className="text-xs" style={{ color: 'var(--text-secondary)' }}>
+                  {t('tts.edgeAutoMeta')}
+                </div>
+              </div>
+            </div>
+
+            {female.length > 0 && (
+              <>
+                <div className="px-3 pt-2 pb-1 text-[11px] uppercase tracking-wider"
+                  style={{ color: 'var(--text-secondary)' }}>
+                  {t('tts.standardGroupFemale')}
+                </div>
+                {female.map(v => (
+                  <EdgeVoiceRow key={v.name} voice={v} t={t}
+                    isSelected={voiceName === v.name}
+                    onSelect={() => { setVoiceName(v.name); setIsOpen(false); }} />
+                ))}
+              </>
+            )}
+            {male.length > 0 && (
+              <>
+                <div className="px-3 pt-2 pb-1 text-[11px] uppercase tracking-wider"
+                  style={{ color: 'var(--text-secondary)' }}>
+                  {t('tts.standardGroupMale')}
+                </div>
+                {male.map(v => (
+                  <EdgeVoiceRow key={v.name} voice={v} t={t}
+                    isSelected={voiceName === v.name}
+                    onSelect={() => { setVoiceName(v.name); setIsOpen(false); }} />
+                ))}
+              </>
+            )}
+
+            {visible.length === 0 && (
+              <div className="px-3 py-8 text-center text-sm" style={{ color: 'var(--text-secondary)' }}>
+                {t('tts.noVoicesFound')}
+                {q && <div className="text-xs mt-1">{t('tts.tryAdjustFilter')}</div>}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+
 function SliderControl({ label, value, onChange, min, max, step, description }) {
   return (
     <div>
@@ -122,7 +777,8 @@ const LOCALE_MAP = {
 // ── Shared settings hook ──
 function useSharedSettings() {
   const [engine, setEngine] = useState('edge'); // 'edge' (VoxCloud) | 'omnivoice' (VoxLocal)
-  const [voices, setVoices] = useState([]);
+  const [voices, setVoices] = useState([]);          // user clones
+  const [premiumVoices, setPremiumVoices] = useState([]);  // built-in presets
   const [edgeVoices, setEdgeVoices] = useState([]);
   const [voiceId, setVoiceId] = useState('');
   const [edgeVoice, setEdgeVoice] = useState('');
@@ -150,10 +806,15 @@ function useSharedSettings() {
 
   useEffect(() => {
     listVoices().then(r => setVoices(r.voices || [])).catch(() => {});
+    listPremiumVoices().then(r => setPremiumVoices(r.voices || [])).catch(() => {});
     listEdgeVoices().then(r => setEdgeVoices(r.voices || [])).catch(() => {});
   }, []);
 
-  const selectedVoice = voices.find(v => v.id === voiceId);
+  // selectedVoice: tìm trong premium pool trước (slug-based), fallback user clones
+  const selectedVoice =
+    premiumVoices.find(v => v.slug === voiceId) ||
+    voices.find(v => v.id === voiceId);
+  const isSelectedPremium = !!premiumVoices.find(v => v.slug === voiceId);
 
   // Filter edge voices by selected language
   const langPrefix = LOCALE_MAP[language] || '';
@@ -170,10 +831,10 @@ function useSharedSettings() {
 
   return {
     engine, setEngine,
-    voices, voiceId, setVoiceId,
+    voices, premiumVoices, voiceId, setVoiceId,
     edgeVoices: filteredEdgeVoices, edgeVoice, setEdgeVoice,
     language, setLanguage,
-    speed, setSpeed, selectedVoice, ttsParams,
+    speed, setSpeed, selectedVoice, isSelectedPremium, ttsParams,
     showAdvanced, setShowAdvanced,
     numStep, setNumStep, guidanceScale, setGuidanceScale,
     tShift, setTShift, layerPenaltyFactor, setLayerPenaltyFactor,
@@ -292,6 +953,7 @@ function SettingsPanel({ s }) {
     isCloud ? LANGUAGE_VALUES_EDGE : LANGUAGE_VALUES_PREMIUM,
   );
 
+
   return (
     <>
       {/* Engine toggle: VoxCloud / VoxLocal */}
@@ -321,26 +983,24 @@ function SettingsPanel({ s }) {
 
       {/* Voice + Language */}
       <div className="flex gap-4 mb-4">
-        <div className="flex-1">
+        <div className="flex-1 min-w-0">
           <label className={labelClass} style={labelStyle}>{t('tts.voice')}</label>
           {isCloud ? (
-            <select value={s.edgeVoice} onChange={e => s.setEdgeVoice(e.target.value)}
-              className="w-full p-2.5 rounded-lg text-sm" style={selectStyle}>
-              <option value="">{t('tts.autoVoice')}</option>
-              {s.edgeVoices.map(v => (
-                <option key={v.name} value={v.name}>
-                  {v.name.replace('Neural', '')} ({v.gender})
-                </option>
-              ))}
-            </select>
+            <EdgeVoicePicker
+              voiceName={s.edgeVoice}
+              setVoiceName={s.setEdgeVoice}
+              edgeVoices={s.edgeVoices}
+              t={t}
+            />
           ) : (
-            <select value={s.voiceId} onChange={e => s.setVoiceId(e.target.value)}
-              className="w-full p-2.5 rounded-lg text-sm" style={selectStyle}>
-              <option value="">{t('tts.voiceDefault')}</option>
-              {s.voices.map(v => (
-                <option key={v.id} value={v.id}>{v.name}</option>
-              ))}
-            </select>
+            <PremiumVoicePicker
+              voiceId={s.voiceId}
+              setVoiceId={s.setVoiceId}
+              premiumVoices={s.premiumVoices}
+              userVoices={s.voices}
+              language={s.language}
+              t={t}
+            />
           )}
         </div>
         <div className="flex-1">
@@ -353,19 +1013,14 @@ function SettingsPanel({ s }) {
         </div>
       </div>
 
-      {/* Voice preview (VoxLocal only) */}
-      {!isCloud && s.voiceId && s.selectedVoice && (
+      {/* Voice info card (chỉ VoxLocal + clone — premium đã có meta trong picker trigger) */}
+      {!isCloud && s.voiceId && s.selectedVoice && !s.isSelectedPremium && s.selectedVoice.ref_text && (
         <div className="mb-4 p-3 rounded-lg flex items-start gap-3"
           style={{ background: 'var(--bg-surface)', border: '1px solid #2a2a40' }}>
           <User size={16} style={{ color: 'var(--accent)', marginTop: 2 }} />
-          <div className="text-sm">
-            <p className="font-medium">{s.selectedVoice.name}</p>
-            {s.selectedVoice.ref_text && (
-              <p className="mt-1 text-xs" style={labelStyle}>
-                Ref: &ldquo;{s.selectedVoice.ref_text.length > 80 ? s.selectedVoice.ref_text.slice(0, 80) + '...' : s.selectedVoice.ref_text}&rdquo;
-              </p>
-            )}
-          </div>
+          <p className="text-xs flex-1" style={labelStyle}>
+            Ref: &ldquo;{s.selectedVoice.ref_text.length > 80 ? s.selectedVoice.ref_text.slice(0, 80) + '...' : s.selectedVoice.ref_text}&rdquo;
+          </p>
         </div>
       )}
 

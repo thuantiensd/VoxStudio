@@ -138,6 +138,20 @@ export async function listVoices() {
   return res.json();
 }
 
+// Premium preset voices — built-in pool, ai cũng dùng được. Tách riêng
+// danh sách clone của user để dropdown TTS group rõ ràng (Premium / My Voices).
+export async function listPremiumVoices() {
+  const res = await request('/voices/premium');
+  return res.json();
+}
+
+// URL audio mẫu để play preview trong dropdown. Trả full URL (có ngrok-skip
+// header bị browser audio element lờ đi nên endpoint phải public-readable
+// và không yêu cầu auth header — đã xử lý ở backend).
+export function premiumPreviewUrl(slug) {
+  return `${API_BASE}/voices/premium/${encodeURIComponent(slug)}/preview`;
+}
+
 export async function previewVoice(audioFile, text, refText = '', params = {}) {
   const form = new FormData();
   form.append('audio', audioFile);
