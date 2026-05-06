@@ -1,0 +1,20 @@
+{
+  "slug": "zh_xiulan",
+  "display_name": "秀兰",
+  "gender": "female",
+  "language": "chinese",
+  "description": "中文女声 · 中年温柔 — 适合有声书、朗读散文",
+  "instruct": "female, middle-aged, moderate pitch",
+  "sample_text": "深秋的午后，阳光斜斜地洒进书房，照亮了那本翻开的旧书。她轻轻地翻过一页，仿佛听见了岁月低语的声音，温暖而又熟悉。",
+  "params": {
+    "num_step": 32,
+    "guidance_scale": 2.5,
+    "position_temperature": 4.5,
+    "class_temperature": 0.0,
+    "t_shift": 0.1
+  },
+  "seed": 1561859814,
+  "model": "k2-fsa/OmniVoice",
+  "sample_rate": 24000,
+  "built_at": "2026-05-06 13:21:13"
+}

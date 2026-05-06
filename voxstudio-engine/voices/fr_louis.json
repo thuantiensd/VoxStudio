@@ -1,0 +1,20 @@
+{
+  "slug": "fr_louis",
+  "display_name": "Louis",
+  "gender": "male",
+  "language": "french",
+  "description": "Voix française masculine — livre audio, narration romanesque",
+  "instruct": "male, middle-aged, moderate pitch",
+  "sample_text": "L'horloge de la grande salle sonna minuit. Charles, immobile devant la fenêtre, regardait la pluie tomber sur les toits gris de Paris. Demain, tout serait différent.",
+  "params": {
+    "num_step": 32,
+    "guidance_scale": 2.5,
+    "position_temperature": 4.5,
+    "class_temperature": 0.0,
+    "t_shift": 0.1
+  },
+  "seed": 3229176681,
+  "model": "k2-fsa/OmniVoice",
+  "sample_rate": 24000,
+  "built_at": "2026-05-06 13:21:19"
+}

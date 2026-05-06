@@ -1,0 +1,20 @@
+{
+  "slug": "kr_seonha",
+  "display_name": "선하",
+  "gender": "female",
+  "language": "korean",
+  "description": "한국어 여성 · 따뜻한 중년 — 오디오북, 에세이 낭독",
+  "instruct": "female, middle-aged, moderate pitch",
+  "sample_text": "오래된 골목 끝에는 작은 찻집이 하나 있었다. 비가 내리는 저녁이면, 사람들은 그곳에 모여 따뜻한 차 한 잔과 함께 지나간 시간을 나누곤 했다.",
+  "params": {
+    "num_step": 32,
+    "guidance_scale": 2.5,
+    "position_temperature": 4.5,
+    "class_temperature": 0.0,
+    "t_shift": 0.1
+  },
+  "seed": 1955285922,
+  "model": "k2-fsa/OmniVoice",
+  "sample_rate": 24000,
+  "built_at": "2026-05-06 13:21:18"
+}

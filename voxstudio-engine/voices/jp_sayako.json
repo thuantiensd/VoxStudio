@@ -1,0 +1,20 @@
+{
+  "slug": "jp_sayako",
+  "display_name": "さやこ",
+  "gender": "female",
+  "language": "japanese",
+  "description": "日本語女性 · 落ち着いた中年 — ドキュメンタリー、ナレーション",
+  "instruct": "female, middle-aged, low pitch",
+  "sample_text": "深い森の中、何百年もの間、ひっそりと生き続けてきた木々たちがいる。その静寂の中に、人類が忘れかけた自然の知恵が、今もなお息づいているのである。",
+  "params": {
+    "num_step": 32,
+    "guidance_scale": 2.5,
+    "position_temperature": 4.5,
+    "class_temperature": 0.0,
+    "t_shift": 0.1
+  },
+  "seed": 1098778364,
+  "model": "k2-fsa/OmniVoice",
+  "sample_rate": 24000,
+  "built_at": "2026-05-06 13:21:16"
+}

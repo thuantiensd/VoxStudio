@@ -1,0 +1,20 @@
+{
+  "slug": "kr_junho",
+  "display_name": "준호",
+  "gender": "male",
+  "language": "korean",
+  "description": "한국어 남성 · 젊고 차분한 — 팟캐스트, 해설",
+  "instruct": "male, young adult, moderate pitch",
+  "sample_text": "안녕하세요, 오늘 에피소드에 오신 것을 환영합니다. 이번 시간에는 작은 일상의 습관들이 어떻게 우리의 삶을 변화시키는지에 대해 함께 이야기해보려고 합니다.",
+  "params": {
+    "num_step": 32,
+    "guidance_scale": 2.5,
+    "position_temperature": 4.5,
+    "class_temperature": 0.0,
+    "t_shift": 0.1
+  },
+  "seed": 4205699027,
+  "model": "k2-fsa/OmniVoice",
+  "sample_rate": 24000,
+  "built_at": "2026-05-06 13:21:17"
+}

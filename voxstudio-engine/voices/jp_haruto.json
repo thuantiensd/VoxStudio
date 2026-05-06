@@ -1,0 +1,20 @@
+{
+  "slug": "jp_haruto",
+  "display_name": "ハルト",
+  "gender": "male",
+  "language": "japanese",
+  "description": "日本語男性 · 若くて落ち着いた — ポッドキャスト、解説",
+  "instruct": "male, young adult, moderate pitch",
+  "sample_text": "皆さんこんにちは、今日のエピソードへようこそ。今回は、毎日の小さな習慣がどのように私たちの未来を形作るかについて、ゆっくりとお話ししていきたいと思います。",
+  "params": {
+    "num_step": 32,
+    "guidance_scale": 2.5,
+    "position_temperature": 4.5,
+    "class_temperature": 0.0,
+    "t_shift": 0.1
+  },
+  "seed": 346247274,
+  "model": "k2-fsa/OmniVoice",
+  "sample_rate": 24000,
+  "built_at": "2026-05-06 13:21:14"
+}

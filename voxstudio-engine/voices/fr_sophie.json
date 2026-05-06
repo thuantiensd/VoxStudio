@@ -1,0 +1,20 @@
+{
+  "slug": "fr_sophie",
+  "display_name": "Sophie",
+  "gender": "female",
+  "language": "french",
+  "description": "Voix française féminine mature — documentaire, narration grave",
+  "instruct": "female, middle-aged, low pitch",
+  "sample_text": "Au cœur de la forêt amazonienne, des espèces encore inconnues de la science vivent en harmonie avec leur environnement depuis des millénaires. Chaque arbre raconte une histoire que peu d'entre nous savent encore lire.",
+  "params": {
+    "num_step": 32,
+    "guidance_scale": 2.5,
+    "position_temperature": 4.5,
+    "class_temperature": 0.0,
+    "t_shift": 0.1
+  },
+  "seed": 3364375706,
+  "model": "k2-fsa/OmniVoice",
+  "sample_rate": 24000,
+  "built_at": "2026-05-06 13:21:20"
+}
