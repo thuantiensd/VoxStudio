@@ -293,8 +293,35 @@ function PremiumVoicePicker({
     && genderFilter === 'all'
   ), [userVoices, genderFilter, q]);
 
-  const femalePremium = visiblePremium.filter(v => v.gender === 'female');
-  const malePremium = visiblePremium.filter(v => v.gender === 'male');
+  // Group premium voices by language, sort vietnamese first.
+  // Mỗi language group: female trước (sort theo display_name), nam sau.
+  // Tránh mix Trung/Nhật/... với voice Việt như user phàn nàn.
+  const _LANG_ORDER = ['vietnamese', 'english', 'chinese', 'japanese', 'korean', 'french', 'spanish'];
+  const premiumByLang = useMemo(() => {
+    const groups = {};
+    for (const v of visiblePremium) {
+      const lang = v.language || 'other';
+      if (!groups[lang]) groups[lang] = [];
+      groups[lang].push(v);
+    }
+    // Sort female before male, then by display_name
+    for (const lang in groups) {
+      groups[lang].sort((a, b) => {
+        if (a.gender !== b.gender) return a.gender === 'female' ? -1 : 1;
+        return (a.display_name || '').localeCompare(b.display_name || '');
+      });
+    }
+    // Return ordered list of [lang, voices] tuples
+    const ordered = [];
+    for (const lang of _LANG_ORDER) {
+      if (groups[lang]) ordered.push([lang, groups[lang]]);
+    }
+    // Append unknown languages alphabetically at end
+    for (const lang of Object.keys(groups).sort()) {
+      if (!_LANG_ORDER.includes(lang)) ordered.push([lang, groups[lang]]);
+    }
+    return ordered;
+  }, [visiblePremium]);
 
   const selectedPremium = premiumVoices.find(v => v.slug === voiceId);
   const selectedUser = userVoices.find(v => v.id === voiceId);
@@ -433,14 +460,15 @@ function PremiumVoicePicker({
               </div>
             </div>
 
-            {/* Premium voices */}
-            {femalePremium.length > 0 && (
-              <>
+            {/* Premium voices — group theo language để tránh mix giữa các tiếng.
+                Vd: chọn "Tất cả" sẽ thấy section Tiếng Việt riêng, English riêng, ... */}
+            {premiumByLang.map(([lang, voices]) => (
+              <div key={lang}>
                 <div className="px-3 pt-2 pb-1 text-[11px] uppercase tracking-wider"
                   style={{ color: 'var(--text-secondary)' }}>
-                  {t('tts.premiumGroupFemale')}
+                  ✨ Premium · {_langLabel(lang, t)}
                 </div>
-                {femalePremium.map(v => (
+                {voices.map(v => (
                   <VoiceRow key={v.slug} voice={v} isPremium t={t}
                     isSelected={voiceId === v.slug}
                     isPlaying={playingId === v.slug}
@@ -448,24 +476,8 @@ function PremiumVoicePicker({
                     onSelect={() => { setVoiceId(v.slug); setIsOpen(false); stopAudio(); }}
                     onPlay={() => playPreview(v)} />
                 ))}
-              </>
-            )}
-            {malePremium.length > 0 && (
-              <>
-                <div className="px-3 pt-2 pb-1 text-[11px] uppercase tracking-wider"
-                  style={{ color: 'var(--text-secondary)' }}>
-                  {t('tts.premiumGroupMale')}
-                </div>
-                {malePremium.map(v => (
-                  <VoiceRow key={v.slug} voice={v} isPremium t={t}
-                    isSelected={voiceId === v.slug}
-                    isPlaying={playingId === v.slug}
-                    hasPreview={!!v.preview_url}
-                    onSelect={() => { setVoiceId(v.slug); setIsOpen(false); stopAudio(); }}
-                    onPlay={() => playPreview(v)} />
-                ))}
-              </>
-            )}
+              </div>
+            ))}
 
             {/* User clones */}
             {visibleUser.length > 0 && (
