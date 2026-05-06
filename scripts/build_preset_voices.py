@@ -180,6 +180,42 @@ TEXT_ES_NARRATOR = (
     "historias antiguas que sólo los viejos recordaban."
 )
 
+# ── Sample texts cho 7 voice mới (đảm bảo mỗi ngôn ngữ 3 voice) ──
+TEXT_ZH_AUDIOBOOK = (
+    "深秋的午后，阳光斜斜地洒进书房，照亮了那本翻开的旧书。"
+    "她轻轻地翻过一页，仿佛听见了岁月低语的声音，温暖而又熟悉。"
+)
+TEXT_JP_PODCAST = (
+    "皆さんこんにちは、今日のエピソードへようこそ。"
+    "今回は、毎日の小さな習慣がどのように私たちの未来を形作るかについて、"
+    "ゆっくりとお話ししていきたいと思います。"
+)
+TEXT_JP_DOCUMENTARY = (
+    "深い森の中、何百年もの間、ひっそりと生き続けてきた木々たちがいる。"
+    "その静寂の中に、人類が忘れかけた自然の知恵が、"
+    "今もなお息づいているのである。"
+)
+TEXT_KR_PODCAST = (
+    "안녕하세요, 오늘 에피소드에 오신 것을 환영합니다. "
+    "이번 시간에는 작은 일상의 습관들이 어떻게 우리의 삶을 변화시키는지에 대해 "
+    "함께 이야기해보려고 합니다."
+)
+TEXT_KR_NARRATOR_WARM = (
+    "오래된 골목 끝에는 작은 찻집이 하나 있었다. "
+    "비가 내리는 저녁이면, 사람들은 그곳에 모여 따뜻한 차 한 잔과 함께 "
+    "지나간 시간을 나누곤 했다."
+)
+TEXT_FR_AUDIOBOOK = (
+    "L'horloge de la grande salle sonna minuit. Charles, immobile devant la fenêtre, "
+    "regardait la pluie tomber sur les toits gris de Paris. "
+    "Demain, tout serait différent."
+)
+TEXT_FR_DOCUMENTARY = (
+    "Au cœur de la forêt amazonienne, des espèces encore inconnues de la science "
+    "vivent en harmonie avec leur environnement depuis des millénaires. "
+    "Chaque arbre raconte une histoire que peu d'entre nous savent encore lire."
+)
+
 
 # Default params — giữ gần model default cho naturalness tối đa
 DEFAULT_PARAMS = {
@@ -457,6 +493,89 @@ PRESETS = [
         "description": "Voix française chaleureuse — narration, livre audio",
         "instruct": "female, young adult, moderate pitch",
         "sample_text": TEXT_FR_NARRATOR,
+        "params": WARM_STUDIO_PARAMS,
+    },
+
+    # ════════════════════════════════════════════════════════════
+    # +7 voice mới để mỗi ngôn ngữ ZH/JP/KR/FR đủ 3 giọng (1 nam + 2 nữ
+    # hoặc 1 nữ + 2 nam tuỳ ngôn ngữ). VN + EN đã đủ ≥3 nên skip.
+    # ════════════════════════════════════════════════════════════
+
+    # ── Chinese: thêm 1 (đã có 2) ──
+    {
+        "slug": "zh_xiulan",
+        "display_name": "秀兰",
+        "gender": "female",
+        "language": "chinese",
+        "description": "中文女声 · 中年温柔 — 适合有声书、朗读散文",
+        "instruct": "female, middle-aged, moderate pitch",
+        "sample_text": TEXT_ZH_AUDIOBOOK,
+        "params": WARM_STUDIO_PARAMS,
+    },
+
+    # ── Japanese: thêm 2 (đã có 1) ──
+    {
+        "slug": "jp_haruto",
+        "display_name": "ハルト",
+        "gender": "male",
+        "language": "japanese",
+        "description": "日本語男性 · 若くて落ち着いた — ポッドキャスト、解説",
+        "instruct": "male, young adult, moderate pitch",
+        "sample_text": TEXT_JP_PODCAST,
+        "params": WARM_STUDIO_PARAMS,
+    },
+    {
+        "slug": "jp_sayako",
+        "display_name": "さやこ",
+        "gender": "female",
+        "language": "japanese",
+        "description": "日本語女性 · 落ち着いた中年 — ドキュメンタリー、ナレーション",
+        "instruct": "female, middle-aged, low pitch",
+        "sample_text": TEXT_JP_DOCUMENTARY,
+        "params": WARM_STUDIO_PARAMS,
+    },
+
+    # ── Korean: thêm 2 (đã có 1) ──
+    {
+        "slug": "kr_junho",
+        "display_name": "준호",
+        "gender": "male",
+        "language": "korean",
+        "description": "한국어 남성 · 젊고 차분한 — 팟캐스트, 해설",
+        "instruct": "male, young adult, moderate pitch",
+        "sample_text": TEXT_KR_PODCAST,
+        "params": WARM_STUDIO_PARAMS,
+    },
+    {
+        "slug": "kr_seonha",
+        "display_name": "선하",
+        "gender": "female",
+        "language": "korean",
+        "description": "한국어 여성 · 따뜻한 중년 — 오디오북, 에세이 낭독",
+        "instruct": "female, middle-aged, moderate pitch",
+        "sample_text": TEXT_KR_NARRATOR_WARM,
+        "params": WARM_STUDIO_PARAMS,
+    },
+
+    # ── French: thêm 2 (đã có 1) ──
+    {
+        "slug": "fr_louis",
+        "display_name": "Louis",
+        "gender": "male",
+        "language": "french",
+        "description": "Voix française masculine — livre audio, narration romanesque",
+        "instruct": "male, middle-aged, moderate pitch",
+        "sample_text": TEXT_FR_AUDIOBOOK,
+        "params": WARM_STUDIO_PARAMS,
+    },
+    {
+        "slug": "fr_sophie",
+        "display_name": "Sophie",
+        "gender": "female",
+        "language": "french",
+        "description": "Voix française féminine mature — documentaire, narration grave",
+        "instruct": "female, middle-aged, low pitch",
+        "sample_text": TEXT_FR_DOCUMENTARY,
         "params": WARM_STUDIO_PARAMS,
     },
 ]

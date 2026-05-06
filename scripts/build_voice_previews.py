@@ -39,11 +39,55 @@ def _free_memory(device: str):
 
 
 # Template preview — personalize {name}. ~8-10s, mention app capability.
-PREVIEW_TEXT = (
-    "Xin chào, tôi là {name}, một trong những giọng đọc của VoxStudio. "
-    "Tôi có thể giúp bạn lồng tiếng video, đọc sách nói, "
-    "hoặc làm người dẫn chuyện cho nội dung của bạn."
-)
+# Mỗi voice tự đọc intro bằng ngôn ngữ NATIVE của giọng (Emma nói English,
+# ゆき nói Japanese...) → user nghe demo voice trên text mà voice optimize cho.
+PREVIEW_TEMPLATES = {
+    "vietnamese": (
+        "Xin chào, tôi là {name}, một trong những giọng đọc của VoxStudio. "
+        "Tôi có thể giúp bạn lồng tiếng video, đọc sách nói, "
+        "hoặc làm người dẫn chuyện cho nội dung của bạn."
+    ),
+    "english": (
+        "Hello, I'm {name}, one of the voices from VoxStudio. "
+        "I can help you narrate videos, read audiobooks, "
+        "or be the voice for your content."
+    ),
+    "chinese": (
+        "你好，我是{name}，VoxStudio的语音之一。"
+        "我可以帮您为视频配音、朗读有声书，"
+        "或为您的内容担任旁白。"
+    ),
+    "japanese": (
+        "こんにちは、{name}と申します。VoxStudioの音声の一つです。"
+        "動画のナレーション、オーディオブックの朗読、"
+        "コンテンツのナレーターをお手伝いします。"
+    ),
+    "korean": (
+        "안녕하세요, 저는 VoxStudio의 음성 중 하나인 {name}입니다. "
+        "동영상 더빙, 오디오북 낭독, "
+        "콘텐츠의 내레이션을 도와드릴 수 있습니다."
+    ),
+    "french": (
+        "Bonjour, je suis {name}, l'une des voix de VoxStudio. "
+        "Je peux vous aider à narrer des vidéos, à lire des livres audio, "
+        "ou à donner voix à votre contenu."
+    ),
+    "spanish": (
+        "Hola, soy {name}, una de las voces de VoxStudio. "
+        "Puedo ayudarle a narrar videos, leer audiolibros, "
+        "o ser la voz de su contenido."
+    ),
+}
+# Fallback nếu language không match — dùng English (universal).
+PREVIEW_FALLBACK_LANG = "english"
+# Backward-compat alias — code cũ dùng PREVIEW_TEXT.
+PREVIEW_TEXT = PREVIEW_TEMPLATES["vietnamese"]
+
+
+def get_preview_template(language: str) -> str:
+    """Lookup template theo voice.language. Fallback English nếu không có."""
+    return PREVIEW_TEMPLATES.get((language or "").lower(),
+                                  PREVIEW_TEMPLATES[PREVIEW_FALLBACK_LANG])
 
 
 def main():
@@ -104,7 +148,9 @@ def main():
     else:
         device = args.device
 
-    template = args.text or PREVIEW_TEXT
+    # Override template (CLI flag) áp dụng cho mọi voice. Mặc định: tự pick
+    # template theo voice.language → mỗi voice nói intro bằng ngôn ngữ native.
+    cli_template = args.text  # None = pick theo language
 
     print(f"Loading OmniVoice on {device}...")
     t0 = time.time()
@@ -129,7 +175,11 @@ def main():
             continue
 
         emoji = "👩" if gender == "female" else "👨"
-        print(f"  [{i}/{len(candidates)}] {emoji} {slug} · {display_name}")
+        # Pick template theo voice.language (vd 'english' → English template).
+        # CLI --text override luôn applies (cho dev cần test custom text).
+        voice_lang = (meta.get("language") or "vietnamese").lower()
+        template = cli_template or get_preview_template(voice_lang)
+        print(f"  [{i}/{len(candidates)}] {emoji} {slug} · {display_name} · {voice_lang}")
         t1 = time.time()
 
         # Free memory TRƯỚC mỗi generate (quan trọng cho MPS)
