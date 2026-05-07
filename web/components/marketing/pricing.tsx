@@ -6,24 +6,29 @@ import { Check, ArrowRight } from "lucide-react";
 const PLAN_KEYS = ["free", "pro", "studio"] as const;
 type PlanKey = (typeof PLAN_KEYS)[number];
 
-export function Pricing() {
+export function Pricing({ hideHeader = false }: { hideHeader?: boolean } = {}) {
   const t = useTranslations("landing.pricing");
   const locale = useLocale();
 
   return (
-    <section id="pricing" className="py-20 sm:py-28 bg-card/20 border-y border-border/40">
+    <section
+      id="pricing"
+      className={`bg-card/20 border-y border-border/40 ${hideHeader ? "py-12 sm:py-16 border-t-0" : "py-20 sm:py-28"}`}
+    >
       <div className="mx-auto max-w-6xl px-4 sm:px-6">
-        <div className="text-center mb-12">
-          <div className="text-xs font-semibold uppercase tracking-wider text-primary mb-2">
-            {t("eyebrow")}
+        {!hideHeader && (
+          <div className="text-center mb-12">
+            <div className="text-xs font-semibold uppercase tracking-wider text-primary mb-2">
+              {t("eyebrow")}
+            </div>
+            <h2 className="text-3xl font-semibold tracking-tight sm:text-4xl">
+              {t("title")}
+            </h2>
+            <p className="mx-auto mt-3 max-w-2xl text-base text-muted-foreground">
+              {t("subtitle")}
+            </p>
           </div>
-          <h2 className="text-3xl font-semibold tracking-tight sm:text-4xl">
-            {t("title")}
-          </h2>
-          <p className="mx-auto mt-3 max-w-2xl text-base text-muted-foreground">
-            {t("subtitle")}
-          </p>
-        </div>
+        )}
 
         <div className="grid gap-6 lg:grid-cols-3 max-w-5xl mx-auto">
           {PLAN_KEYS.map((key) => (
@@ -34,13 +39,17 @@ export function Pricing() {
         <p className="mt-10 text-center text-sm text-muted-foreground">
           {t("ltdHint")}
         </p>
-        <div className="mt-4 text-center">
-          <Link href="/pricing"
-                className="inline-flex items-center gap-1 text-sm text-primary hover:underline">
-            {t("viewFull")}
-            <ArrowRight className="h-3.5 w-3.5" />
-          </Link>
-        </div>
+        {!hideHeader && (
+          <div className="mt-4 text-center">
+            <Link
+              href="/pricing"
+              className="inline-flex items-center gap-1 text-sm text-primary hover:underline"
+            >
+              {t("viewFull")}
+              <ArrowRight className="h-3.5 w-3.5" />
+            </Link>
+          </div>
+        )}
       </div>
     </section>
   );

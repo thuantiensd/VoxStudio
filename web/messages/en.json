@@ -58,6 +58,7 @@
     "planActive": "Expires: {date}",
     "planLifetime": "Lifetime — never expires.",
     "upgrade": "Upgrade plan",
+    "upgradeShort": "UPGRADE",
     "paymentsTitle": "Payment history",
     "noPayments": "No transactions yet.",
     "viewQr": "View payment QR",
@@ -66,7 +67,118 @@
     "statusPaid": "Paid",
     "statusCancelled": "Cancelled",
     "verifyBanner": "Email not verified — you need to verify before purchasing.",
-    "verifyAction": "Verify now"
+    "verifyAction": "Verify now",
+    "memberLabel": "Member",
+    "verified": "Verified",
+    "notVerified": "Not verified",
+    "joinedLabel": "Joined {date}",
+    "balanceUsd": "USD Balance",
+    "creditsLabel": "Vox Credits",
+    "creditsAmount": "{amount}",
+    "topupShort": "TOP UP",
+    "topupCta": "Top up Vox Credits",
+    "statSpent": "Total spent",
+    "statOrders": "Total orders",
+    "statPending": "In progress",
+    "statCompleted": "Completed",
+    "ctaNewOrder": "New service",
+    "ctaTopup": "Top up",
+    "popularServices": "Popular services",
+    "recentActivity": "Recent activity",
+    "recentEmpty": "No activity yet.",
+    "descTts": "Natural text-to-speech in 646 languages",
+    "descDubbing": "Studio-grade auto video dubbing",
+    "descCloning": "Voice cloning in 5 seconds",
+    "tab": {
+      "overview": "Overview",
+      "profile": "Profile",
+      "wallet": "Wallet"
+    },
+    "nav": {
+      "overviewSection": "OVERVIEW",
+      "studioSection": "AI STUDIO",
+      "dashboard": "Dashboard",
+      "topup": "Top up wallet",
+      "credits": "Buy AI credits",
+      "affiliate": "Affiliate program",
+      "guide": "Advanced TTS guide",
+      "voiceProcessing": "Voice processing",
+      "tts": "Text-to-Speech",
+      "cloning": "Voice cloning",
+      "dubbing": "Auto dubbing",
+      "stt": "Speech-to-Text",
+      "voiceChange": "Voice change",
+      "voiceSplit": "Voice separation",
+      "audioMusic": "Audio & Music",
+      "imageGen": "Image generation",
+      "overview": "Overview",
+      "profile": "Profile",
+      "billing": "Billing",
+      "usage": "Usage",
+      "support": "Support",
+      "pricing": "Pricing"
+    },
+    "overview": {
+      "title": "Hi, {name} 👋",
+      "subtitle": "This is your account dashboard.",
+      "expires": "Expires",
+      "noExpiry": "—",
+      "verifyStatus": "Email verification",
+      "verified": "Verified",
+      "notVerified": "Not verified",
+      "ctaTitle": "Unlock the full power of VoxStudio",
+      "ctaDesc": "Upgrade to Pro or Studio for unlimited TTS, dubbing, and voice cloning — with priority Zalo support within 24h.",
+      "quickActions": "QUICK ACTIONS",
+      "actionTts": "Text-to-Speech",
+      "actionDub": "Video dubbing",
+      "actionClone": "Voice cloning",
+      "actionLanguages": "646 languages"
+    },
+    "profile": {
+      "title": "Profile",
+      "subtitle": "Manage your personal info and security.",
+      "fieldName": "Display name",
+      "fieldEmail": "Email",
+      "fieldPlan": "Plan",
+      "fieldExpires": "Expires",
+      "noName": "Not set",
+      "editTitle": "Need to update info?",
+      "editDesc": "For now, contact our team to change your display name or email. Self-edit is coming soon.",
+      "editCta": "Contact support"
+    },
+    "billing": {
+      "title": "Billing",
+      "subtitle": "Your transaction history and invoices.",
+      "loading": "Loading payment history…",
+      "refCode": "Reference",
+      "plan": "Plan",
+      "amount": "Amount",
+      "status": "Status"
+    },
+    "usage": {
+      "title": "Usage",
+      "subtitle": "Track your quotas and current month usage.",
+      "tts": "TTS characters",
+      "dubbing": "Dubbing minutes",
+      "cloning": "Voice clones",
+      "coming": "Coming soon",
+      "empty": "Detailed usage tracking will be available in the next update."
+    },
+    "support": {
+      "title": "Support center",
+      "subtitle": "We're here to help — responses within 24h.",
+      "emailTitle": "Support email",
+      "emailDesc": "Email the VoxStudio team. We respond within 24h on business days.",
+      "faqTitle": "Frequently asked questions",
+      "faqDesc": "Quick answers to common questions.",
+      "faqCta": "View FAQ",
+      "docsTitle": "Documentation",
+      "docsDesc": "Detailed guides on installation, voice cloning, and video dubbing.",
+      "docsCta": "Contact team",
+      "privacyTitle": "Privacy",
+      "privacyDesc": "Learn how VoxStudio collects and protects your data.",
+      "privacyCta": "View policy"
+    }
   },
   "checkout": {
     "title": "Checkout — {plan} plan",
@@ -86,12 +198,61 @@
   },
   "landing": {
     "hero": {
-      "badge": "AI dubbing · emotion-aware",
-      "headline": "Studio-grade video dubbing — in minutes",
-      "subheadline": "Desktop app for AI dubbing, voice cloning, subtitle translation. Runs locally on your machine — private, no uploads, free to try.",
-      "ctaPrimary": "Download for free",
-      "ctaSecondary": "Watch demo (90s)",
-      "platforms": "macOS available · Windows coming soon"
+      "badge": "Studio Dubbing · Text-to-Speech · Voice Cloning",
+      "headline1": "Studio-grade",
+      "headline2": "AI dubbing",
+      "subheadline": "Lifelike text-to-speech · Studio-grade dubbing · 5-second voice cloning · 646 languages — fully private.",
+      "ctaPrimary": "Start creating",
+      "ctaSecondary": "Try it now",
+      "platforms": "macOS available · Windows coming soon",
+      "statVoices": "200+ AI voices",
+      "statLanguages": "646 languages",
+      "statClone": "5s voice clone",
+      "statUptime": "100% private"
+    },
+    "tools": {
+      "sectionLabel": "TOOLKIT",
+      "title1": "Everything you need to",
+      "title2": "create AI voice",
+      "subtitle": "One platform — Studio Dubbing is the flagship, with Text-to-Speech and Voice Cloning to back it up.",
+      "dubbing": {
+        "label": "FLAGSHIP · STUDIO DUBBING",
+        "title": "Dub entire videos in minutes",
+        "description": "Upload YouTube / MP4 → AI transcribes, translates, dubs with multiple voices, mixes with background. Fully automated.",
+        "cta": "Explore Studio"
+      },
+      "tts": {
+        "label": "TEXT TO SPEECH",
+        "title": "Voices that move you",
+        "description": "From text to audio in a flash. Warm studio-grade voices across multiple languages.",
+        "cta": "Try it now"
+      },
+      "clone": {
+        "label": "VOICE CLONING",
+        "title": "Clone voices under 5 seconds",
+        "description": "Upload a 5-30s sample → AI replicates the voice perfectly. Read long texts without losing voice consistency.",
+        "cta": "Clone voice"
+      }
+    },
+    "voices": {
+      "sectionLabel": "VOICE LIBRARY",
+      "title1": "Each voice is",
+      "title2": "a character of its own",
+      "subtitle": "Carefully curated for every scenario — warm radio voices, energetic MCs, contemplative narrators. Find your match in seconds.",
+      "cta": "Explore the library"
+    },
+    "globe": {
+      "sectionLabel": "NO BORDERS",
+      "title1": "One story —",
+      "title2": "told in every language",
+      "subtitle": "Your content deserves a global audience. VoxStudio turns language barriers into bridges that connect creators with the world.",
+      "bullet1Title": "Multi-voice dubbing",
+      "bullet1Desc": "From films, podcasts to ads — every character with its own nuance",
+      "bullet2Title": "Natural translation",
+      "bullet2Desc": "AI understands context, not just words — your tone, emotion, intent preserved",
+      "bullet3Title": "Lightning fast",
+      "bullet3Desc": "Render right from your browser, results in realtime — batch process multiple jobs in parallel, no waiting",
+      "cta": "Start creating"
     },
     "trust": {
       "title": "Built for serious creators",
@@ -100,7 +261,7 @@
       "stat2": "Voice clone from",
       "stat2Value": "3-5 seconds",
       "stat3": "Processing",
-      "stat3Value": "100% local GPU",
+      "stat3Value": "High-speed GPU",
       "stat4": "Video formats",
       "stat4Value": "MP4/MOV/MKV"
     },
@@ -150,7 +311,7 @@
         },
         "privacy": {
           "title": "Private by design",
-          "desc": "Processing happens on your machine — your source files never leave the computer. No telemetry by default."
+          "desc": "Your files are never shared with third parties. No telemetry, no data resale — enterprise-grade security."
         }
       }
     },
@@ -268,8 +429,29 @@
       "button": "Download VoxStudio free",
       "secondary": "Watch demo first"
     },
+    "seo": {
+      "eyebrow": "WHAT IS VOXSTUDIO",
+      "title": "The #1 AI text-to-speech and video dubbing platform for global creators",
+      "subtitle": "VoxStudio combines advanced Text-to-Speech, AI dubbing, and voice cloning — turning any content into studio-grade audio in seconds.",
+      "ttsTitle": "Natural AI text-to-speech",
+      "ttsP1": "VoxStudio's Text-to-Speech (TTS) uses next-generation AI models to turn any written content — YouTube scripts, audiobooks, lecture audio, podcasts — into natural-sounding voice with human-like intonation and emotion.",
+      "ttsP2": "Hundreds of voices available: warm radio hosts, energetic MCs, contemplative narrators. Type your text, pick a voice, adjust pace and emotion — get studio-quality MP3/WAV output in seconds.",
+      "dubbingTitle": "Studio-grade AI video dubbing",
+      "dubbingP1": "Studio Dubbing is VoxStudio's flagship feature: upload a YouTube video, MP4, or paste a link — AI automatically transcribes (speech-to-text), translates to your target language, dubs with multiple character voices, and mixes in background audio.",
+      "dubbingP2": "Built for YouTube/TikTok creators going global, agencies producing multilingual ads, and educators translating video lessons. Fully automated — you just review and export.",
+      "cloneTitle": "5-second voice cloning",
+      "cloneP1": "VoxStudio's Voice Cloning needs just 5-30 seconds of sample audio — AI recreates the voice down to every breath, intonation, and emotion. Read multi-hour scripts with absolute voice consistency.",
+      "cloneP2": "Versatile use cases: preserve loved ones' voices, dub animated films with custom character voices, produce audiobooks in the author's own voice, or create branded voiceovers.",
+      "globalTitle": "646 languages worldwide",
+      "globalP1": "VoxStudio isn't limited to one language — the software supports text-to-speech and dubbing for 646+ languages, including English, Mandarin, Japanese, Korean, French, German, Spanish, and every major language.",
+      "globalP2": "Built-in AI translation understands context — not word-for-word machine translation. Source content keeps its emotional tone when localized. Ideal for creators expanding to international markets.",
+      "trustTitle": "Why choose VoxStudio?",
+      "trustBody": "VoxStudio is built by a Vietnamese team that understands creator needs deeply: native UI, accurate Vietnamese pronunciation (including Sino-Vietnamese and proper nouns), regional pricing, priority support. Free updates for life on all paid plans.",
+      "ctaFeatures": "Explore all features",
+      "ctaPricing": "See pricing"
+    },
     "footer": {
-      "tagline": "Professional AI dubbing & subtitle translation — running on your machine.",
+      "tagline": "Professional AI dubbing & subtitle translation for global creators.",
       "product": "Product",
       "company": "Company",
       "support": "Support",
@@ -316,8 +498,13 @@
     "checksumDesc": "Confirm the downloaded file hasn't been tampered with. In Terminal:"
   },
   "pricingPage": {
-    "title": "VoxStudio Pricing",
+    "eyebrow": "PRICING",
+    "title": "Simple. Transparent. Fair.",
     "subtitle": "Start free, upgrade as you grow. All plans include free updates for life.",
+    "trust1": "No credit card required",
+    "trust2": "Cancel anytime",
+    "trust3": "7-day money-back",
+    "compareEyebrow": "COMPARE PLANS",
     "compareTitle": "Detailed comparison",
     "feature": "Feature",
     "comparison": {
@@ -354,10 +541,26 @@
       "supportPro": "Email 24h",
       "supportStudio": "Priority Zalo"
     },
+    "valueLifetimeTitle": "Free updates for life",
+    "valueLifetimeDesc": "Every new feature is free for paying customers — no upgrade fees.",
+    "valueCancelTitle": "Cancel anytime",
+    "valueCancelDesc": "No long-term contracts. One-click cancel, no questions asked.",
+    "valueSupportTitle": "Vietnamese-speaking support",
+    "valueSupportDesc": "Our team replies within 24h. Pro/Studio plans get priority Zalo support.",
+    "offersTitle": "Special offers",
+    "offersSubtitle": "Save more with the lifetime deal — peace of mind with our refund policy.",
     "ltdTitle": "Lifetime deal (LTD)",
-    "ltdDesc": "Pay once, use forever — limited slots. Contact us for current pricing.",
+    "ltdDesc": "Pay once, use forever — limited slots. Save 70% vs. monthly over 3 years.",
+    "ltdCta": "Contact for pricing",
     "guaranteeTitle": "7-day money-back guarantee",
-    "guaranteeDesc": "Not satisfied within 7 days? Reply to the receipt email — 100% refund."
+    "guaranteeDesc": "Not satisfied? Get a full refund in the first 7 days, no questions asked.",
+    "guarantee1": "Reply to the receipt email to request",
+    "guarantee2": "Funds returned within 3-5 business days",
+    "guarantee3": "LTD plan refundable within 14 days",
+    "finalCtaTitle": "Ready to start?",
+    "finalCtaSubtitle": "Download VoxStudio for free — no card required. Upgrade when you see the value.",
+    "finalCtaPrimary": "Download free",
+    "finalCtaSecondary": "Talk to us"
   },
   "contactPage": {
     "title": "Get in touch",
@@ -377,6 +580,12 @@
     "businessDesc": "Need enterprise customization, API integration, or staff training? Email business@voxstudio.vn for a quote."
   },
   "termsPage": {
+    "metaTitle": "Terms of Service — VoxStudio",
+    "metaDescription": "VoxStudio Terms of Service: usage rules for AI dubbing, voice cloning, payment, refunds, and mutual responsibilities.",
+    "backHome": "Back to home",
+    "tocTitle": "TABLE OF CONTENTS",
+    "footerNote": "Have a question about these terms?",
+    "footerCta": "Contact us",
     "title": "Terms of Service",
     "lastUpdated": "Last updated: April 26, 2026",
     "intro": "Thanks for using VoxStudio. By installing, signing up for, or using the VoxStudio software (the \"Service\"), you agree to the terms below.",
@@ -392,6 +601,12 @@
     ]
   },
   "privacyPage": {
+    "metaTitle": "Privacy Policy — VoxStudio",
+    "metaDescription": "VoxStudio Privacy Policy: how we collect, use, and protect your data. Local-first, no video uploads, no data resale.",
+    "backHome": "Back to home",
+    "tocTitle": "TABLE OF CONTENTS",
+    "footerNote": "Privacy questions?",
+    "footerCta": "Contact us",
     "title": "Privacy Policy",
     "lastUpdated": "Last updated: April 26, 2026",
     "intro": "VoxStudio is committed to protecting your privacy. This document explains what we collect, how we use it, and how we protect it.",

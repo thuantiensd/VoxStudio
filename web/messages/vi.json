@@ -58,6 +58,7 @@
     "planActive": "Hết hạn: {date}",
     "planLifetime": "Trọn đời — không hết hạn.",
     "upgrade": "Nâng cấp gói",
+    "upgradeShort": "NÂNG CẤP",
     "paymentsTitle": "Lịch sử thanh toán",
     "noPayments": "Chưa có giao dịch nào.",
     "viewQr": "Xem QR thanh toán",
@@ -66,7 +67,118 @@
     "statusPaid": "Đã thanh toán",
     "statusCancelled": "Đã huỷ",
     "verifyBanner": "Email chưa được xác thực — bạn cần xác thực để mua gói.",
-    "verifyAction": "Xác thực ngay"
+    "verifyAction": "Xác thực ngay",
+    "memberLabel": "Thành viên",
+    "verified": "Đã xác thực",
+    "notVerified": "Chưa xác thực",
+    "joinedLabel": "Tham gia {date}",
+    "balanceUsd": "Số dư USD",
+    "creditsLabel": "Vox Credits",
+    "creditsAmount": "{amount}",
+    "topupShort": "NẠP TIỀN",
+    "topupCta": "Nạp Vox Credits",
+    "statSpent": "Tổng chi tiêu",
+    "statOrders": "Tổng đơn",
+    "statPending": "Đang xử lý",
+    "statCompleted": "Hoàn thành",
+    "ctaNewOrder": "Đặt dịch vụ mới",
+    "ctaTopup": "Nạp tiền",
+    "popularServices": "Dịch vụ phổ biến",
+    "recentActivity": "Hoạt động gần đây",
+    "recentEmpty": "Chưa có hoạt động nào.",
+    "descTts": "Đọc văn bản tự nhiên 646 ngôn ngữ",
+    "descDubbing": "Lồng tiếng video tự động chuẩn phòng thu",
+    "descCloning": "Sao chép giọng nói trong 5 giây",
+    "tab": {
+      "overview": "Tổng quan",
+      "profile": "Hồ sơ",
+      "wallet": "Ví tiền"
+    },
+    "nav": {
+      "overviewSection": "TỔNG QUAN",
+      "studioSection": "AI STUDIO",
+      "dashboard": "Bảng điều khiển",
+      "topup": "Nạp tiền vào Ví",
+      "credits": "Mua tín dụng AI",
+      "affiliate": "Tiếp thị liên kết",
+      "guide": "Hướng dẫn TTS nâng cao",
+      "voiceProcessing": "Xử lý giọng nói",
+      "tts": "Văn bản thành giọng nói",
+      "cloning": "Nhân bản giọng nói",
+      "dubbing": "Lồng tiếng tự động",
+      "stt": "Giọng nói thành văn bản",
+      "voiceChange": "Đổi giọng nói",
+      "voiceSplit": "Tách giọng nói",
+      "audioMusic": "Âm thanh & Nhạc",
+      "imageGen": "Tạo ảnh AI",
+      "overview": "Tổng quan",
+      "profile": "Tài khoản",
+      "billing": "Thanh toán",
+      "usage": "Sử dụng",
+      "support": "Hỗ trợ",
+      "pricing": "Bảng giá"
+    },
+    "overview": {
+      "title": "Xin chào, {name} 👋",
+      "subtitle": "Đây là bảng điều khiển tài khoản của bạn.",
+      "expires": "Hết hạn",
+      "noExpiry": "—",
+      "verifyStatus": "Xác thực email",
+      "verified": "Đã xác thực",
+      "notVerified": "Chưa xác thực",
+      "ctaTitle": "Mở khoá toàn bộ tính năng VoxStudio",
+      "ctaDesc": "Nâng cấp Pro hoặc Studio để dùng không giới hạn TTS, dubbing, voice cloning — hỗ trợ Zalo ưu tiên 24h.",
+      "quickActions": "TÍNH NĂNG NHANH",
+      "actionTts": "Đọc văn bản (TTS)",
+      "actionDub": "Lồng tiếng video",
+      "actionClone": "Nhân bản giọng",
+      "actionLanguages": "646 ngôn ngữ"
+    },
+    "profile": {
+      "title": "Thông tin hồ sơ",
+      "subtitle": "Quản lý hồ sơ cá nhân và bảo mật.",
+      "fieldName": "Tên hiển thị",
+      "fieldEmail": "Email",
+      "fieldPlan": "Gói dịch vụ",
+      "fieldExpires": "Hết hạn",
+      "noName": "Chưa đặt tên",
+      "editTitle": "Cần đổi thông tin?",
+      "editDesc": "Hiện tại bạn cần liên hệ đội ngũ để đổi tên hiển thị hoặc email. Tính năng tự đổi sẽ ra mắt sớm.",
+      "editCta": "Liên hệ hỗ trợ"
+    },
+    "billing": {
+      "title": "Thanh toán",
+      "subtitle": "Lịch sử giao dịch và hoá đơn của bạn.",
+      "loading": "Đang tải lịch sử thanh toán…",
+      "refCode": "Mã giao dịch",
+      "plan": "Gói",
+      "amount": "Số tiền",
+      "status": "Trạng thái"
+    },
+    "usage": {
+      "title": "Lượng sử dụng",
+      "subtitle": "Theo dõi quota và mức sử dụng của bạn trong tháng này.",
+      "tts": "Ký tự TTS",
+      "dubbing": "Phút lồng tiếng",
+      "cloning": "Voice clone",
+      "coming": "Sắp có",
+      "empty": "Tính năng theo dõi chi tiết sẽ ra mắt trong bản cập nhật tiếp theo."
+    },
+    "support": {
+      "title": "Trung tâm hỗ trợ",
+      "subtitle": "Chúng tôi luôn sẵn sàng giúp bạn — phản hồi trong vòng 24h.",
+      "emailTitle": "Email hỗ trợ",
+      "emailDesc": "Gửi email cho đội ngũ VoxStudio. Phản hồi trong 24h ngày làm việc.",
+      "faqTitle": "Câu hỏi thường gặp",
+      "faqDesc": "Xem các câu trả lời nhanh cho thắc mắc phổ biến.",
+      "faqCta": "Xem FAQ",
+      "docsTitle": "Tài liệu sử dụng",
+      "docsDesc": "Hướng dẫn cài đặt, voice clone, lồng tiếng video chi tiết.",
+      "docsCta": "Liên hệ team",
+      "privacyTitle": "Quyền riêng tư",
+      "privacyDesc": "Tìm hiểu cách VoxStudio thu thập và bảo vệ dữ liệu của bạn.",
+      "privacyCta": "Xem chính sách"
+    }
   },
   "checkout": {
     "title": "Thanh toán gói {plan}",
@@ -86,23 +198,72 @@
   },
   "landing": {
     "hero": {
-      "badge": "AI dubbing · giữ nguyên cảm xúc",
-      "headline": "Lồng tiếng video chuyên nghiệp — chỉ vài phút",
-      "subheadline": "Phần mềm desktop AI dub video, clone giọng, dịch phụ đề. Chạy trực tiếp trên máy bạn — riêng tư, không upload, miễn phí dùng thử.",
-      "ctaPrimary": "Tải VoxStudio miễn phí",
-      "ctaSecondary": "Xem demo (90 giây)",
-      "platforms": "Cho macOS · Windows sắp ra mắt"
+      "badge": "Studio Dubbing · Text-to-Speech · Voice Cloning",
+      "headline1": "Lồng tiếng AI",
+      "headline2": "chuẩn phòng thu",
+      "subheadline": "Đọc văn bản như người thật · Lồng tiếng video chuẩn phòng thu · Nhân bản giọng trong 5 giây · 646 ngôn ngữ — riêng tư tuyệt đối.",
+      "ctaPrimary": "Bắt đầu sáng tạo",
+      "ctaSecondary": "Nghe thử ngay",
+      "platforms": "Cho macOS · Windows sắp ra mắt",
+      "statVoices": "200+ giọng AI",
+      "statLanguages": "646 ngôn ngữ",
+      "statClone": "Clone 5 giây",
+      "statUptime": "100% riêng tư"
+    },
+    "tools": {
+      "sectionLabel": "BỘ CÔNG CỤ",
+      "title1": "Một studio — đủ mọi",
+      "title2": "công cụ giọng nói AI",
+      "subtitle": "Lồng tiếng video là flagship, song hành cùng đọc văn bản và nhân bản giọng — chuẩn phòng thu, dành cho creator chuyên nghiệp.",
+      "dubbing": {
+        "label": "TÍNH NĂNG CHỦ LỰC · LỒNG TIẾNG STUDIO",
+        "title": "Lồng tiếng cả bộ phim chỉ trong vài phút",
+        "description": "Tải video YouTube hoặc MP4 lên — AI tự bóc lời thoại, dịch sang ngôn ngữ bạn chọn, lồng tiếng đa nhân vật và phối nhạc nền. Hoàn toàn tự động, mượt như studio thật.",
+        "cta": "Khám phá Studio"
+      },
+      "tts": {
+        "label": "ĐỌC VĂN BẢN",
+        "title": "Giọng đọc chạm tới cảm xúc",
+        "description": "Từ văn bản hoá audio chỉ trong tích tắc. Giọng ấm, biểu cảm tự nhiên như người thật — hỗ trợ hơn 646 ngôn ngữ trên toàn thế giới.",
+        "cta": "Nghe thử ngay"
+      },
+      "clone": {
+        "label": "NHÂN BẢN GIỌNG",
+        "title": "Sao chép giọng dưới 5 giây",
+        "description": "Chỉ cần 5-30 giây audio mẫu, AI tái tạo giọng nói chân thực đến từng hơi thở. Đọc kịch bản dài, lồng tiếng video — chất giọng đồng nhất tuyệt đối.",
+        "cta": "Tạo giọng riêng"
+      }
+    },
+    "voices": {
+      "sectionLabel": "THƯ VIỆN GIỌNG",
+      "title1": "Mỗi giọng nói",
+      "title2": "một câu chuyện riêng",
+      "subtitle": "Bộ sưu tập chọn lọc kỹ lưỡng cho mọi tình huống — phát thanh viên ấm áp, MC năng động, người dẫn truyện trầm lắng. Tìm chất giọng phù hợp chỉ trong vài giây.",
+      "cta": "Khám phá thư viện"
+    },
+    "globe": {
+      "sectionLabel": "KHÔNG BIÊN GIỚI",
+      "title1": "Một câu chuyện —",
+      "title2": "kể bằng mọi thứ tiếng",
+      "subtitle": "Nội dung của bạn xứng đáng được lắng nghe khắp năm châu. VoxStudio biến mọi rào cản ngôn ngữ thành cây cầu kết nối triệu trái tim.",
+      "bullet1Title": "Lồng tiếng đa giọng",
+      "bullet1Desc": "Từ phim, podcast đến quảng cáo — mỗi nhân vật một sắc thái riêng biệt, sống động",
+      "bullet2Title": "Dịch thuật tự nhiên",
+      "bullet2Desc": "AI hiểu ngữ cảnh, không dịch máy móc — văn phong giữ trọn cảm xúc gốc",
+      "bullet3Title": "Tốc độ ánh sáng",
+      "bullet3Desc": "Render thẳng từ trình duyệt, kết quả realtime — hỗ trợ batch nhiều job song song, không phải chờ đợi",
+      "cta": "Bắt đầu sáng tạo"
     },
     "trust": {
       "title": "Tin dùng bởi creator Việt",
       "stat1": "Lồng tiếng tự động",
-      "stat1Value": "10+ ngôn ngữ",
-      "stat2": "Voice clone từ",
+      "stat1Value": "646+ ngôn ngữ",
+      "stat2": "Nhân bản giọng từ",
       "stat2Value": "3-5 giây",
       "stat3": "Xử lý",
-      "stat3Value": "100% offline GPU",
+      "stat3Value": "GPU tốc độ cao",
       "stat4": "Hỗ trợ video",
-      "stat4Value": "MP4/MOV/MKV"
+      "stat4Value": "MP4 · MOV · MKV"
     },
     "demo": {
       "eyebrow": "Demo nhanh",
@@ -150,7 +311,7 @@
         },
         "privacy": {
           "title": "Riêng tư tuyệt đối",
-          "desc": "Xử lý ngay trên máy bạn — file gốc không bao giờ rời khỏi máy tính. Không telemetry mặc định."
+          "desc": "File của bạn không bao giờ bị chia sẻ với bên thứ ba. Không telemetry, không bán dữ liệu — bảo mật theo chuẩn enterprise."
         }
       }
     },
@@ -268,8 +429,29 @@
       "button": "Tải VoxStudio miễn phí",
       "secondary": "Xem demo trước"
     },
+    "seo": {
+      "eyebrow": "VOXSTUDIO LÀ GÌ",
+      "title": "Nền tảng AI chuyển văn bản thành giọng nói và lồng tiếng video số 1 cho creator Việt",
+      "subtitle": "VoxStudio kết hợp công nghệ Text-to-Speech, lồng tiếng AI và nhân bản giọng tiên tiến — biến mọi nội dung thành audio chuyên nghiệp chỉ trong vài giây.",
+      "ttsTitle": "Chuyển văn bản thành giọng nói AI tự nhiên",
+      "ttsP1": "Công cụ Text-to-Speech (TTS) của VoxStudio sử dụng mô hình AI thế hệ mới, biến mọi đoạn văn bản tiếng Việt — từ kịch bản YouTube, sách nói, audio bài giảng đến podcast — thành giọng đọc tự nhiên, có ngữ điệu và cảm xúc như người thật.",
+      "ttsP2": "Hỗ trợ hàng trăm giọng đọc khác nhau: phát thanh viên ấm áp, MC năng động, người dẫn truyện trầm lắng. Bạn nhập văn bản, chọn giọng, chỉnh tốc độ và cảm xúc — kết quả ra audio MP3/WAV chất lượng phòng thu chỉ trong vài giây.",
+      "dubbingTitle": "Lồng tiếng video AI chuẩn phòng thu",
+      "dubbingP1": "Studio Dubbing là tính năng chủ lực của VoxStudio: chỉ cần upload video YouTube, MP4 hoặc dán link — AI tự động bóc tách lời thoại (Speech-to-Text), dịch sang ngôn ngữ bạn chọn, lồng tiếng đa nhân vật và phối nhạc nền.",
+      "dubbingP2": "Phù hợp cho creator YouTube/TikTok cần lồng tiếng nội dung quốc tế, agency làm phim quảng cáo đa ngôn ngữ, hoặc giáo viên muốn chuyển bài giảng video sang nhiều thứ tiếng. Toàn bộ quy trình tự động — bạn chỉ duyệt và xuất file.",
+      "cloneTitle": "Nhân bản giọng nói trong 5 giây",
+      "cloneP1": "Voice Cloning của VoxStudio chỉ cần 5-30 giây mẫu audio — AI tái tạo giọng nói chân thực đến từng hơi thở, ngữ điệu, cảm xúc. Đọc kịch bản dài hàng giờ vẫn giữ chất giọng đồng nhất tuyệt đối.",
+      "cloneP2": "Ứng dụng đa dạng: phục dựng giọng người thân, lồng tiếng phim hoạt hình với giọng nhân vật riêng, sản xuất audiobook bằng chính giọng tác giả, hoặc tạo voiceover cho thương hiệu cá nhân.",
+      "globalTitle": "Hỗ trợ 646 ngôn ngữ trên toàn thế giới",
+      "globalP1": "VoxStudio không giới hạn ở tiếng Việt — phần mềm hỗ trợ chuyển văn bản thành giọng nói và lồng tiếng cho hơn 646 ngôn ngữ, bao gồm tiếng Anh, Trung, Nhật, Hàn, Pháp, Đức, Tây Ban Nha và mọi ngôn ngữ phổ biến khác.",
+      "globalP2": "AI dịch thuật tích hợp hiểu ngữ cảnh — không dịch từng chữ máy móc. Nội dung gốc giữ trọn cảm xúc khi chuyển sang ngôn ngữ mới. Lý tưởng cho creator muốn vươn ra thị trường quốc tế.",
+      "trustTitle": "Tại sao chọn VoxStudio?",
+      "trustBody": "VoxStudio được phát triển bởi đội ngũ Việt, hiểu rõ nhu cầu của creator nội địa: giao diện tiếng Việt, hỗ trợ phát âm tiếng Việt chuẩn (kể cả từ Hán-Việt và tên riêng), giá hợp lý theo thu nhập VN, hỗ trợ Zalo ưu tiên. Cập nhật miễn phí trọn đời cho mọi gói trả phí.",
+      "ctaFeatures": "Khám phá tất cả tính năng",
+      "ctaPricing": "Xem bảng giá"
+    },
     "footer": {
-      "tagline": "Lồng tiếng & dịch phụ đề chuyên nghiệp bằng AI — chạy trên máy bạn.",
+      "tagline": "Lồng tiếng & dịch phụ đề chuyên nghiệp bằng AI cho creator Việt.",
       "product": "Sản phẩm",
       "company": "Công ty",
       "support": "Hỗ trợ",
@@ -316,8 +498,13 @@
     "checksumDesc": "Đảm bảo file tải về không bị thay đổi. Mở Terminal, chạy:"
   },
   "pricingPage": {
-    "title": "Bảng giá VoxStudio",
+    "eyebrow": "BẢNG GIÁ",
+    "title": "Đơn giản. Minh bạch. Hợp lý.",
     "subtitle": "Bắt đầu miễn phí, nâng cấp khi cần. Mọi gói đều bao gồm cập nhật miễn phí trọn đời.",
+    "trust1": "Không cần thẻ tín dụng",
+    "trust2": "Huỷ bất kỳ lúc nào",
+    "trust3": "Hoàn tiền 7 ngày",
+    "compareEyebrow": "SO SÁNH GÓI",
     "compareTitle": "So sánh chi tiết",
     "feature": "Tính năng",
     "comparison": {
@@ -354,10 +541,26 @@
       "supportPro": "Email 24h",
       "supportStudio": "Zalo ưu tiên"
     },
+    "valueLifetimeTitle": "Cập nhật miễn phí trọn đời",
+    "valueLifetimeDesc": "Mọi tính năng mới đều miễn phí cho khách hàng đã mua — không phải nâng cấp lại.",
+    "valueCancelTitle": "Huỷ bất kỳ lúc nào",
+    "valueCancelDesc": "Không hợp đồng ràng buộc. Huỷ trong 1 click, không hỏi lý do.",
+    "valueSupportTitle": "Hỗ trợ tiếng Việt",
+    "valueSupportDesc": "Đội ngũ Việt phản hồi trong 24h. Pro/Studio có Zalo ưu tiên.",
+    "offersTitle": "Ưu đãi đặc biệt",
+    "offersSubtitle": "Tiết kiệm hơn với gói trọn đời, an tâm với chính sách hoàn tiền.",
     "ltdTitle": "Mua trọn đời (LTD)",
-    "ltdDesc": "Trả 1 lần, dùng mãi mãi — số lượng có hạn. Liên hệ để biết giá ưu đãi.",
+    "ltdDesc": "Trả 1 lần, dùng mãi mãi — số lượng có hạn. Tiết kiệm 70% so với mua tháng trong 3 năm.",
+    "ltdCta": "Liên hệ nhận báo giá",
     "guaranteeTitle": "Cam kết hoàn tiền 7 ngày",
-    "guaranteeDesc": "Không hài lòng trong vòng 7 ngày? Reply email biên lai, hoàn 100%."
+    "guaranteeDesc": "Không hài lòng? Hoàn 100% trong 7 ngày đầu, không cần lý do.",
+    "guarantee1": "Reply email biên lai để yêu cầu hoàn",
+    "guarantee2": "Tiền về trong 3-5 ngày làm việc",
+    "guarantee3": "Gói LTD hoàn 100% trong 14 ngày",
+    "finalCtaTitle": "Sẵn sàng bắt đầu?",
+    "finalCtaSubtitle": "Tải VoxStudio miễn phí, không cần thẻ. Nâng cấp khi bạn thấy giá trị.",
+    "finalCtaPrimary": "Tải miễn phí",
+    "finalCtaSecondary": "Liên hệ tư vấn"
   },
   "contactPage": {
     "title": "Liên hệ với chúng tôi",
@@ -377,6 +580,12 @@
     "businessDesc": "Cần custom enterprise, tích hợp API, đào tạo nhân sự? Email business@voxstudio.vn để nhận báo giá."
   },
   "termsPage": {
+    "metaTitle": "Điều khoản dịch vụ — VoxStudio",
+    "metaDescription": "Điều khoản dịch vụ VoxStudio: quy định sử dụng phần mềm lồng tiếng AI, voice clone, thanh toán, hoàn tiền và trách nhiệm của hai bên.",
+    "backHome": "Quay lại trang chủ",
+    "tocTitle": "MỤC LỤC",
+    "footerNote": "Có câu hỏi về điều khoản này?",
+    "footerCta": "Liên hệ với chúng tôi",
     "title": "Điều khoản dịch vụ",
     "lastUpdated": "Cập nhật lần cuối: 26/04/2026",
     "intro": "Cảm ơn bạn đã sử dụng VoxStudio. Khi bạn cài đặt, đăng ký, hoặc sử dụng phần mềm VoxStudio (\"Dịch vụ\"), bạn đồng ý tuân thủ các điều khoản dưới đây.",
@@ -416,6 +625,12 @@
     ]
   },
   "privacyPage": {
+    "metaTitle": "Chính sách quyền riêng tư — VoxStudio",
+    "metaDescription": "Chính sách quyền riêng tư VoxStudio: cách chúng tôi thu thập, sử dụng và bảo vệ thông tin của bạn. Local-first, không upload video, không bán dữ liệu.",
+    "backHome": "Quay lại trang chủ",
+    "tocTitle": "MỤC LỤC",
+    "footerNote": "Có thắc mắc về quyền riêng tư?",
+    "footerCta": "Liên hệ với chúng tôi",
     "title": "Chính sách quyền riêng tư",
     "lastUpdated": "Cập nhật lần cuối: 26/04/2026",
     "intro": "VoxStudio cam kết bảo vệ quyền riêng tư của bạn. Tài liệu này giải thích chúng tôi thu thập, sử dụng và bảo vệ thông tin của bạn như thế nào.",
