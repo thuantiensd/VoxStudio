@@ -724,7 +724,6 @@ function BalanceCard({
   label,
   value,
   big = false,
-  accent = "default",
   icon: Icon,
 }: {
   label: string;
