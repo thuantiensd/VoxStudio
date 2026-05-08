@@ -98,7 +98,8 @@ async def _ensure_voice_columns(db: AsyncSession):
 
 DEFAULT_PLANS = [
     {
-        "id": "free", "name": "Miễn phí",
+        # Free — try the platform. Có watermark + slow queue.
+        "id": "free", "name": "Free",
         "price_vnd": 0, "price_usd": 0,
         "ltd_price_vnd": 0, "ltd_price_usd": 0,
         "ltd_slots_total": 0,
@@ -108,53 +109,53 @@ DEFAULT_PLANS = [
             "translate": True, "download": True, "voice_clone": True,
             "video_download": True,
             "batch": False, "api": False, "priority_queue": False,
-            "export_4k": False, "watermark_free": False,
+            "export_4k": False, "export_1080p": False, "watermark_free": False,
+            "commercial_use": False, "webhooks": False, "team_workspace": False,
         },
         "limits": {
             "concurrent_jobs": 1,
             "daily_jobs": 10,
             "daily_downloads": 15,
-            "dubbing_min_month": 10,
+            "dubbing_min_month": 3,                    # 3 phút (was 10)
             "stt_min_month": 30,
-            "tts_chars_month": 5_000,
-            "tts_max_chars_request": 1_000,    # 1k/lần — free user thử
+            "tts_chars_month": 30_000,                 # 30k (was 5k)
+            "tts_max_chars_request": 1_000,
             "voice_clone_max": 1,
             "project_max": 5,
         },
     },
     {
-        "id": "pro", "name": "Pro",
-        # 4-tier pricing: Pro 199k VND/tháng (~$8 USD).
-        # 1M chars TTS (~1.250 phút) + 30 phút dubbing + 5 voice clones.
-        "price_vnd": 199_000, "price_usd": 800,  # $8 in cents
-        "ltd_price_vnd": 3_999_000, "ltd_price_usd": 16_000,  # $160 LTD = 20 tháng
+        # Creator $15/mo (~375k VND) — best for creators
+        "id": "pro", "name": "Creator",
+        "price_vnd": 375_000, "price_usd": 1_500,    # $15 in cents
+        "ltd_price_vnd": 7_499_000, "ltd_price_usd": 30_000,    # $300 LTD = 20 tháng
         "ltd_slots_total": 100,
         "sort_order": 2,
         "features": {
             "dubbing": True, "stt": True, "tts": True,
             "translate": True, "download": True, "voice_clone": True,
-            "video_download": True,                # đa nền tảng YouTube/TikTok
+            "video_download": True,
             "batch": False, "api": False, "priority_queue": False,
-            "export_4k": False, "watermark_free": True,
+            "export_4k": False, "export_1080p": True, "watermark_free": True,
+            "commercial_use": False, "webhooks": False, "team_workspace": False,
         },
         "limits": {
             "concurrent_jobs": 2,
-            "daily_jobs": 100,
+            "daily_jobs": 50,
             "daily_downloads": -1,
-            "dubbing_min_month": 30,
-            "stt_min_month": 1_000,
-            "tts_chars_month": 1_000_000,
-            "tts_max_chars_request": 25_000,
-            "voice_clone_max": 5,
-            "project_max": 50,
+            "dubbing_min_month": 20,
+            "stt_min_month": 500,
+            "tts_chars_month": 500_000,
+            "tts_max_chars_request": 10_000,
+            "voice_clone_max": 3,
+            "project_max": 30,
         },
     },
     {
+        # Studio $39/mo (~975k VND) — MOST POPULAR
         "id": "studio", "name": "Studio",
-        # 4-tier: Studio 499k VND/tháng (~$20 USD) — REDUCED features vs Premium.
-        # 2M chars TTS + 120 phút dubbing + 10 voice clones + priority queue
-        "price_vnd": 499_000, "price_usd": 2_000,  # $20 in cents
-        "ltd_price_vnd": 9_999_000, "ltd_price_usd": 40_000,
+        "price_vnd": 975_000, "price_usd": 3_900,    # $39 in cents
+        "ltd_price_vnd": 19_499_000, "ltd_price_usd": 78_000,  # $780 LTD = 20 tháng
         "ltd_slots_total": 100,
         "sort_order": 3,
         "features": {
@@ -162,45 +163,45 @@ DEFAULT_PLANS = [
             "translate": True, "download": True, "voice_clone": True,
             "video_download": True,
             "batch": True, "api": False, "priority_queue": True,
-            "export_4k": True, "watermark_free": True,
+            "export_4k": True, "export_1080p": True, "watermark_free": True,
+            "commercial_use": True, "webhooks": False, "team_workspace": False,
         },
         "limits": {
             "concurrent_jobs": 3,
             "daily_jobs": 200,
             "daily_downloads": -1,
-            "dubbing_min_month": 120,
-            "stt_min_month": 3_000,
-            "tts_chars_month": 2_000_000,           # 2M chars (~2.500 phút)
+            "dubbing_min_month": 100,
+            "stt_min_month": 2_000,
+            "tts_chars_month": 2_000_000,
             "tts_max_chars_request": 50_000,
             "voice_clone_max": 10,
             "project_max": 100,
         },
     },
     {
-        "id": "premium", "name": "Premium",
-        # 4-tier: Premium 999k VND/tháng (~$40 USD) — flagship cho heavy user/agency.
-        # 7M chars TTS + 250 phút dubbing + unlimited clones + premium voices.
-        # Rẻ hơn Bulk topup 999k vì có dubbing built-in + priority queue + recurring.
-        "price_vnd": 999_000, "price_usd": 4_000,  # $40 in cents
-        "ltd_price_vnd": 19_999_000, "ltd_price_usd": 80_000,  # $800 LTD = 20 tháng
-        "ltd_slots_total": 50,
+        # Scale $99/mo (~2.475k VND) — for agencies & production teams
+        "id": "premium", "name": "Scale",
+        "price_vnd": 2_475_000, "price_usd": 9_900,  # $99 in cents
+        "ltd_price_vnd": 49_499_000, "ltd_price_usd": 198_000,  # $1.980 LTD
+        "ltd_slots_total": 30,
         "sort_order": 4,
         "features": {
             "dubbing": True, "stt": True, "tts": True,
             "translate": True, "download": True, "voice_clone": True,
             "video_download": True,
             "batch": True, "api": True, "priority_queue": True,
-            "export_4k": True, "watermark_free": True,
+            "export_4k": True, "export_1080p": True, "watermark_free": True,
+            "commercial_use": True, "webhooks": True, "team_workspace": True,
         },
         "limits": {
             "concurrent_jobs": 5,
             "daily_jobs": -1,
             "daily_downloads": -1,
-            "dubbing_min_month": 250,
+            "dubbing_min_month": 300,
             "stt_min_month": -1,
-            "tts_chars_month": 7_000_000,           # 7M chars (~8.750 phút)
+            "tts_chars_month": 5_000_000,
             "tts_max_chars_request": -1,
-            "voice_clone_max": -1,                  # unlimited
+            "voice_clone_max": -1,
             "project_max": -1,
         },
     },
@@ -214,11 +215,11 @@ async def _seed_plans(db: AsyncSession):
     price_usd với các giá legacy known."""
     # Giá USD legacy của lần seed trước — nếu match → force update
     LEGACY_USD = {
-        "free":   [0],
-        # Force-update plans → 4-tier pricing
-        "pro":    [600, 100, 800, 2_000],         # $6/$1/$8/$20 → force re-update
-        "studio": [1_400, 200, 2_000, 6_900],     # $14/$2/$20/$69 → force re-update (giảm features)
-        "premium": [],                             # mới — không có legacy
+        "free":    [0],
+        # Force-update đến new spec (Creator $15, Studio $39, Scale $99)
+        "pro":     [600, 100, 800, 2_000, 1_500],            # legacy + current $15
+        "studio":  [1_400, 200, 2_000, 6_900, 3_900],        # legacy + current $39
+        "premium": [4_000, 9_900],                            # $40 (intermediate) + $99 (current)
     }
     for spec in DEFAULT_PLANS:
         existing = await db.get(Plan, spec["id"])
@@ -294,42 +295,48 @@ async def _seed_plans(db: AsyncSession):
 # ── Seed credit packs ─────────────────────────────────────────
 
 DEFAULT_CREDIT_PACKS = [
+    # Dubbing-minute topup packs. 1 credit = 1 phút lồng tiếng video.
+    # User dùng khi vượt quota dubbing tháng → mua thêm minutes.
     {
-        "id": "mini", "name": "Mini",
-        "base_credits": 200_000, "bonus_credits": 0, "bonus_percent": 0,
-        "price_vnd": 49_000, "price_usd": 200,    # $2
+        "id": "dub_30", "name": "+30 phút",
+        "base_credits": 30, "bonus_credits": 0, "bonus_percent": 0,
+        "price_vnd": 225_000, "price_usd": 900,    # $9
         "sort_order": 1, "is_popular": False,
     },
     {
-        "id": "starter", "name": "Starter",
-        "base_credits": 700_000, "bonus_credits": 0, "bonus_percent": 0,
-        "price_vnd": 119_000, "price_usd": 500,   # $5
+        "id": "dub_100", "name": "+100 phút",
+        "base_credits": 100, "bonus_credits": 0, "bonus_percent": 0,
+        "price_vnd": 625_000, "price_usd": 2_500,  # $25
         "sort_order": 2, "is_popular": True,
     },
     {
-        "id": "credits_pro", "name": "Pro",
-        "base_credits": 2_000_000, "bonus_credits": 200_000, "bonus_percent": 10,
-        "price_vnd": 349_000, "price_usd": 1_400,   # $14
+        "id": "dub_500", "name": "+500 phút",
+        "base_credits": 500, "bonus_credits": 0, "bonus_percent": 0,
+        "price_vnd": 2_225_000, "price_usd": 8_900,  # $89
         "sort_order": 3, "is_popular": False,
-    },
-    {
-        "id": "bulk", "name": "Bulk",
-        "base_credits": 6_000_000, "bonus_credits": 1_500_000, "bonus_percent": 25,
-        "price_vnd": 999_000, "price_usd": 4_000,   # $40
-        "sort_order": 4, "is_popular": False,
-    },
-    {
-        "id": "max", "name": "Max",
-        "base_credits": 16_000_000, "bonus_credits": 6_400_000, "bonus_percent": 40,
-        "price_vnd": 2_499_000, "price_usd": 9_999,  # $100
-        "sort_order": 5, "is_popular": False,
     },
 ]
 
 
 async def _seed_credit_packs(db: AsyncSession):
-    """Upsert default credit packs. Idempotent."""
+    """Upsert default credit packs.
+
+    Migration: deactivate old chars-based packs (mini/starter/credits_pro/bulk/max),
+    insert new dubbing-minute packs (dub_30/dub_100/dub_500).
+    """
     from .models import CreditPack
+    from sqlalchemy import select
+
+    # Deactivate legacy packs khi switch sang dubbing-minute model
+    LEGACY_PACK_IDS = {"mini", "starter", "credits_pro", "bulk", "max"}
+    legacy = (await db.execute(
+        select(CreditPack).where(CreditPack.id.in_(LEGACY_PACK_IDS))
+    )).scalars().all()
+    for old in legacy:
+        if old.is_active:
+            old.is_active = False
+            logger.info("Deactivated legacy credit pack: %s", old.id)
+
     for spec in DEFAULT_CREDIT_PACKS:
         existing = await db.get(CreditPack, spec["id"])
         if existing:

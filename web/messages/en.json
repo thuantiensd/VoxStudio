@@ -338,84 +338,101 @@
       }
     },
     "pricing": {
-      "eyebrow": "Pricing",
-      "title": "Start free — upgrade when you need to",
-      "subtitle": "Prices shown in USD. Live USD↔VND conversion in-app.",
+      "eyebrow": "PRICING",
+      "title": "Simple, transparent, profitable for peace of mind",
+      "subtitle": "Start free, upgrade when you need to — USD-anchored international pricing.",
       "perMonth": "/month",
-      "popular": "Most popular",
+      "popular": "MOST POPULAR",
       "ltdLabel": "Lifetime",
+      "billingMonthly": "Monthly",
+      "billingYearly": "Yearly",
+      "billingSave": "SAVE 30%",
+      "yearlyBilled": "Billed yearly: {total}",
+      "fairUseHint": "Fair use policy applies. Topup credits never expire.",
       "free": {
         "name": "Free",
         "price": "$0",
-        "desc": "Full preview, no credit card",
+        "desc": "For trying the platform",
         "features": [
-          "5,000 TTS chars / month (~6 min)",
-          "5 minutes of video dubbing / month",
+          "30k TTS characters",
+          "3 minutes video dubbing",
           "1 voice clone",
-          "Download from YouTube · TikTok · Facebook (15/day)",
+          "720p export · watermark",
+          "Slow queue",
+          "15 downloads/day",
           "Community support"
         ],
-        "cta": "Download free"
+        "cta": "Start Free"
       },
       "pro": {
-        "name": "Pro",
-        "price": "$8",
-        "priceVnd": "199,000₫",
-        "desc": "For professional creators",
+        "name": "Creator",
+        "price": "$15",
+        "desc": "Best for creators",
+        "badge": "BEST FOR CREATORS",
         "features": [
-          "1,000,000 TTS chars / month (~1,250 min)",
-          "30 minutes of video dubbing / month",
-          "5 voice clones · 50 projects",
-          "Unlimited multi-platform video downloads",
-          "2 parallel jobs · 100 jobs/day",
-          "Email support — 24h response",
-          "Run out? Top up with credit packs"
+          "500k TTS characters",
+          "20 minutes video dubbing",
+          "3 voice clones",
+          "No watermark",
+          "1080p export",
+          "Unlimited downloads",
+          "50 jobs/day",
+          "Email support"
         ],
-        "cta": "Choose Pro"
+        "cta": "Choose Creator"
       },
       "studio": {
         "name": "Studio",
-        "price": "$20",
-        "priceVnd": "499,000₫",
-        "desc": "For creators & freelancers",
+        "price": "$39",
+        "desc": "For pro creators",
         "features": [
-          "2,000,000 TTS chars / month (~2,500 min)",
-          "120 minutes of video dubbing / month",
-          "10 voice clones · 100 projects",
-          "Unlimited multi-platform video downloads",
-          "Priority GPU · 3 parallel jobs · 200 jobs/day",
-          "4K export · Batch processing",
-          "Email support — 24h response"
+          "2M TTS characters",
+          "100 minutes video dubbing",
+          "10 voice clones",
+          "4K export",
+          "Batch processing",
+          "Priority GPU queue",
+          "3 concurrent jobs",
+          "Unlimited downloads",
+          "Commercial usage"
         ],
         "cta": "Choose Studio"
       },
       "premium": {
-        "name": "Premium",
-        "price": "$40",
-        "priceVnd": "999,000₫",
-        "desc": "For agencies & production studios",
+        "name": "Scale",
+        "price": "$99",
+        "desc": "For agencies & production teams",
+        "badge": "FOR AGENCIES",
         "features": [
-          "7,000,000 TTS chars / month (~8,750 min)",
-          "250 minutes of video dubbing / month",
-          "Unlimited voice clones · unlimited projects",
-          "Unlimited multi-platform video downloads",
-          "Priority queue + dedicated worker · 5 parallel jobs",
-          "Full BYOK + API access",
-          "Premium voice models (ElevenLabs · Minimax)",
-          "Priority Zalo support"
+          "5M+ TTS characters",
+          "300 minutes video dubbing",
+          "Unlimited voice clones",
+          "API access · Webhooks",
+          "Dedicated GPU queue",
+          "Team workspace",
+          "Priority rendering",
+          "Commercial license",
+          "BYOK support"
         ],
-        "cta": "Choose Premium"
+        "cta": "Contact Sales"
       },
       "ltdHint": "Lifetime deals available — save up to 50% vs. monthly. Contact for details.",
       "viewFull": "See full comparison",
-      "creditsEyebrow": "BUY EXTRA CREDITS",
-      "creditsTitle": "Out of quota? Flexible top-up — credits never expire",
-      "creditsSubtitle": "Pay once, use forever. Perfect for extra volume without upgrading.",
-      "creditsBonus": "+{percent}% bonus",
-      "creditsTotal": "{total} credits",
-      "creditsBase": "{base} + {bonus} bonus",
-      "creditsBuy": "Buy now",
-      "creditsLoginRequired": "Sign in to buy credits"
+      "creditsEyebrow": "DUBBING MINUTES TOP-UP",
+      "creditsTitle": "Out of monthly quota? Buy extra minutes — never expire",
+      "creditsSubtitle": "Pay once, added to your account forever. Perfect for project bursts.",
+      "creditsBuy": "Buy dubbing minutes",
+      "creditsLoginRequired": "Sign in to buy minutes",
+      "trust": {
+        "stripe": "Stripe Secure",
+        "stripeSub": "Bank-grade security",
+        "refund": "7-Day Refund",
+        "refundSub": "Not happy? 100% refund",
+        "gpu": "Fast GPU",
+        "gpuSub": "Quick rendering, no waits",
+        "uptime": "99.9% Uptime",
+        "uptimeSub": "SLA on paid plans"
+      }
     },
     "faq": {
       "eyebrow": "Frequently asked",
