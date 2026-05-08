@@ -185,39 +185,43 @@
   --ring: oklch(0.7 0.24 290);
 }
 
-/* Account dashboard — neutral pure-black palette (override dark vars) */
+/* Account dashboard — neutral dark palette với hierarchy rõ ràng
+   - background: rất tối (canvas chính)
+   - card: nổi lên ~#222 (panels phải nhìn thấy được)
+   - muted: hover state ~#2e2e2e
+   - border: white/12% rõ hơn để phân tách */
 .dark .theme-black,
 .theme-black.dark {
-  --background: oklch(0.04 0 0);                /* ~#0a0a0a — gần đen tuyệt đối */
+  --background: oklch(0.05 0 0);                /* ~#0d0d0d — canvas tối */
   --foreground: oklch(0.97 0 0);
-  --card: oklch(0.09 0 0);                      /* ~#161616 */
+  --card: oklch(0.15 0 0);                      /* ~#262626 — nổi rõ hơn bg */
   --card-foreground: oklch(0.97 0 0);
-  --popover: oklch(0.09 0 0);
+  --popover: oklch(0.15 0 0);
   --popover-foreground: oklch(0.97 0 0);
   --primary: oklch(0.97 0 0);                   /* trắng làm accent (bỏ tím) */
   --primary-foreground: oklch(0.04 0 0);        /* đen text on white button */
-  --secondary: oklch(0.13 0 0);
+  --secondary: oklch(0.18 0 0);                 /* ~#2e2e2e */
   --secondary-foreground: oklch(0.97 0 0);
-  --muted: oklch(0.13 0 0);
-  --muted-foreground: oklch(0.62 0 0);
+  --muted: oklch(0.20 0 0);                     /* ~#333 hover */
+  --muted-foreground: oklch(0.65 0 0);
   --accent: oklch(0.97 0 0);
   --accent-foreground: oklch(0.04 0 0);
-  --border: oklch(1 0 0 / 8%);
-  --input: oklch(1 0 0 / 12%);
-  --ring: oklch(1 0 0 / 30%);
+  --border: oklch(1 0 0 / 12%);                 /* viền rõ hơn */
+  --input: oklch(1 0 0 / 16%);
+  --ring: oklch(1 0 0 / 35%);
   --chart-1: oklch(0.7 0.24 290);
   --chart-2: oklch(0.78 0.22 340);
   --chart-3: oklch(0.74 0.16 250);
   --chart-4: oklch(0.66 0.22 310);
   --chart-5: oklch(0.72 0.2 200);
-  --sidebar: oklch(0.07 0 0);
+  --sidebar: oklch(0.10 0 0);                   /* ~#1a1a1a — tách nhẹ khỏi bg */
   --sidebar-foreground: oklch(0.97 0 0);
   --sidebar-primary: oklch(0.97 0 0);
   --sidebar-primary-foreground: oklch(0.04 0 0);
-  --sidebar-accent: oklch(0.13 0 0);
+  --sidebar-accent: oklch(0.18 0 0);
   --sidebar-accent-foreground: oklch(0.97 0 0);
-  --sidebar-border: oklch(1 0 0 / 8%);
-  --sidebar-ring: oklch(1 0 0 / 30%);
+  --sidebar-border: oklch(1 0 0 / 12%);
+  --sidebar-ring: oklch(1 0 0 / 35%);
 }
 
 @layer base {
