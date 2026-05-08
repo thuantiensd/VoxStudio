@@ -579,7 +579,7 @@ function HomeTab({
       </div>
 
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-        <BigToolCard icon={FileText} title="Văn bản thành giọng nói" desc="Vox Premium và VoxCloud, có lịch sử audio." gradient="from-zinc-100 to-zinc-500" onClick={() => setActiveTab("tts")} />
+        <BigToolCard icon={FileText} title="Văn bản thành giọng nói" desc="VoxStudio và Edge TTS, có lịch sử audio." gradient="from-zinc-100 to-zinc-500" onClick={() => setActiveTab("tts")} />
         <BigToolCard icon={Repeat} title="Giọng nói thành văn bản" desc="Tạo SRT/JSON subtitle từ audio/video." gradient="from-zinc-100 to-zinc-500" onClick={() => setActiveTab("subtitle")} />
         <BigToolCard icon={Mic2} title="Lồng tiếng tự động" desc="Tạo project dubbing thật trên backend." gradient="from-zinc-100 to-zinc-500" onClick={() => setActiveTab("dubbing")} />
         <BigToolCard icon={Wand2} title="Nhân bản giọng nói" desc="Clone voice từ audio mẫu của bạn." gradient="from-zinc-100 to-zinc-500" onClick={() => setActiveTab("saved-voices")} />
@@ -1163,50 +1163,59 @@ function TtsTab() {
                 Lịch sử
               </button>
             </div>
-            {panel === "history" && (
-              <div className="flex shrink-0 items-center gap-2">
-                <button
-                  type="button"
-                  onClick={reloadHistory}
-                  className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-border/60 bg-background/60 text-muted-foreground hover:bg-muted/50 hover:text-foreground"
-                  aria-label="Làm mới lịch sử"
-                  title="Làm mới lịch sử"
+
+            <div className="flex shrink-0 items-center gap-2">
+              {/* Model selector — luôn hiển thị ở góc phải */}
+              <div className="relative">
+                <select
+                  value={engine}
+                  onChange={(event) => setEngine(event.target.value as "premium" | "cloud")}
+                  className="h-9 appearance-none rounded-lg border border-border/60 bg-background/60 pl-9 pr-8 text-xs font-semibold text-foreground outline-none focus:border-primary/50 cursor-pointer"
                 >
-                  <RotateCcw className="h-3.5 w-3.5" />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setHistoryNewestFirst((value) => !value)}
-                  className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-border/60 bg-background/60 text-muted-foreground hover:bg-muted/50 hover:text-foreground"
-                  aria-label="Đổi thứ tự lịch sử"
-                  title={historyNewestFirst ? "Cũ nhất trước" : "Mới nhất trước"}
-                >
-                  <FileText className="h-3.5 w-3.5" />
-                </button>
-                <button
-                  type="button"
-                  onClick={clearHistoryItems}
-                  disabled={history.length === 0}
-                  className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-border/60 bg-background/60 text-muted-foreground hover:bg-red-500/10 hover:text-red-500 disabled:pointer-events-none disabled:opacity-40"
-                  aria-label="Xoá toàn bộ lịch sử"
-                  title="Xoá toàn bộ lịch sử"
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                </button>
+                  <option value="premium">VoxStudio</option>
+                  <option value="cloud">Edge TTS</option>
+                </select>
+                <Music2 className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+                <ChevronDown className="pointer-events-none absolute right-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
               </div>
-            )}
+
+              {panel === "history" && (
+                <>
+                  <button
+                    type="button"
+                    onClick={reloadHistory}
+                    className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-border/60 bg-background/60 text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+                    aria-label="Làm mới lịch sử"
+                    title="Làm mới lịch sử"
+                  >
+                    <RotateCcw className="h-3.5 w-3.5" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setHistoryNewestFirst((value) => !value)}
+                    className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-border/60 bg-background/60 text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+                    aria-label="Đổi thứ tự lịch sử"
+                    title={historyNewestFirst ? "Cũ nhất trước" : "Mới nhất trước"}
+                  >
+                    <FileText className="h-3.5 w-3.5" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={clearHistoryItems}
+                    disabled={history.length === 0}
+                    className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-border/60 bg-background/60 text-muted-foreground hover:bg-red-500/10 hover:text-red-500 disabled:pointer-events-none disabled:opacity-40"
+                    aria-label="Xoá toàn bộ lịch sử"
+                    title="Xoá toàn bộ lịch sử"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                </>
+              )}
+            </div>
           </div>
 
           {panel === "settings" ? (
             <div className="min-h-0 flex-1 space-y-5 overflow-y-auto p-4">
-              <label className="block text-xs font-semibold text-muted-foreground">
-                Model
-                <select value={engine} onChange={(event) => setEngine(event.target.value as "premium" | "cloud")} className="mt-2 h-12 w-full rounded-lg border border-border/60 bg-background px-3 text-sm font-semibold text-foreground outline-none focus:border-primary/50">
-                  <option value="premium">Vox Premium</option>
-                  <option value="cloud">VoxCloud</option>
-                </select>
-              </label>
-
               <label className="block text-xs font-semibold text-muted-foreground">
                 Ngôn ngữ
                 <select value={language} onChange={(event) => setLanguage(event.target.value)} className="mt-2 h-12 w-full rounded-lg border border-border/60 bg-background px-3 text-sm font-semibold text-foreground outline-none focus:border-primary/50">
@@ -1224,7 +1233,7 @@ function TtsTab() {
                   <select value={voiceId} onChange={(event) => setVoiceId(event.target.value)} className="mt-2 h-12 w-full rounded-lg border border-border/60 bg-background px-3 text-sm font-semibold text-foreground outline-none focus:border-primary/50">
                     <option value="">Giọng mặc định</option>
                     {premiumVoices.length > 0 && (
-                      <optgroup label="Vox Premium">
+                      <optgroup label="VoxStudio">
                         {premiumVoices.map((voice) => (
                           <option key={voice.slug} value={voice.slug}>{voice.display_name}</option>
                         ))}
@@ -1241,7 +1250,7 @@ function TtsTab() {
                 </label>
               ) : (
                 <label className="block text-xs font-semibold text-muted-foreground">
-                  Giọng VoxCloud
+                  Giọng Edge TTS
                   <select value={edgeVoice} onChange={(event) => setEdgeVoice(event.target.value)} className="mt-2 h-12 w-full rounded-lg border border-border/60 bg-background px-3 text-sm font-semibold text-foreground outline-none focus:border-primary/50">
                     <option value="">Tự động chọn giọng</option>
                     {filteredEdgeVoices.map((voice) => (
@@ -1259,7 +1268,7 @@ function TtsTab() {
                     onClick={() => setShowAdvanced((value) => !value)}
                     className="flex w-full items-center justify-between text-xs font-semibold text-foreground hover:text-primary"
                   >
-                    <span>Tham số Vox Premium</span>
+                    <span>Tham số VoxStudio</span>
                     <ChevronDown className={`h-4 w-4 transition-transform ${showAdvanced ? "rotate-180" : ""}`} />
                   </button>
 
@@ -1355,7 +1364,7 @@ function TtsTab() {
                       {item.text}
                     </p>
                     <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] font-medium text-muted-foreground">
-                      <span>{item.engine === "premium" ? "Vox Premium" : "VoxCloud"}</span>
+                      <span>{item.engine === "premium" ? "VoxStudio" : "Edge TTS"}</span>
                       <span>•</span>
                       <span className="max-w-[180px] truncate">{item.voiceLabel}</span>
                       <span>•</span>
@@ -1712,14 +1721,14 @@ function VoiceModelsTab() {
     ...premiumVoices.map((voice) => ({
       id: voice.slug,
       name: voice.display_name,
-      desc: voice.description || `Vox Premium · ${voice.language || "đa ngôn ngữ"} · ${voice.gender}`,
-      badge: "Vox Premium",
+      desc: voice.description || `VoxStudio · ${voice.language || "đa ngôn ngữ"} · ${voice.gender}`,
+      badge: "VoxStudio",
     })),
     ...edgeVoices.slice(0, 12).map((voice) => ({
       id: voice.name,
       name: voice.name,
-      desc: `VoxCloud · ${voice.locale} · ${voice.gender}`,
-      badge: "VoxCloud",
+      desc: `Edge TTS · ${voice.locale} · ${voice.gender}`,
+      badge: "Edge TTS",
     })),
   ];
 
@@ -1839,7 +1848,7 @@ function SavedVoicesTab() {
         </div>
 
         <div className="space-y-4 rounded-2xl border border-primary/50 bg-background p-5">
-          <SelectField label="Provider" value="Vox Premium" />
+          <SelectField label="Provider" value="VoxStudio" />
           <label className="block text-xs font-bold uppercase tracking-wider text-muted-foreground">
             Tên giọng nói *
             <input
