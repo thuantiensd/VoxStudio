@@ -194,25 +194,30 @@
   --card-foreground: oklch(0.97 0 0);
   --popover: oklch(0.09 0 0);
   --popover-foreground: oklch(0.97 0 0);
+  --primary: oklch(0.97 0 0);                   /* trắng làm accent (bỏ tím) */
+  --primary-foreground: oklch(0.04 0 0);        /* đen text on white button */
   --secondary: oklch(0.13 0 0);
   --secondary-foreground: oklch(0.97 0 0);
   --muted: oklch(0.13 0 0);
   --muted-foreground: oklch(0.62 0 0);
+  --accent: oklch(0.97 0 0);
+  --accent-foreground: oklch(0.04 0 0);
   --border: oklch(1 0 0 / 8%);
   --input: oklch(1 0 0 / 12%);
+  --ring: oklch(1 0 0 / 30%);
   --chart-1: oklch(0.7 0.24 290);
   --chart-2: oklch(0.78 0.22 340);
   --chart-3: oklch(0.74 0.16 250);
   --chart-4: oklch(0.66 0.22 310);
   --chart-5: oklch(0.72 0.2 200);
-  --sidebar: oklch(0.13 0.025 290);
-  --sidebar-foreground: oklch(0.88 0.012 290);
-  --sidebar-primary: oklch(0.7 0.24 290);
-  --sidebar-primary-foreground: oklch(0.1 0.02 290);
-  --sidebar-accent: oklch(0.2 0.03 290);
-  --sidebar-accent-foreground: oklch(0.96 0.008 290);
+  --sidebar: oklch(0.07 0 0);
+  --sidebar-foreground: oklch(0.97 0 0);
+  --sidebar-primary: oklch(0.97 0 0);
+  --sidebar-primary-foreground: oklch(0.04 0 0);
+  --sidebar-accent: oklch(0.13 0 0);
+  --sidebar-accent-foreground: oklch(0.97 0 0);
   --sidebar-border: oklch(1 0 0 / 8%);
-  --sidebar-ring: oklch(0.7 0.24 290);
+  --sidebar-ring: oklch(1 0 0 / 30%);
 }
 
 @layer base {
