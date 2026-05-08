@@ -337,6 +337,10 @@
     from { transform: translateX(-50%); }
     to   { transform: translateX(0); }
   }
+  @keyframes indeterminate {
+    0%   { transform: translateX(-100%); }
+    100% { transform: translateX(200%); }
+  }
   .marquee-track {
     animation: marquee-x 40s linear infinite;
     will-change: transform;

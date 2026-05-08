@@ -147,7 +147,7 @@ type TtsHistoryItem = {
   voiceKey: string;
   voiceLabel: string;
   createdAt: string;
-  status: "done" | "failed";
+  status: "processing" | "done" | "failed";
   credits: number;
   charCount: number;
   audioUrl?: string;
@@ -937,6 +937,23 @@ function TtsTab() {
     const voiceLabel = selectedVoiceLabel;
     const voiceKey = selectedVoiceKey;
     const creditCost = estimateTtsCredits(sourceText);
+    const tempId = createHistoryId();
+
+    // 1. Push processing item ngay lập tức + switch sang lịch sử
+    pushHistory({
+      id: tempId,
+      text: sourceText,
+      engine,
+      language,
+      voiceKey,
+      voiceLabel,
+      createdAt,
+      status: "processing",
+      credits: creditCost,
+      charCount: sourceText.length,
+    });
+    setPanel("history");
+
     try {
       const next =
         engine === "premium"
@@ -958,39 +975,31 @@ function TtsTab() {
             })
           : await generateCloudTts({ text, voice: edgeVoice || null, language, speed });
       setResult(next);
-      pushHistory({
-        id: createHistoryId(),
-        text: sourceText,
-        engine,
-        language,
-        voiceKey,
-        voiceLabel,
-        createdAt,
-        status: "done",
-        credits: creditCost,
-        charCount: sourceText.length,
-        audioUrl: next.audio_url,
-        duration: next.duration,
-        sampleRate: next.sample_rate,
-      });
-      setPanel("history");
+      // 2. Update item status = "done" với audio url
+      writeHistory((items) =>
+        items.map((it) =>
+          it.id === tempId
+            ? {
+                ...it,
+                status: "done",
+                audioUrl: next.audio_url,
+                duration: next.duration,
+                sampleRate: next.sample_rate,
+              }
+            : it,
+        ),
+      );
     } catch (e) {
       const message = e instanceof Error ? e.message : "Không tạo được giọng nói.";
       setError(message);
-      pushHistory({
-        id: createHistoryId(),
-        text: sourceText,
-        engine,
-        language,
-        voiceKey,
-        voiceLabel,
-        createdAt,
-        status: "failed",
-        credits: creditCost,
-        charCount: sourceText.length,
-        error: message,
-      });
-      setPanel("history");
+      // 3. Update item status = "failed" với error message
+      writeHistory((items) =>
+        items.map((it) =>
+          it.id === tempId
+            ? { ...it, status: "failed", error: message }
+            : it,
+        ),
+      );
     } finally {
       setBusy(false);
     }
@@ -1361,16 +1370,39 @@ function TtsTab() {
                   </p>
                 </div>
               ) : (
-                visibleHistory.map((item) => (
-                  <div key={item.id} className="rounded-2xl border border-border/60 bg-background/45 p-4 shadow-sm">
+                visibleHistory.map((item) => {
+                  const isProcessing = item.status === "processing";
+                  const isDone = item.status === "done";
+                  const isFailed = item.status === "failed";
+                  return (
+                  <div
+                    key={item.id}
+                    className={`rounded-2xl border bg-background/45 p-4 shadow-sm transition-all ${
+                      isProcessing
+                        ? "border-primary/60 ring-2 ring-primary/30"
+                        : "border-border/60"
+                    }`}
+                  >
                     <div className="flex items-center gap-2 border-b border-border/50 pb-3">
-                      <div className={`grid h-8 w-8 shrink-0 place-items-center rounded-full ${item.status === "done" ? "bg-primary/15 text-primary" : "bg-red-500/10 text-red-500"}`}>
-                        {item.engine === "premium" ? <Mic2 className="h-4 w-4" /> : <Zap className="h-4 w-4" />}
+                      <div className={`grid h-8 w-8 shrink-0 place-items-center rounded-full ${
+                        isDone ? "bg-primary/15 text-primary" :
+                        isFailed ? "bg-red-500/10 text-red-500" :
+                        "bg-primary/15 text-primary"
+                      }`}>
+                        {isProcessing ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : item.engine === "premium" ? (
+                          <Mic2 className="h-4 w-4" />
+                        ) : (
+                          <Zap className="h-4 w-4" />
+                        )}
                       </div>
-                      {item.status === "done" ? (
+                      {isDone ? (
                         <CheckCircle2 className="h-4 w-4 shrink-0 text-muted-foreground" />
-                      ) : (
+                      ) : isFailed ? (
                         <AlertTriangle className="h-4 w-4 shrink-0 text-red-500" />
+                      ) : (
+                        <RotateCcw className="h-4 w-4 shrink-0 animate-spin text-primary" />
                       )}
                       <span className="min-w-0 flex-1 truncate text-xs font-medium text-muted-foreground">
                         {formatHistoryTime(item.createdAt)}
@@ -1378,25 +1410,40 @@ function TtsTab() {
                       <span className="rounded-md bg-muted/70 px-2 py-1 text-[11px] font-bold text-foreground">
                         {item.charCount.toLocaleString("vi-VN")}
                       </span>
-                      <span className={`rounded-md px-2 py-1 text-[10px] font-black uppercase tracking-wide ${item.status === "done" ? "bg-foreground text-background" : "bg-red-500 text-white"}`}>
-                        {item.status === "done" ? "XONG" : "THẤT BẠI"}
+                      <span className={`rounded-md px-2 py-1 text-[10px] font-black uppercase tracking-wide ${
+                        isDone ? "bg-foreground text-background" :
+                        isFailed ? "bg-red-500 text-white" :
+                        "bg-primary text-primary-foreground"
+                      }`}>
+                        {isDone ? "XONG" : isFailed ? "THẤT BẠI" : "ĐANG XỬ LÝ"}
                       </span>
-                      <button
-                        type="button"
-                        onClick={() => deleteHistoryItem(item.id)}
-                        className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-border/60 text-muted-foreground hover:bg-red-500/10 hover:text-red-500"
-                        aria-label="Xoá mục lịch sử"
-                        title="Xoá mục lịch sử"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </button>
+                      {!isProcessing && (
+                        <button
+                          type="button"
+                          onClick={() => deleteHistoryItem(item.id)}
+                          className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-border/60 text-muted-foreground hover:bg-red-500/10 hover:text-red-500"
+                          aria-label="Xoá mục lịch sử"
+                          title="Xoá mục lịch sử"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      )}
                     </div>
 
                     <p className="mt-3 line-clamp-2 text-sm font-medium leading-6 text-foreground">
                       {item.text}
                     </p>
 
-                    {item.status === "done" && item.audioUrl ? (
+                    {isProcessing ? (
+                      <div className="mt-3">
+                        <div className="relative h-1.5 overflow-hidden rounded-full bg-muted/60">
+                          <div className="absolute inset-y-0 left-0 w-1/2 animate-[indeterminate_1.5s_ease-in-out_infinite] rounded-full bg-gradient-to-r from-transparent via-primary to-transparent" />
+                        </div>
+                        <p className="mt-2 text-[11px] text-muted-foreground">
+                          Đang tạo giọng nói... vui lòng chờ vài giây.
+                        </p>
+                      </div>
+                    ) : isDone && item.audioUrl ? (
                       <div className="mt-3">
                         <CompactAudioPlayer
                           src={mediaUrl(item.audioUrl)}
@@ -1420,7 +1467,8 @@ function TtsTab() {
                       </div>
                     )}
                   </div>
-                ))
+                  );
+                })
               )}
             </div>
           )}
