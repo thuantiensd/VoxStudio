@@ -779,6 +779,18 @@ function TtsTab() {
     if (typeof window === "undefined") return "premium";
     return (localStorage.getItem("voxstudio:tts:engine") as "premium" | "cloud" | null) || "premium";
   });
+  const [modelMenuOpen, setModelMenuOpen] = useState(false);
+  const modelMenuRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!modelMenuOpen) return;
+    const onDown = (e: MouseEvent) => {
+      if (modelMenuRef.current && !modelMenuRef.current.contains(e.target as Node)) {
+        setModelMenuOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [modelMenuOpen]);
   const [voiceId, setVoiceId] = useState(() => (typeof window === "undefined" ? "" : localStorage.getItem("voxstudio:tts:voiceId") || ""));
   const [edgeVoice, setEdgeVoice] = useState(() => (typeof window === "undefined" ? "" : localStorage.getItem("voxstudio:tts:edgeVoice") || ""));
   const [language, setLanguage] = useState(() => (typeof window === "undefined" ? "vi" : localStorage.getItem("voxstudio:tts:language") || "vi"));
@@ -1165,18 +1177,47 @@ function TtsTab() {
             </div>
 
             <div className="flex shrink-0 items-center gap-2">
-              {/* Model selector — luôn hiển thị ở góc phải */}
-              <div className="relative">
-                <select
-                  value={engine}
-                  onChange={(event) => setEngine(event.target.value as "premium" | "cloud")}
-                  className="h-9 appearance-none rounded-lg border border-border/60 bg-background/60 pl-9 pr-8 text-xs font-semibold text-foreground outline-none focus:border-primary/50 cursor-pointer"
+              {/* Model selector — custom dropdown với logo */}
+              <div ref={modelMenuRef} className="relative">
+                <button
+                  type="button"
+                  onClick={() => setModelMenuOpen((o) => !o)}
+                  className="inline-flex h-9 items-center gap-2 rounded-lg border border-border/60 bg-background/60 pl-2 pr-2.5 text-xs font-semibold text-foreground hover:bg-muted/40"
                 >
-                  <option value="premium">VoxStudio</option>
-                  <option value="cloud">Edge TTS</option>
-                </select>
-                <Music2 className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-                <ChevronDown className="pointer-events-none absolute right-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+                  <EngineLogo engine={engine} size="sm" />
+                  <span>{engine === "premium" ? "VoxStudio" : "Edge TTS"}</span>
+                  <ChevronDown className={`h-3.5 w-3.5 text-muted-foreground transition-transform ${modelMenuOpen ? "rotate-180" : ""}`} />
+                </button>
+
+                {modelMenuOpen && (
+                  <div className="absolute right-0 top-full z-50 mt-1.5 w-72 overflow-hidden rounded-xl border border-border/60 bg-popover shadow-2xl">
+                    <div className="p-1">
+                      <ModelOption
+                        active={engine === "premium"}
+                        name="VoxStudio"
+                        desc="Giọng đọc tự nhiên, model riêng, tiếng Việt chuẩn"
+                        engineId="premium"
+                        onClick={() => {
+                          setEngine("premium");
+                          setModelMenuOpen(false);
+                        }}
+                      />
+                      <ModelOption
+                        active={engine === "cloud"}
+                        name="Edge TTS"
+                        desc="400+ giọng, 100+ ngôn ngữ, miễn phí siêu rẻ"
+                        engineId="cloud"
+                        onClick={() => {
+                          setEngine("cloud");
+                          setModelMenuOpen(false);
+                        }}
+                      />
+                    </div>
+                    <div className="border-t border-border/60 bg-muted/20 px-3 py-2 text-[10px] text-muted-foreground">
+                      Bạn có thể đổi model bất kỳ lúc nào — settings sẽ được lưu.
+                    </div>
+                  </div>
+                )}
               </div>
 
               {panel === "history" && (
@@ -2477,5 +2518,63 @@ function SupportLink({
       </div>
       <ArrowRight className="h-3.5 w-3.5 text-muted-foreground transition-transform group-hover:translate-x-0.5" />
     </Link>
+  );
+}
+
+// ── ENGINE LOGO ────────────────────────────────────────────────────────
+function EngineLogo({
+  engine,
+  size = "md",
+}: {
+  engine: "premium" | "cloud";
+  size?: "sm" | "md";
+}) {
+  const px = size === "sm" ? 20 : 36;
+  const className = size === "sm" ? "h-5 w-5" : "h-9 w-9";
+  const src = engine === "premium" ? "/logo.png" : "/edge-logo.svg";
+  const alt = engine === "premium" ? "VoxStudio" : "Microsoft Edge";
+  return (
+    <Image
+      src={src}
+      alt={alt}
+      width={px}
+      height={px}
+      className={`${className} shrink-0 rounded-md object-contain`}
+    />
+  );
+}
+
+// ── MODEL OPTION (dropdown row) ────────────────────────────────────────
+function ModelOption({
+  engineId,
+  name,
+  desc,
+  active,
+  onClick,
+}: {
+  engineId: "premium" | "cloud";
+  name: string;
+  desc: string;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={`flex w-full items-start gap-3 rounded-lg p-2.5 text-left transition-colors ${
+        active ? "bg-foreground/10" : "hover:bg-muted/50"
+      }`}
+    >
+      <EngineLogo engine={engineId} size="md" />
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-1.5">
+          <span className="text-sm font-semibold">{name}</span>
+          {active && (
+            <CheckCircle2 className="h-3 w-3 text-emerald-500" />
+          )}
+        </div>
+        <div className="mt-0.5 text-[11px] text-muted-foreground line-clamp-2">{desc}</div>
+      </div>
+    </button>
   );
 }
