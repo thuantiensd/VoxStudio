@@ -48,6 +48,72 @@
   --radius-4xl: calc(var(--radius) * 2.6);
 }
 
+/* Account workspace — monochrome dashboard mapped from the desktop app. */
+.account-mono {
+  color-scheme: dark;
+  background:
+    radial-gradient(circle at 15% 0%, rgba(255,255,255,0.08), transparent 28%),
+    #050505 !important;
+}
+.account-mono [class*="bg-[#060913]"],
+.account-mono [class*="bg-[#070a15]"],
+.account-mono [class*="bg-[#111827]"] {
+  background-color: #050505 !important;
+}
+.account-mono [class*="bg-violet-"],
+.account-mono [class*="bg-purple-"],
+.account-mono [class*="bg-fuchsia-"],
+.account-mono [class*="bg-pink-"],
+.account-mono [class*="bg-rose-"],
+.account-mono [class*="bg-blue-"],
+.account-mono [class*="bg-sky-"],
+.account-mono [class*="bg-emerald-"],
+.account-mono [class*="bg-green-"],
+.account-mono [class*="bg-orange-"],
+.account-mono [class*="bg-amber-"],
+.account-mono [class*="bg-red-"] {
+  background-color: rgba(255,255,255,0.10) !important;
+}
+.account-mono [class*="text-violet-"],
+.account-mono [class*="text-purple-"],
+.account-mono [class*="text-fuchsia-"],
+.account-mono [class*="text-pink-"],
+.account-mono [class*="text-rose-"],
+.account-mono [class*="text-blue-"],
+.account-mono [class*="text-sky-"],
+.account-mono [class*="text-emerald-"],
+.account-mono [class*="text-green-"],
+.account-mono [class*="text-orange-"],
+.account-mono [class*="text-amber-"],
+.account-mono [class*="text-red-"] {
+  color: #f4f4f5 !important;
+}
+.account-mono [class*="border-violet-"],
+.account-mono [class*="border-purple-"],
+.account-mono [class*="border-fuchsia-"],
+.account-mono [class*="border-pink-"],
+.account-mono [class*="border-rose-"],
+.account-mono [class*="border-blue-"],
+.account-mono [class*="border-sky-"],
+.account-mono [class*="border-emerald-"],
+.account-mono [class*="border-green-"],
+.account-mono [class*="border-orange-"],
+.account-mono [class*="border-amber-"],
+.account-mono [class*="border-red-"] {
+  border-color: rgba(255,255,255,0.22) !important;
+}
+.account-mono [class*="from-"],
+.account-mono [class*="to-"],
+.account-mono [class*="via-"] {
+  --tw-gradient-from: #ffffff var(--tw-gradient-from-position) !important;
+  --tw-gradient-to: #52525b var(--tw-gradient-to-position) !important;
+  --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to) !important;
+}
+.account-mono a,
+.account-mono button {
+  letter-spacing: 0;
+}
+
 /* ──────────────────────────────────────────────────────────
    VoxStudio brand — purple-first studio identity
    Primary:   #7C5CFF (purple-violet) — actions, brand
@@ -59,7 +125,7 @@
    Identity tách khỏi KingCong (xanh) — purple cho "studio creator" vibe.
 ────────────────────────────────────────────────────────── */
 :root {
-  --font-sans: "Be Vietnam Pro", Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-sans: Inter, "SF Pro Text", "Be Vietnam Pro", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --font-geist-mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
 
   /* Light mode — productivity (dashboard, account pages) */
@@ -117,6 +183,23 @@
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 14%);
   --ring: oklch(0.7 0.24 290);
+}
+
+/* Account dashboard — neutral pure-black palette (override dark vars) */
+.dark .theme-black,
+.theme-black.dark {
+  --background: oklch(0.04 0 0);                /* ~#0a0a0a — gần đen tuyệt đối */
+  --foreground: oklch(0.97 0 0);
+  --card: oklch(0.09 0 0);                      /* ~#161616 */
+  --card-foreground: oklch(0.97 0 0);
+  --popover: oklch(0.09 0 0);
+  --popover-foreground: oklch(0.97 0 0);
+  --secondary: oklch(0.13 0 0);
+  --secondary-foreground: oklch(0.97 0 0);
+  --muted: oklch(0.13 0 0);
+  --muted-foreground: oklch(0.62 0 0);
+  --border: oklch(1 0 0 / 8%);
+  --input: oklch(1 0 0 / 12%);
   --chart-1: oklch(0.7 0.24 290);
   --chart-2: oklch(0.78 0.22 340);
   --chart-3: oklch(0.74 0.16 250);
@@ -256,5 +339,389 @@
   .marquee-mask {
     -webkit-mask-image: linear-gradient(to right, transparent, #000 10%, #000 90%, transparent);
     mask-image: linear-gradient(to right, transparent, #000 10%, #000 90%, transparent);
+  }
+
+  .account-pro {
+    --account-bg: #f5f6f8;
+    --account-surface: #ffffff;
+    --account-surface-muted: #f8fafc;
+    --account-sidebar: #f9fafb;
+    --account-border: rgba(15, 23, 42, 0.1);
+    --account-border-strong: rgba(15, 23, 42, 0.16);
+    --account-text: #0f172a;
+    --account-muted: #64748b;
+    --account-subtle: #94a3b8;
+    --account-accent: #111827;
+    --account-accent-text: #ffffff;
+    background: var(--account-bg);
+    color: var(--account-text);
+    font-family: Inter, "SF Pro Text", "Be Vietnam Pro", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11", "ss01";
+    letter-spacing: 0;
+  }
+
+  .dark .account-pro {
+    --account-bg: #07090d;
+    --account-surface: #0d1117;
+    --account-surface-muted: #111722;
+    --account-sidebar: #090c12;
+    --account-border: rgba(148, 163, 184, 0.14);
+    --account-border-strong: rgba(148, 163, 184, 0.22);
+    --account-text: #f8fafc;
+    --account-muted: #94a3b8;
+    --account-subtle: #64748b;
+    --account-accent: #f8fafc;
+    --account-accent-text: #07090d;
+  }
+
+  .account-sidebar {
+    background: var(--account-sidebar);
+    border-color: var(--account-border);
+  }
+
+  .account-topbar {
+    background: color-mix(in oklab, var(--account-bg) 88%, transparent);
+    border-color: var(--account-border);
+    backdrop-filter: blur(16px);
+  }
+
+  .account-card {
+    background: var(--account-surface);
+    border: 1px solid var(--account-border);
+    border-radius: 12px;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+  }
+
+  .dark .account-card {
+    box-shadow: 0 1px 0 rgba(255, 255, 255, 0.03);
+  }
+
+  .account-tile {
+    background: var(--account-surface-muted);
+    border: 1px solid var(--account-border);
+    border-radius: 10px;
+    transition: border-color 160ms ease, background 160ms ease, transform 160ms ease;
+  }
+  .account-tile:hover {
+    border-color: var(--account-border-strong);
+    transform: translateY(-1px);
+  }
+
+  .account-field {
+    background: var(--account-surface);
+    border: 1px solid var(--account-border);
+    border-radius: 10px;
+    color: var(--account-text);
+  }
+  .account-field:focus {
+    border-color: var(--account-border-strong);
+    box-shadow: 0 0 0 3px color-mix(in oklab, var(--account-accent) 10%, transparent);
+  }
+
+  .account-primary {
+    background: var(--account-accent);
+    color: var(--account-accent-text);
+    border-radius: 10px;
+  }
+
+  .account-muted {
+    color: var(--account-muted);
+  }
+
+  .deck-root {
+    --deck-bg: #f4f5f7;
+    --deck-surface: #ffffff;
+    --deck-panel: #f8f9fb;
+    --deck-inset: #f2f4f7;
+    --deck-line: rgba(16, 24, 40, 0.09);
+    --deck-line-strong: rgba(16, 24, 40, 0.18);
+    --deck-text: #101828;
+    --deck-muted: #667085;
+    --deck-subtle: #98a2b3;
+    --deck-ink: #111827;
+    --deck-paper: #ffffff;
+    min-height: 100vh;
+    background: var(--deck-bg);
+    color: var(--deck-text);
+    font-family: var(--font-inter), var(--font-be-vietnam), ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11", "ss01";
+    letter-spacing: 0;
+  }
+
+  .dark .deck-root {
+    --deck-bg: #f4f5f7;
+    --deck-surface: #ffffff;
+    --deck-panel: #f8f9fb;
+    --deck-inset: #f2f4f7;
+    --deck-line: rgba(16, 24, 40, 0.09);
+    --deck-line-strong: rgba(16, 24, 40, 0.18);
+    --deck-text: #101828;
+    --deck-muted: #667085;
+    --deck-subtle: #98a2b3;
+    --deck-ink: #111827;
+    --deck-paper: #ffffff;
+    background: var(--deck-bg);
+  }
+
+  .deck-rail {
+    flex-direction: column;
+    align-items: center;
+    padding: 18px 0;
+    background: #080b12;
+    color: #f8fafc;
+    border-right: 1px solid rgba(255,255,255,0.1);
+  }
+
+  .deck-rail-button {
+    display: grid;
+    place-items: center;
+    width: 42px;
+    height: 42px;
+    border-radius: 14px;
+    color: rgba(248, 250, 252, 0.56);
+    transition: background 160ms ease, color 160ms ease, transform 160ms ease;
+  }
+  .deck-rail-button:hover {
+    background: rgba(255,255,255,0.08);
+    color: #fff;
+  }
+  .deck-rail-button-active {
+    background: #fff;
+    color: #07090d;
+    box-shadow: 0 12px 30px rgba(0,0,0,0.22);
+  }
+
+  .deck-panel {
+    min-height: 100vh;
+    padding: 24px;
+    background: var(--deck-panel);
+    border-right: 1px solid var(--deck-line);
+  }
+  .deck-panel-section {
+    padding: 8px 2px 18px;
+  }
+
+  .deck-topbar {
+    border-bottom: 1px solid var(--deck-line);
+    background: rgba(244, 245, 247, 0.88);
+    backdrop-filter: blur(16px);
+  }
+
+  .deck-card,
+  .deck-hero,
+  .deck-tool-hero {
+    background: var(--deck-surface);
+    border: 1px solid var(--deck-line);
+    border-radius: 16px;
+    box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04);
+  }
+  .dark .deck-card,
+  .dark .deck-hero,
+  .dark .deck-tool-hero {
+    box-shadow: 0 1px 0 rgba(255,255,255,0.03);
+  }
+
+  .deck-hero {
+    display: grid;
+    gap: 28px;
+    padding: 30px;
+  }
+  @media (min-width: 1024px) {
+    .deck-hero {
+      grid-template-columns: minmax(0, 1.25fr) 420px;
+      align-items: end;
+    }
+  }
+  .deck-hero-grid {
+    display: grid;
+    gap: 10px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .deck-tool-hero {
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+    padding: 26px;
+  }
+  @media (min-width: 1280px) {
+    .deck-tool-hero {
+      flex-direction: row;
+      align-items: center;
+      justify-content: space-between;
+    }
+  }
+
+  .deck-plan-card {
+    margin-top: 14px;
+    padding: 20px;
+    border-radius: 18px;
+    background: #101828;
+    color: #f8fafc;
+    box-shadow: 0 18px 48px rgba(16, 24, 40, 0.18);
+  }
+  .dark .deck-plan-card {
+    background: linear-gradient(150deg, rgba(248,250,252,0.11), rgba(148,163,184,0.07));
+    border: 1px solid rgba(248,250,252,0.12);
+    box-shadow: none;
+  }
+
+  .deck-inset {
+    background: var(--deck-inset);
+    border: 1px solid var(--deck-line);
+    border-radius: 12px;
+  }
+
+  .deck-launch-card {
+    min-height: 166px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    padding: 20px;
+    text-align: left;
+    background: var(--deck-surface);
+    border: 1px solid var(--deck-line);
+    border-radius: 16px;
+    transition: transform 160ms ease, border-color 160ms ease, background 160ms ease;
+  }
+  .deck-launch-card:hover {
+    transform: translateY(-2px);
+    border-color: var(--deck-line-strong);
+    box-shadow: 0 14px 34px rgba(16, 24, 40, 0.08);
+  }
+  .deck-launch-icon {
+    display: grid;
+    place-items: center;
+    width: 44px;
+    height: 44px;
+    border-radius: 12px;
+    background: var(--deck-inset);
+    color: var(--deck-text);
+  }
+
+  .deck-field {
+    background: var(--deck-inset);
+    color: var(--deck-text);
+    border: 1px solid var(--deck-line);
+    border-radius: 12px;
+    outline: none;
+  }
+  .deck-field:focus {
+    border-color: var(--deck-line-strong);
+    box-shadow: 0 0 0 4px color-mix(in oklab, var(--deck-ink) 8%, transparent);
+  }
+
+  .deck-upload {
+    min-height: 360px;
+    display: flex;
+    cursor: pointer;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    border: 1px dashed var(--deck-line-strong);
+    border-radius: 16px;
+    background: var(--deck-inset);
+    padding: 32px;
+    transition: background 160ms ease, border-color 160ms ease;
+  }
+  .deck-upload:hover {
+    background: var(--deck-surface);
+  }
+
+  .deck-primary-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    min-height: 42px;
+    padding: 0 16px;
+    border-radius: 12px;
+    background: var(--deck-ink);
+    color: var(--deck-paper);
+    font-size: 14px;
+    font-weight: 650;
+    transition: opacity 160ms ease, transform 160ms ease;
+  }
+  .deck-primary-button:hover {
+    opacity: 0.92;
+  }
+  .deck-primary-button:disabled {
+    opacity: 0.55;
+  }
+
+  .deck-ghost-button {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 38px;
+    padding: 0 13px;
+    border-radius: 12px;
+    border: 1px solid var(--deck-line);
+    background: var(--deck-surface);
+    font-size: 13px;
+    font-weight: 650;
+  }
+
+  .deck-icon-button {
+    display: grid;
+    place-items: center;
+    width: 42px;
+    height: 42px;
+    border-radius: 12px;
+    border: 1px solid var(--deck-line);
+    background: var(--deck-surface);
+  }
+
+  .deck-mobile-tab {
+    flex-shrink: 0;
+    border: 1px solid var(--deck-line);
+    background: var(--deck-surface);
+    border-radius: 999px;
+    padding: 8px 12px;
+    font-size: 12px;
+    font-weight: 650;
+    color: var(--deck-muted);
+  }
+  .deck-mobile-tab-active {
+    background: var(--deck-ink);
+    color: var(--deck-paper);
+  }
+
+  .deck-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 38px;
+    padding: 0 13px;
+    border-radius: 999px;
+    background: var(--deck-inset);
+    border: 1px solid var(--deck-line);
+    font-size: 13px;
+    font-weight: 650;
+  }
+
+  .deck-kicker {
+    color: var(--deck-muted);
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.16em;
+  }
+  .deck-copy {
+    color: var(--deck-muted);
+    font-size: 14px;
+    line-height: 1.65;
+  }
+  .deck-muted {
+    color: var(--deck-muted);
+  }
+  .deck-empty {
+    display: grid;
+    place-items: center;
+    text-align: center;
+    color: var(--deck-muted);
+    border: 1px dashed var(--deck-line-strong);
+    border-radius: 16px;
+    gap: 10px;
   }
 }
