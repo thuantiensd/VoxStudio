@@ -34,6 +34,8 @@ import {
   TrendingUp,
   Clock,
   Mail,
+  Sparkles,
+  ShieldCheck,
 } from "lucide-react";
 import { Link } from "@/i18n/navigation";
 import { useAuth } from "@/lib/auth-context";
@@ -51,13 +53,12 @@ export default function AccountPage() {
   const [activeTab, setActiveTab] = useState<Tab>("overview");
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [voiceOpen, setVoiceOpen] = useState(true);
-  const [theme, setTheme] = useState<"dark" | "light">("dark");
+  const [theme, setTheme] = useState<"dark" | "light">(() => {
+    if (typeof window === "undefined") return "dark";
+    return (localStorage.getItem("voxstudio:theme") as "dark" | "light" | null) || "dark";
+  });
 
   // Theme: toggle `dark` class on <html>
-  useEffect(() => {
-    const saved = localStorage.getItem("voxstudio:theme") as "dark" | "light" | null;
-    if (saved) setTheme(saved);
-  }, []);
   useEffect(() => {
     document.documentElement.classList.toggle("dark", theme === "dark");
     localStorage.setItem("voxstudio:theme", theme);
@@ -412,7 +413,7 @@ function TabButton({
   );
 }
 
-// ── OVERVIEW TAB ────────────────────────────────────────────────────────
+// ── OVERVIEW TAB — premium dashboard layout ───────────────────────────
 function OverviewTab({
   user,
   planName,
@@ -431,124 +432,347 @@ function OverviewTab({
   totalSpent: number;
   t: ReturnType<typeof useTranslations>;
 }) {
-  const initial = (user.name || user.email)[0].toUpperCase();
   const displayName = user.name || user.email.split("@")[0];
-  const joinedAt = new Date().toLocaleDateString("vi-VN", {
-    month: "long",
-    year: "numeric",
-  });
+  const credits = user.credit_balance || 0;
+  // Mock usage state — sẽ wire vào API sau
+  const ttsUsed = 0;
+  const ttsTotal = 1_000_000;
+  const dubUsed = 0;
+  const dubTotal = 30;
+  const ttsPct = Math.min(100, (ttsUsed / Math.max(1, ttsTotal)) * 100);
+  const dubPct = Math.min(100, (dubUsed / Math.max(1, dubTotal)) * 100);
 
   return (
-    <div className="space-y-5">
-      {/* Profile card */}
-      <section className="rounded-2xl border border-border/60 bg-card/40 p-5 sm:p-6">
-        <div className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex items-center gap-4">
-            <div className="grid h-16 w-16 shrink-0 place-items-center rounded-full bg-foreground text-2xl font-bold text-background">
-              {initial}
-            </div>
-            <div>
-              <h2 className="text-2xl font-bold tracking-tight">{displayName}</h2>
-              <p className="mt-1 inline-flex items-center gap-1.5 text-sm text-muted-foreground">
-                <Mail className="h-3.5 w-3.5" />
-                {user.email}
-              </p>
-              <div className="mt-3 flex flex-wrap gap-2">
-                <Badge>
-                  {isPaid && <Crown className="h-3 w-3" />}
-                  {isPaid ? planName : t("memberLabel")}
-                </Badge>
-                <Badge>
-                  <Clock className="h-3 w-3" />
-                  {t("joinedLabel", { date: joinedAt })}
-                </Badge>
-              </div>
+    <div className="space-y-8">
+      {/* HERO — greeting với subtle gradient */}
+      <div className="relative overflow-hidden rounded-3xl border border-border/60 bg-gradient-to-br from-card/60 via-card/40 to-card/20 p-6 sm:p-8">
+        <div
+          aria-hidden
+          className="pointer-events-none absolute -right-20 -top-20 h-64 w-64 rounded-full bg-primary/[0.08] blur-3xl"
+        />
+        <div className="relative flex flex-col gap-6 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground mb-2">
+              {t("overview.welcomeBack")}
+            </p>
+            <h1 className="text-3xl font-bold tracking-tight sm:text-4xl">
+              {displayName}
+            </h1>
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <span className="inline-flex items-center gap-1.5 rounded-full border border-border/60 bg-background/40 px-2.5 py-1 text-xs">
+                {isPaid && <Crown className="h-3 w-3 text-primary" />}
+                <span className="font-semibold">{planName}</span>
+              </span>
+              <span className="inline-flex items-center gap-1.5 rounded-full border border-border/60 bg-background/40 px-2.5 py-1 text-xs">
+                <Mail className="h-3 w-3 text-muted-foreground" />
+                <span className="text-muted-foreground">{user.email}</span>
+              </span>
             </div>
           </div>
-          <div className="flex flex-col gap-3 sm:flex-row">
-            <BalanceCard
-              label={t("creditsLabel")}
-              value={(user.credit_balance || 0).toLocaleString("vi-VN")}
-              icon={Zap}
-            />
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
             <Link
               href="/pricing"
-              className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-foreground/40 bg-foreground px-5 py-3 text-sm font-semibold text-background transition-opacity hover:opacity-90"
+              className="inline-flex items-center justify-center gap-2 rounded-xl border border-border/60 bg-background/40 px-4 py-2.5 text-sm font-semibold transition-colors hover:bg-muted/40"
             >
-              <ArrowRight className="h-3.5 w-3.5" />
-              {t("topupCta")}
+              <Zap className="h-3.5 w-3.5 text-primary" />
+              {credits.toLocaleString("vi-VN")} credits
+            </Link>
+            {!isPaid && (
+              <Link
+                href="/pricing"
+                className="inline-flex items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground shadow-lg shadow-primary/30 transition-transform hover:scale-105"
+              >
+                <Sparkles className="h-3.5 w-3.5" />
+                {t("upgrade")}
+              </Link>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* QUICK TOOLS — 4 cards với gradient icon */}
+      <section>
+        <div className="mb-4 flex items-center justify-between">
+          <h2 className="text-xs font-semibold uppercase tracking-[0.15em] text-muted-foreground">
+            {t("overview.quickActions")}
+          </h2>
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <ToolCard
+            icon={FileText}
+            label={t("nav.tts")}
+            desc={t("descTts")}
+            href="/#features"
+            gradient="from-violet-500/20 to-fuchsia-500/10"
+            iconClass="text-violet-400"
+          />
+          <ToolCard
+            icon={Film}
+            label={t("nav.dubbing")}
+            desc={t("descDubbing")}
+            href="/#features"
+            gradient="from-fuchsia-500/20 to-pink-500/10"
+            iconClass="text-fuchsia-400"
+          />
+          <ToolCard
+            icon={Wand2}
+            label={t("nav.cloning")}
+            desc={t("descCloning")}
+            href="/#features"
+            gradient="from-pink-500/20 to-orange-500/10"
+            iconClass="text-pink-400"
+          />
+          <ToolCard
+            icon={Activity}
+            label={t("ctaNewOrder")}
+            desc={t("overview.startNewProject")}
+            href="/#features"
+            gradient="from-emerald-500/20 to-teal-500/10"
+            iconClass="text-emerald-400"
+          />
+        </div>
+      </section>
+
+      {/* TWO-COL: Usage (left 2/3) + Plan/Activity (right 1/3) */}
+      <section className="grid gap-5 lg:grid-cols-3">
+        {/* USAGE — 2 cols */}
+        <div className="lg:col-span-2 rounded-2xl border border-border/60 bg-card/40 p-5 sm:p-6">
+          <div className="mb-5 flex items-center justify-between">
+            <div>
+              <h3 className="text-base font-semibold">{t("overview.usageTitle")}</h3>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                {t("overview.usageSubtitle")}
+              </p>
+            </div>
+            <Link
+              href="/pricing"
+              className="text-xs font-semibold text-primary hover:underline underline-offset-2"
+            >
+              {t("overview.upgradeForMore")} →
             </Link>
           </div>
-        </div>
-      </section>
 
-      {/* 4 stat cards */}
-      <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard
-          icon={TrendingUp}
-          label={t("statSpent")}
-          value={`${totalSpent.toLocaleString("vi-VN")}đ`}
-        />
-        <StatCard
-          icon={ShoppingCart}
-          label={t("statOrders")}
-          value={paidCount.toString()}
-        />
-        <StatCard
-          icon={Clock}
-          label={t("statPending")}
-          value={pendingCount.toString()}
-        />
-        <StatCard
-          icon={CheckCircle2}
-          label={t("statCompleted")}
-          value={paidCount.toString()}
-        />
-      </section>
-
-      {/* Quick action buttons */}
-      <section className="grid gap-3 sm:grid-cols-2">
-        <ActionButton
-          icon={Plus}
-          label={t("ctaNewOrder")}
-          href="/#features"
-          primary
-        />
-        <ActionButton icon={Wallet} label={t("ctaTopup")} href="/pricing" />
-      </section>
-
-      {/* Recent activity */}
-      <section className="grid gap-4 lg:grid-cols-2">
-        <div className="rounded-2xl border border-border/60 bg-card/40 p-5">
-          <div className="mb-3 flex items-center justify-between">
-            <h3 className="font-semibold">{t("popularServices")}</h3>
-          </div>
-          <div className="space-y-2.5">
-            <ServiceRow icon={FileText} label={t("nav.tts")} desc={t("descTts")} />
-            <ServiceRow
+          <div className="space-y-5">
+            <UsageMeter
+              icon={FileText}
+              label={t("usage.tts")}
+              used={ttsUsed}
+              total={ttsTotal}
+              unit={t("usage.unitChars")}
+              pct={ttsPct}
+            />
+            <UsageMeter
               icon={Film}
-              label={t("nav.dubbing")}
-              desc={t("descDubbing")}
+              label={t("usage.dubbing")}
+              used={dubUsed}
+              total={dubTotal}
+              unit={t("usage.unitMinutes")}
+              pct={dubPct}
             />
-            <ServiceRow
-              icon={Wand2}
-              label={t("nav.cloning")}
-              desc={t("descCloning")}
+          </div>
+
+          {/* Stats inline */}
+          <div className="mt-6 grid grid-cols-3 gap-3 border-t border-border/30 pt-5">
+            <MiniStat label={t("statCompleted")} value={paidCount} icon={CheckCircle2} />
+            <MiniStat label={t("statPending")} value={pendingCount} icon={Clock} />
+            <MiniStat
+              label={t("statSpent")}
+              value={totalSpent === 0 ? "—" : `${(totalSpent / 1_000).toFixed(0)}k`}
+              icon={TrendingUp}
             />
           </div>
         </div>
-        <div className="rounded-2xl border border-border/60 bg-card/40 p-5">
-          <div className="mb-3 flex items-center justify-between">
-            <h3 className="font-semibold">{t("recentActivity")}</h3>
+
+        {/* RIGHT: Plan card + recent activity */}
+        <div className="space-y-5">
+          {/* Plan card với glow */}
+          <div
+            className={`relative overflow-hidden rounded-2xl border p-5 ${
+              isPaid
+                ? "border-primary/30 bg-gradient-to-br from-primary/[0.08] via-card/40 to-card/20"
+                : "border-border/60 bg-card/40"
+            }`}
+          >
+            {isPaid && (
+              <div
+                aria-hidden
+                className="pointer-events-none absolute -right-10 -top-10 h-32 w-32 rounded-full bg-primary/20 blur-3xl"
+              />
+            )}
+            <div className="relative">
+              <div className="mb-3 flex items-center gap-1.5">
+                {isPaid && <Crown className="h-3.5 w-3.5 text-primary" />}
+                <span className="text-[10px] font-semibold uppercase tracking-[0.15em] text-muted-foreground">
+                  {t("planTitle")}
+                </span>
+              </div>
+              <div className="text-2xl font-bold tracking-tight">{planName}</div>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {!isPaid ? t("planFree") : t("planLifetime")}
+              </p>
+              <Link
+                href="/pricing"
+                className="mt-4 inline-flex w-full items-center justify-center gap-1.5 rounded-lg border border-border/60 bg-background/40 px-3 py-2 text-xs font-semibold transition-colors hover:bg-muted/40"
+              >
+                {isPaid ? t("changePlan") : t("upgrade")}
+                <ArrowRight className="h-3 w-3" />
+              </Link>
+            </div>
           </div>
-          <div className="rounded-xl border border-dashed border-border/60 p-6 text-center">
-            <Activity className="mx-auto h-7 w-7 text-muted-foreground/40" />
-            <p className="mt-2 text-sm text-muted-foreground">
-              {t("recentEmpty")}
-            </p>
+
+          {/* Recent activity */}
+          <div className="rounded-2xl border border-border/60 bg-card/40 p-5">
+            <h3 className="mb-3 text-xs font-semibold uppercase tracking-[0.15em] text-muted-foreground">
+              {t("recentActivity")}
+            </h3>
+            <div className="rounded-lg border border-dashed border-border/40 p-5 text-center">
+              <Activity className="mx-auto h-6 w-6 text-muted-foreground/30" />
+              <p className="mt-2 text-xs text-muted-foreground">
+                {t("recentEmpty")}
+              </p>
+            </div>
           </div>
         </div>
       </section>
+
+      {/* TRUST FOOTER — inline stats */}
+      <section className="rounded-2xl border border-border/40 bg-card/20 p-5">
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+          <TrustStat icon={Sparkles} label="10K+" sub={t("overview.trustUsers")} />
+          <TrustStat icon={Film} label="1M+" sub={t("overview.trustVideos")} />
+          <TrustStat icon={Activity} label="99.9%" sub={t("overview.trustUptime")} />
+          <TrustStat icon={ShieldCheck} label="24/7" sub={t("overview.trustSupport")} />
+        </div>
+      </section>
+    </div>
+  );
+}
+
+// Tool card — premium gradient hover
+function ToolCard({
+  icon: Icon,
+  label,
+  desc,
+  href,
+  gradient,
+  iconClass,
+}: {
+  icon: React.ComponentType<{ className?: string }>;
+  label: string;
+  desc: string;
+  href: string;
+  gradient: string;
+  iconClass: string;
+}) {
+  return (
+    <Link
+      href={href}
+      className="group relative overflow-hidden rounded-2xl border border-border/60 bg-card/40 p-5 transition-all hover:-translate-y-1 hover:border-primary/30 hover:shadow-lg hover:shadow-primary/10"
+    >
+      <div
+        aria-hidden
+        className={`pointer-events-none absolute inset-0 bg-gradient-to-br ${gradient} opacity-0 transition-opacity group-hover:opacity-100`}
+      />
+      <div className="relative">
+        <div className={`mb-4 flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br ${gradient} ${iconClass}`}>
+          <Icon className="h-5 w-5" />
+        </div>
+        <h3 className="text-sm font-semibold tracking-tight">{label}</h3>
+        <p className="mt-1 text-xs text-muted-foreground line-clamp-2">{desc}</p>
+        <ArrowRight className="absolute right-0 top-0 h-3.5 w-3.5 text-muted-foreground transition-all group-hover:translate-x-1 group-hover:text-foreground" />
+      </div>
+    </Link>
+  );
+}
+
+// Usage meter — gradient progress bar
+function UsageMeter({
+  icon: Icon,
+  label,
+  used,
+  total,
+  unit,
+  pct,
+}: {
+  icon: React.ComponentType<{ className?: string }>;
+  label: string;
+  used: number;
+  total: number;
+  unit: string;
+  pct: number;
+}) {
+  const isUnlimited = total === -1;
+  const barColor = pct > 90
+    ? "from-red-500 to-orange-500"
+    : pct > 70
+      ? "from-yellow-500 to-orange-500"
+      : "from-primary to-fuchsia-500";
+
+  return (
+    <div>
+      <div className="mb-2 flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <Icon className="h-3.5 w-3.5 text-muted-foreground" />
+          <span className="text-sm font-medium">{label}</span>
+        </div>
+        <div className="font-mono text-xs text-muted-foreground">
+          <span className="font-semibold text-foreground">
+            {used.toLocaleString("vi-VN")}
+          </span>
+          {" / "}
+          {isUnlimited ? "∞" : total.toLocaleString("vi-VN")} {unit}
+        </div>
+      </div>
+      <div className="h-1.5 overflow-hidden rounded-full bg-muted/40">
+        <div
+          className={`h-full rounded-full bg-gradient-to-r ${barColor} transition-all duration-500`}
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+    </div>
+  );
+}
+
+// Mini stat — for inline rows
+function MiniStat({
+  icon: Icon,
+  label,
+  value,
+}: {
+  icon: React.ComponentType<{ className?: string }>;
+  label: string;
+  value: string | number;
+}) {
+  return (
+    <div className="flex items-center gap-2.5">
+      <div className="flex h-8 w-8 items-center justify-center rounded-lg border border-border/40 bg-background/40">
+        <Icon className="h-3.5 w-3.5 text-muted-foreground" />
+      </div>
+      <div className="min-w-0">
+        <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</div>
+        <div className="text-sm font-semibold tracking-tight truncate">{value}</div>
+      </div>
+    </div>
+  );
+}
+
+// Trust stat — bottom footer
+function TrustStat({
+  icon: Icon,
+  label,
+  sub,
+}: {
+  icon: React.ComponentType<{ className?: string }>;
+  label: string;
+  sub: string;
+}) {
+  return (
+    <div className="flex items-center gap-3">
+      <Icon className="h-4 w-4 text-primary" />
+      <div>
+        <div className="text-base font-bold tracking-tight">{label}</div>
+        <div className="text-[11px] text-muted-foreground">{sub}</div>
+      </div>
     </div>
   );
 }

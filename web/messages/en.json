@@ -68,6 +68,7 @@
     "statusCancelled": "Cancelled",
     "verifyBanner": "Email not verified — you need to verify before purchasing.",
     "verifyAction": "Verify now",
+    "changePlan": "Change plan",
     "memberLabel": "Member",
     "verified": "Verified",
     "notVerified": "Not verified",
@@ -121,6 +122,7 @@
     "overview": {
       "title": "Hi, {name} 👋",
       "subtitle": "This is your account dashboard.",
+      "welcomeBack": "Welcome back",
       "expires": "Expires",
       "noExpiry": "—",
       "verifyStatus": "Email verification",
@@ -132,7 +134,15 @@
       "actionTts": "Text-to-Speech",
       "actionDub": "Video dubbing",
       "actionClone": "Voice cloning",
-      "actionLanguages": "646 languages"
+      "actionLanguages": "646 languages",
+      "startNewProject": "Create new project — takes seconds",
+      "usageTitle": "Usage this month",
+      "usageSubtitle": "Quotas reset monthly. Run out? Top up credits.",
+      "upgradeForMore": "Upgrade for more",
+      "trustUsers": "Trusted creators",
+      "trustVideos": "Videos processed",
+      "trustUptime": "Uptime",
+      "trustSupport": "Support"
     },
     "profile": {
       "title": "Profile",
@@ -161,6 +171,8 @@
       "tts": "TTS characters",
       "dubbing": "Dubbing minutes",
       "cloning": "Voice clones",
+      "unitChars": "chars",
+      "unitMinutes": "min",
       "coming": "Coming soon",
       "empty": "Detailed usage tracking will be available in the next update."
     },

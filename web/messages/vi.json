@@ -68,6 +68,7 @@
     "statusCancelled": "Đã huỷ",
     "verifyBanner": "Email chưa được xác thực — bạn cần xác thực để mua gói.",
     "verifyAction": "Xác thực ngay",
+    "changePlan": "Đổi gói",
     "memberLabel": "Thành viên",
     "verified": "Đã xác thực",
     "notVerified": "Chưa xác thực",
@@ -121,6 +122,7 @@
     "overview": {
       "title": "Xin chào, {name} 👋",
       "subtitle": "Đây là bảng điều khiển tài khoản của bạn.",
+      "welcomeBack": "Chào mừng trở lại",
       "expires": "Hết hạn",
       "noExpiry": "—",
       "verifyStatus": "Xác thực email",
@@ -132,7 +134,15 @@
       "actionTts": "Đọc văn bản (TTS)",
       "actionDub": "Lồng tiếng video",
       "actionClone": "Nhân bản giọng",
-      "actionLanguages": "646 ngôn ngữ"
+      "actionLanguages": "646 ngôn ngữ",
+      "startNewProject": "Tạo project mới — chỉ vài giây",
+      "usageTitle": "Sử dụng tháng này",
+      "usageSubtitle": "Quota tự reset đầu tháng. Hết quota? Topup credits.",
+      "upgradeForMore": "Nâng cấp để có thêm",
+      "trustUsers": "Creator tin dùng",
+      "trustVideos": "Video đã xử lý",
+      "trustUptime": "Uptime",
+      "trustSupport": "Hỗ trợ"
     },
     "profile": {
       "title": "Thông tin hồ sơ",
@@ -161,6 +171,8 @@
       "tts": "Ký tự TTS",
       "dubbing": "Phút lồng tiếng",
       "cloning": "Voice clone",
+      "unitChars": "ký tự",
+      "unitMinutes": "phút",
       "coming": "Sắp có",
       "empty": "Tính năng theo dõi chi tiết sẽ ra mắt trong bản cập nhật tiếp theo."
     },
