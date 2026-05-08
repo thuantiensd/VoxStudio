@@ -1163,14 +1163,14 @@ function TtsTab() {
           )}
         </section>
 
-        <aside className="flex min-h-[calc(100vh-88px)] flex-col overflow-hidden rounded-2xl border border-border/60 bg-card/70 shadow-sm">
-          <div className="flex items-center justify-between gap-3 border-b border-border/60 p-4">
+        <aside className="flex min-h-[calc(100vh-88px)] flex-col rounded-2xl border border-border/60 bg-card/70 shadow-sm">
+          <div className="relative flex items-center justify-between gap-3 border-b border-border/60 p-4">
             <div className="inline-flex items-center gap-2">
-              <button onClick={() => setPanel("settings")} className={`inline-flex h-9 items-center gap-2 rounded-lg px-3 text-xs font-semibold ${panel === "settings" ? "bg-foreground text-background" : "bg-muted/40 text-muted-foreground hover:text-foreground"}`}>
+              <button type="button" onClick={() => setPanel("settings")} className={`inline-flex h-9 items-center gap-2 rounded-lg px-3 text-xs font-semibold ${panel === "settings" ? "bg-foreground text-background" : "bg-muted/40 text-muted-foreground hover:text-foreground"}`}>
                 <SettingsIcon className="h-3.5 w-3.5" />
                 Cài đặt
               </button>
-              <button onClick={() => setPanel("history")} className={`inline-flex h-9 items-center gap-2 rounded-lg px-3 text-xs font-semibold ${panel === "history" ? "bg-foreground text-background" : "bg-muted/40 text-muted-foreground hover:text-foreground"}`}>
+              <button type="button" onClick={() => setPanel("history")} className={`inline-flex h-9 items-center gap-2 rounded-lg px-3 text-xs font-semibold ${panel === "history" ? "bg-foreground text-background" : "bg-muted/40 text-muted-foreground hover:text-foreground"}`}>
                 <Clock className="h-3.5 w-3.5" />
                 Lịch sử
               </button>
@@ -1190,7 +1190,7 @@ function TtsTab() {
                 </button>
 
                 {modelMenuOpen && (
-                  <div className="absolute right-0 top-full z-50 mt-1.5 w-72 overflow-hidden rounded-xl border border-border/60 bg-popover shadow-2xl">
+                  <div className="absolute right-0 top-[calc(100%+6px)] z-[60] w-72 overflow-hidden rounded-xl border border-border/60 bg-popover shadow-2xl">
                     <div className="p-1">
                       <ModelOption
                         active={engine === "premium"}
