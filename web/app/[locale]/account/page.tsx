@@ -1148,19 +1148,6 @@ function TtsTab() {
             </div>
           )}
 
-          {result && (
-            <div className="mt-4 rounded-xl border border-border/60 bg-card/50 p-4">
-              <div className="mb-2 flex items-center justify-between gap-3 text-sm">
-                <span className="font-semibold">Audio đã tạo</span>
-                <span className="text-xs text-muted-foreground">{result.duration.toFixed(1)}s · {result.sample_rate}Hz</span>
-              </div>
-              <audio controls src={mediaUrl(result.audio_url)} className="w-full" />
-              <a href={mediaUrl(result.audio_url)} className="mt-3 inline-flex items-center gap-2 rounded-lg border border-border/60 px-3 py-2 text-xs font-semibold hover:bg-muted/40">
-                <Download className="h-3.5 w-3.5" />
-                Tải audio
-              </a>
-            </div>
-          )}
         </section>
 
         <aside className="flex min-h-[calc(100vh-88px)] flex-col rounded-2xl border border-border/60 bg-card/70 shadow-sm">
@@ -1417,17 +1404,21 @@ function TtsTab() {
                     </div>
 
                     {item.status === "done" && item.audioUrl ? (
-                      <div className="mt-4 rounded-xl border border-border/60 bg-card/55 p-3">
-                        <audio controls src={mediaUrl(item.audioUrl)} className="w-full" />
-                        <div className="mt-3 flex items-center justify-between gap-3">
-                          <span className="truncate text-xs text-muted-foreground">
-                            {formatDuration(item.duration)}{item.sampleRate ? ` · ${item.sampleRate}Hz` : ""}
+                      <div className="mt-4 overflow-hidden rounded-xl border border-border/60 bg-gradient-to-br from-card/80 to-background/40">
+                        <div className="px-3 pt-3 pb-2">
+                          <audio controls src={mediaUrl(item.audioUrl)} className="w-full h-9 [&::-webkit-media-controls-panel]:bg-background/60" />
+                        </div>
+                        <div className="flex items-center justify-between gap-3 border-t border-border/30 bg-background/30 px-3 py-2">
+                          <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground">
+                            <Clock className="h-3 w-3" />
+                            {formatDuration(item.duration)}
+                            {item.sampleRate ? <><span className="opacity-50">·</span><span className="font-mono">{item.sampleRate}Hz</span></> : null}
                           </span>
-                          <div className="flex shrink-0 items-center gap-2">
+                          <div className="flex shrink-0 items-center gap-1.5">
                             <button
                               type="button"
                               onClick={() => reuseHistoryItem(item)}
-                              className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-border/60 bg-background/60 text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+                              className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted/50 hover:text-foreground transition-colors"
                               aria-label="Dùng lại nội dung"
                               title="Dùng lại nội dung"
                             >
@@ -1436,7 +1427,7 @@ function TtsTab() {
                             <a
                               href={mediaUrl(item.audioUrl)}
                               download
-                              className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-border/60 bg-background/60 text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+                              className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted/50 hover:text-foreground transition-colors"
                               aria-label="Tải audio"
                               title="Tải audio"
                             >
