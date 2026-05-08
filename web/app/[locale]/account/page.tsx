@@ -1220,38 +1220,6 @@ function TtsTab() {
                 )}
               </div>
 
-              {panel === "history" && (
-                <>
-                  <button
-                    type="button"
-                    onClick={reloadHistory}
-                    className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-border/60 bg-background/60 text-muted-foreground hover:bg-muted/50 hover:text-foreground"
-                    aria-label="Làm mới lịch sử"
-                    title="Làm mới lịch sử"
-                  >
-                    <RotateCcw className="h-3.5 w-3.5" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setHistoryNewestFirst((value) => !value)}
-                    className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-border/60 bg-background/60 text-muted-foreground hover:bg-muted/50 hover:text-foreground"
-                    aria-label="Đổi thứ tự lịch sử"
-                    title={historyNewestFirst ? "Cũ nhất trước" : "Mới nhất trước"}
-                  >
-                    <FileText className="h-3.5 w-3.5" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={clearHistoryItems}
-                    disabled={history.length === 0}
-                    className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-border/60 bg-background/60 text-muted-foreground hover:bg-red-500/10 hover:text-red-500 disabled:pointer-events-none disabled:opacity-40"
-                    aria-label="Xoá toàn bộ lịch sử"
-                    title="Xoá toàn bộ lịch sử"
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </button>
-                </>
-              )}
             </div>
           </div>
 
@@ -1361,6 +1329,42 @@ function TtsTab() {
             </div>
           ) : (
             <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
+              {history.length > 0 && (
+                <div className="flex items-center justify-between gap-2 border-b border-border/40 pb-3">
+                  <span className="text-xs font-medium text-muted-foreground">
+                    {history.length} mục · {historyNewestFirst ? "Mới nhất trước" : "Cũ nhất trước"}
+                  </span>
+                  <div className="flex shrink-0 items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={reloadHistory}
+                      className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-border/60 bg-background/60 text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+                      aria-label="Làm mới lịch sử"
+                      title="Làm mới lịch sử"
+                    >
+                      <RotateCcw className="h-3.5 w-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setHistoryNewestFirst((value) => !value)}
+                      className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-border/60 bg-background/60 text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+                      aria-label="Đổi thứ tự lịch sử"
+                      title={historyNewestFirst ? "Cũ nhất trước" : "Mới nhất trước"}
+                    >
+                      <FileText className="h-3.5 w-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={clearHistoryItems}
+                      className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-border/60 bg-background/60 text-muted-foreground hover:bg-red-500/10 hover:text-red-500"
+                      aria-label="Xoá toàn bộ lịch sử"
+                      title="Xoá toàn bộ lịch sử"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                </div>
+              )}
               {history.length === 0 ? (
                 <div className="rounded-2xl border border-dashed border-border/60 bg-background/35 p-8 text-center text-sm text-muted-foreground">
                   <Clock className="mx-auto mb-3 h-7 w-7 opacity-60" />
