@@ -1392,49 +1392,17 @@ function TtsTab() {
                       </button>
                     </div>
 
-                    <p className="mt-4 line-clamp-3 text-sm font-semibold leading-6 text-foreground">
+                    <p className="mt-3 line-clamp-2 text-sm font-medium leading-6 text-foreground">
                       {item.text}
                     </p>
-                    <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] font-medium text-muted-foreground">
-                      <span>{item.engine === "premium" ? "VoxStudio" : "Edge TTS"}</span>
-                      <span>•</span>
-                      <span className="max-w-[180px] truncate">{item.voiceLabel}</span>
-                      <span>•</span>
-                      <span className="font-bold text-primary">{item.credits.toLocaleString("vi-VN")} credits</span>
-                    </div>
 
                     {item.status === "done" && item.audioUrl ? (
-                      <div className="mt-4 overflow-hidden rounded-xl border border-border/60 bg-gradient-to-br from-card/80 to-background/40">
-                        <div className="px-3 pt-3 pb-2">
-                          <audio controls src={mediaUrl(item.audioUrl)} className="w-full h-9 [&::-webkit-media-controls-panel]:bg-background/60" />
-                        </div>
-                        <div className="flex items-center justify-between gap-3 border-t border-border/30 bg-background/30 px-3 py-2">
-                          <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground">
-                            <Clock className="h-3 w-3" />
-                            {formatDuration(item.duration)}
-                            {item.sampleRate ? <><span className="opacity-50">·</span><span className="font-mono">{item.sampleRate}Hz</span></> : null}
-                          </span>
-                          <div className="flex shrink-0 items-center gap-1.5">
-                            <button
-                              type="button"
-                              onClick={() => reuseHistoryItem(item)}
-                              className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted/50 hover:text-foreground transition-colors"
-                              aria-label="Dùng lại nội dung"
-                              title="Dùng lại nội dung"
-                            >
-                              <Repeat className="h-3.5 w-3.5" />
-                            </button>
-                            <a
-                              href={mediaUrl(item.audioUrl)}
-                              download
-                              className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted/50 hover:text-foreground transition-colors"
-                              aria-label="Tải audio"
-                              title="Tải audio"
-                            >
-                              <Download className="h-3.5 w-3.5" />
-                            </a>
-                          </div>
-                        </div>
+                      <div className="mt-3">
+                        <CompactAudioPlayer
+                          src={mediaUrl(item.audioUrl)}
+                          duration={item.duration}
+                          onReuse={() => reuseHistoryItem(item)}
+                        />
                       </div>
                     ) : (
                       <div className="mt-4 rounded-xl border border-red-500/25 bg-red-500/10 p-3">
@@ -2571,5 +2539,118 @@ function ModelOption({
         <div className="mt-0.5 text-[11px] text-muted-foreground line-clamp-2">{desc}</div>
       </div>
     </button>
+  );
+}
+
+// ── COMPACT AUDIO PLAYER ───────────────────────────────────────────────
+function CompactAudioPlayer({
+  src,
+  duration: durationProp,
+  onReuse,
+}: {
+  src: string;
+  duration?: number;
+  onReuse?: () => void;
+}) {
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const [playing, setPlaying] = useState(false);
+  const [current, setCurrent] = useState(0);
+  const [total, setTotal] = useState(durationProp ?? 0);
+
+  useEffect(() => {
+    const el = audioRef.current;
+    if (!el) return;
+    const onTime = () => setCurrent(el.currentTime || 0);
+    const onMeta = () => setTotal(el.duration || durationProp || 0);
+    const onEnd = () => setPlaying(false);
+    const onPlay = () => setPlaying(true);
+    const onPause = () => setPlaying(false);
+    el.addEventListener("timeupdate", onTime);
+    el.addEventListener("loadedmetadata", onMeta);
+    el.addEventListener("ended", onEnd);
+    el.addEventListener("play", onPlay);
+    el.addEventListener("pause", onPause);
+    return () => {
+      el.removeEventListener("timeupdate", onTime);
+      el.removeEventListener("loadedmetadata", onMeta);
+      el.removeEventListener("ended", onEnd);
+      el.removeEventListener("play", onPlay);
+      el.removeEventListener("pause", onPause);
+    };
+  }, [src, durationProp]);
+
+  const toggle = () => {
+    const el = audioRef.current;
+    if (!el) return;
+    if (playing) el.pause();
+    else el.play();
+  };
+
+  const seek = (e: React.MouseEvent<HTMLDivElement>) => {
+    const el = audioRef.current;
+    if (!el || !total) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const pct = (e.clientX - rect.left) / rect.width;
+    el.currentTime = pct * total;
+    setCurrent(el.currentTime);
+  };
+
+  const fmt = (s: number) => {
+    if (!s || isNaN(s)) return "0:00";
+    const m = Math.floor(s / 60);
+    const ss = Math.floor(s % 60);
+    return `${m}:${ss.toString().padStart(2, "0")}`;
+  };
+
+  const pct = total > 0 ? (current / total) * 100 : 0;
+
+  return (
+    <div className="flex items-center gap-3 rounded-full border border-border/60 bg-background/40 p-1.5 pr-3">
+      <button
+        type="button"
+        onClick={toggle}
+        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-foreground text-background hover:scale-105 transition-transform"
+        aria-label={playing ? "Tạm dừng" : "Phát"}
+      >
+        {playing ? <PauseCircle className="h-5 w-5" /> : <Play className="h-4 w-4 fill-current ml-0.5" />}
+      </button>
+
+      <div
+        onClick={seek}
+        className="relative h-1.5 flex-1 cursor-pointer rounded-full bg-muted/60"
+      >
+        <div
+          className="absolute inset-y-0 left-0 rounded-full bg-foreground transition-all"
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+
+      <span className="shrink-0 font-mono text-[11px] text-muted-foreground tabular-nums">
+        {fmt(current)} / {fmt(total)}
+      </span>
+
+      {onReuse && (
+        <button
+          type="button"
+          onClick={onReuse}
+          className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-muted/50 hover:text-foreground transition-colors"
+          aria-label="Dùng lại"
+          title="Dùng lại"
+        >
+          <Repeat className="h-3.5 w-3.5" />
+        </button>
+      )}
+      <a
+        href={src}
+        download
+        className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-muted/50 hover:text-foreground transition-colors"
+        aria-label="Tải audio"
+        title="Tải audio"
+      >
+        <Download className="h-3.5 w-3.5" />
+      </a>
+
+      <audio ref={audioRef} src={src} preload="metadata" className="hidden" />
+    </div>
   );
 }
