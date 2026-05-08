@@ -124,12 +124,39 @@ DEFAULT_PLANS = [
     },
     {
         "id": "pro", "name": "Pro",
-        # Hybrid Option A: 199k VND/tháng (~$8 USD).
-        # 1M chars TTS (~1.250 phút) + 30 phút dubbing + 5 voice clones
+        # 4-tier pricing: Pro 199k VND/tháng (~$8 USD).
+        # 1M chars TTS (~1.250 phút) + 30 phút dubbing + 5 voice clones.
         "price_vnd": 199_000, "price_usd": 800,  # $8 in cents
         "ltd_price_vnd": 3_999_000, "ltd_price_usd": 16_000,  # $160 LTD = 20 tháng
         "ltd_slots_total": 100,
         "sort_order": 2,
+        "features": {
+            "dubbing": True, "stt": True, "tts": True,
+            "translate": True, "download": True, "voice_clone": True,
+            "video_download": True,                # đa nền tảng YouTube/TikTok
+            "batch": False, "api": False, "priority_queue": False,
+            "export_4k": False, "watermark_free": True,
+        },
+        "limits": {
+            "concurrent_jobs": 2,
+            "daily_jobs": 100,
+            "daily_downloads": -1,
+            "dubbing_min_month": 30,
+            "stt_min_month": 1_000,
+            "tts_chars_month": 1_000_000,
+            "tts_max_chars_request": 25_000,
+            "voice_clone_max": 5,
+            "project_max": 50,
+        },
+    },
+    {
+        "id": "studio", "name": "Studio",
+        # 4-tier: Studio 499k VND/tháng (~$20 USD) — REDUCED features vs Premium.
+        # 2M chars TTS + 120 phút dubbing + 10 voice clones + priority queue
+        "price_vnd": 499_000, "price_usd": 2_000,  # $20 in cents
+        "ltd_price_vnd": 9_999_000, "ltd_price_usd": 40_000,
+        "ltd_slots_total": 100,
+        "sort_order": 3,
         "features": {
             "dubbing": True, "stt": True, "tts": True,
             "translate": True, "download": True, "voice_clone": True,
@@ -138,25 +165,26 @@ DEFAULT_PLANS = [
             "export_4k": True, "watermark_free": True,
         },
         "limits": {
-            "concurrent_jobs": 2,
-            "daily_jobs": 100,
-            "daily_downloads": -1,  # unlimited
-            "dubbing_min_month": 30,
-            "stt_min_month": 1_000,
-            "tts_chars_month": 1_000_000,        # 1M chars/tháng (~1.250 phút)
-            "tts_max_chars_request": 25_000,
-            "voice_clone_max": 5,
-            "project_max": 50,
+            "concurrent_jobs": 3,
+            "daily_jobs": 200,
+            "daily_downloads": -1,
+            "dubbing_min_month": 120,
+            "stt_min_month": 3_000,
+            "tts_chars_month": 2_000_000,           # 2M chars (~2.500 phút)
+            "tts_max_chars_request": 50_000,
+            "voice_clone_max": 10,
+            "project_max": 100,
         },
     },
     {
-        "id": "studio", "name": "Studio",
-        # Hybrid Option A: 499k VND/tháng (~$20 USD).
-        # 5M chars TTS (~6.250 phút) + 200 phút dubbing + unlimited clones
-        "price_vnd": 499_000, "price_usd": 2_000,  # $20 in cents
-        "ltd_price_vnd": 9_999_000, "ltd_price_usd": 40_000,  # $400 LTD = 20 tháng
-        "ltd_slots_total": 100,
-        "sort_order": 3,
+        "id": "premium", "name": "Premium",
+        # 4-tier: Premium 999k VND/tháng (~$40 USD) — flagship cho heavy user/agency.
+        # 7M chars TTS + 250 phút dubbing + unlimited clones + premium voices.
+        # Rẻ hơn Bulk topup 999k vì có dubbing built-in + priority queue + recurring.
+        "price_vnd": 999_000, "price_usd": 4_000,  # $40 in cents
+        "ltd_price_vnd": 19_999_000, "ltd_price_usd": 80_000,  # $800 LTD = 20 tháng
+        "ltd_slots_total": 50,
+        "sort_order": 4,
         "features": {
             "dubbing": True, "stt": True, "tts": True,
             "translate": True, "download": True, "voice_clone": True,
@@ -168,11 +196,11 @@ DEFAULT_PLANS = [
             "concurrent_jobs": 5,
             "daily_jobs": -1,
             "daily_downloads": -1,
-            "dubbing_min_month": 200,
+            "dubbing_min_month": 250,
             "stt_min_month": -1,
-            "tts_chars_month": 5_000_000,       # 5M chars/tháng fair-use
+            "tts_chars_month": 7_000_000,           # 7M chars (~8.750 phút)
             "tts_max_chars_request": -1,
-            "voice_clone_max": -1,              # unlimited
+            "voice_clone_max": -1,                  # unlimited
             "project_max": -1,
         },
     },
@@ -187,9 +215,10 @@ async def _seed_plans(db: AsyncSession):
     # Giá USD legacy của lần seed trước — nếu match → force update
     LEGACY_USD = {
         "free":   [0],
-        # Force-update plans created before Hybrid Option A pricing
-        "pro":    [600, 100, 2_000],     # $6 / $1 / $20 (pre-hybrid)
-        "studio": [1_400, 200, 6_900],   # $14 / $2 / $69 (pre-hybrid)
+        # Force-update plans → 4-tier pricing
+        "pro":    [600, 100, 800, 2_000],         # $6/$1/$8/$20 → force re-update
+        "studio": [1_400, 200, 2_000, 6_900],     # $14/$2/$20/$69 → force re-update (giảm features)
+        "premium": [],                             # mới — không có legacy
     }
     for spec in DEFAULT_PLANS:
         existing = await db.get(Plan, spec["id"])

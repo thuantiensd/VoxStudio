@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 
 const ROWS = [
+  "tts",
   "dubLength",
   "stt",
   "voiceClones",
@@ -91,17 +92,20 @@ export default function PricingPage() {
               <table className="w-full border-collapse">
                 <thead>
                   <tr className="border-b border-border/60 bg-muted/20">
-                    <th className="text-left text-xs font-semibold py-3 px-4 sm:text-sm">
+                    <th className="text-left text-xs font-semibold py-3 px-3 sm:text-sm">
                       {t("feature")}
                     </th>
-                    <th className="text-center text-xs font-semibold py-3 px-4 sm:text-sm">
+                    <th className="text-center text-xs font-semibold py-3 px-3 sm:text-sm">
                       Free
                     </th>
-                    <th className="text-center text-xs font-semibold py-3 px-4 text-primary bg-primary/5 sm:text-sm">
+                    <th className="text-center text-xs font-semibold py-3 px-3 sm:text-sm">
                       Pro
                     </th>
-                    <th className="text-center text-xs font-semibold py-3 px-4 sm:text-sm">
+                    <th className="text-center text-xs font-semibold py-3 px-3 text-primary bg-primary/5 sm:text-sm">
                       Studio
+                    </th>
+                    <th className="text-center text-xs font-semibold py-3 px-3 sm:text-sm">
+                      Premium
                     </th>
                   </tr>
                 </thead>
@@ -113,17 +117,20 @@ export default function PricingPage() {
                         i % 2 === 1 ? "bg-muted/10" : ""
                       }`}
                     >
-                      <td className="text-xs py-3 px-4 font-medium sm:text-sm">
+                      <td className="text-xs py-3 px-3 font-medium sm:text-sm">
                         {t(`comparison.${row}`)}
                       </td>
-                      <td className="text-xs text-center py-3 px-4 text-muted-foreground sm:text-sm">
+                      <td className="text-xs text-center py-3 px-3 text-muted-foreground sm:text-sm">
                         {t(`comparison.${row}Free`)}
                       </td>
-                      <td className="text-xs text-center py-3 px-4 font-semibold bg-primary/5 sm:text-sm">
+                      <td className="text-xs text-center py-3 px-3 sm:text-sm">
                         {t(`comparison.${row}Pro`)}
                       </td>
-                      <td className="text-xs text-center py-3 px-4 text-muted-foreground sm:text-sm">
+                      <td className="text-xs text-center py-3 px-3 font-semibold bg-primary/5 sm:text-sm">
                         {t(`comparison.${row}Studio`)}
+                      </td>
+                      <td className="text-xs text-center py-3 px-3 sm:text-sm">
+                        {t(`comparison.${row}Premium`)}
                       </td>
                     </tr>
                   ))}
