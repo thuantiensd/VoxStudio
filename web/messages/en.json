@@ -349,26 +349,24 @@
         "price": "$0",
         "desc": "Full preview, no credit card",
         "features": [
-          "10 minutes of Auto Dub / month",
-          "30 minutes of Speech-to-Text / month",
+          "5,000 TTS chars / month (~6 min)",
+          "5 minutes of video dubbing / month",
           "1 voice clone",
           "15 YouTube downloads / day",
-          "Up to 5 projects · 10 jobs/day",
           "Community support"
         ],
         "cta": "Download free"
       },
       "pro": {
         "name": "Pro",
-        "price": "$20",
-        "priceVnd": "520,000₫",
+        "price": "$8",
+        "priceVnd": "199,000₫",
         "desc": "For professional creators",
         "features": [
-          "Everything in Free",
-          "300 minutes of Auto Dub / month",
-          "1,000 minutes of Speech-to-Text / month",
-          "10 voice clones · 50 projects",
-          "Unlimited YouTube/TikTok downloads",
+          "1,000,000 TTS chars / month (~1,250 min)",
+          "30 minutes of video dubbing / month",
+          "5 voice clones · 50 projects",
+          "Run out? Top up with credit packs",
           "Priority GPU · 2 parallel jobs",
           "Email support — 24h response"
         ],
@@ -376,22 +374,29 @@
       },
       "studio": {
         "name": "Studio",
-        "price": "$69",
-        "priceVnd": "1,794,000₫",
+        "price": "$20",
+        "priceVnd": "499,000₫",
         "desc": "For studios & agencies",
         "features": [
-          "Everything in Pro",
-          "1,500 minutes of Auto Dub / month",
-          "Unlimited Speech-to-Text",
-          "50 voice clones · unlimited projects",
+          "5,000,000 TTS chars / month (~6,250 min)",
+          "200 minutes of video dubbing / month",
+          "Unlimited voice clones",
           "5 parallel jobs · unlimited daily jobs",
           "Full BYOK + API access",
-          "Priority support via Zalo"
+          "Priority Zalo support"
         ],
         "cta": "Choose Studio"
       },
-      "ltdHint": "Lifetime deals available — see details inside the app after install.",
-      "viewFull": "See full comparison"
+      "ltdHint": "Lifetime deals available — save up to 50% vs. monthly. Contact for details.",
+      "viewFull": "See full comparison",
+      "creditsEyebrow": "BUY EXTRA CREDITS",
+      "creditsTitle": "Out of quota? Flexible top-up — credits never expire",
+      "creditsSubtitle": "Pay once, use forever. Perfect for extra volume without upgrading.",
+      "creditsBonus": "+{percent}% bonus",
+      "creditsTotal": "{total} credits",
+      "creditsBase": "{base} + {bonus} bonus",
+      "creditsBuy": "Buy now",
+      "creditsLoginRequired": "Sign in to buy credits"
     },
     "faq": {
       "eyebrow": "Frequently asked",

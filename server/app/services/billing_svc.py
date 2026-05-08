@@ -23,7 +23,7 @@ from typing import Any
 from sqlalchemy import select, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import Payment, Plan, User
+from app.db.models import CreditPack, Payment, Plan, User
 from app.services import email_svc, plan_svc
 
 logger = logging.getLogger(__name__)
@@ -146,7 +146,9 @@ def _to_dict(p: Payment) -> dict:
     return {
         "id": p.id,
         "ref_code": p.id,
+        "kind": getattr(p, "kind", "subscription") or "subscription",
         "plan_id": p.plan_id,
+        "credits_amount": getattr(p, "credits_amount", 0) or 0,
         "amount_vnd": p.amount_vnd,
         "amount_usd": p.amount_usd,
         "is_ltd": bool(p.is_ltd),
@@ -155,6 +157,63 @@ def _to_dict(p: Payment) -> dict:
         "created_at": p.created_at.isoformat() if p.created_at else None,
         "paid_at": p.paid_at.isoformat() if p.paid_at else None,
     }
+
+
+async def create_credit_topup(
+    db: AsyncSession,
+    *,
+    user: User,
+    pack_id: str,
+) -> dict:
+    """Tạo Payment row pending kind='credits' cho 1 credit pack."""
+    pack = await db.get(CreditPack, pack_id)
+    if not pack or not pack.is_active:
+        raise ValueError(f"Gói credits '{pack_id}' không tồn tại.")
+
+    # Lock giá tại thời điểm checkout
+    from app.services import fx_rate_svc
+    amount_vnd = (
+        fx_rate_svc.usd_cents_to_vnd(pack.price_usd)
+        if pack.price_usd > 0 else pack.price_vnd
+    ) or pack.price_vnd
+    amount_usd = pack.price_usd
+    total_credits = (pack.base_credits or 0) + (pack.bonus_credits or 0)
+
+    # Auto-cancel pending khác (chung policy với create_payment)
+    old_pending = (await db.execute(
+        select(Payment).where(
+            Payment.user_id == user.id,
+            Payment.status == "pending",
+        )
+    )).scalars().all()
+    for op in old_pending:
+        op.status = "cancelled"
+        op.note = (op.note or "") + " [auto-huỷ: user tạo giao dịch mới]"
+
+    for _ in range(5):
+        ref_code = _new_ref_code()
+        if not await db.get(Payment, ref_code):
+            break
+    else:
+        raise RuntimeError("Không tạo được mã thanh toán, hãy thử lại.")
+
+    payment = Payment(
+        id=ref_code,
+        user_id=user.id,
+        kind="credits",
+        plan_id=pack_id,
+        credits_amount=total_credits,
+        amount_vnd=amount_vnd,
+        amount_usd=amount_usd,
+        is_ltd=False,
+        status="pending",
+    )
+    db.add(payment)
+    await db.commit()
+    await db.refresh(payment)
+    logger.info("Credit topup created: %s user=%d pack=%s vnd=%d credits=%d",
+                ref_code, user.id, pack_id, amount_vnd, total_credits)
+    return _to_dict(payment)
 
 
 async def list_payments(db: AsyncSession, user_id: int, limit: int = 50) -> list[dict]:
@@ -216,19 +275,39 @@ async def confirm_payment(
     if not user:
         raise ValueError("User không tồn tại (đã xoá tài khoản?).")
 
-    # Activate plan trên user
-    user.plan = p.plan_id
     p.status = "paid"
     p.paid_at = datetime.utcnow()
     p.confirmed_by = admin_id
     if note:
         p.note = note
 
-    # Lấy plan_row để tăng slots LTD + lấy display name cho email
-    plan_row = await db.get(Plan, p.plan_id)
-    if p.is_ltd and plan_row:
-        plan_row.ltd_slots_taken = (plan_row.ltd_slots_taken or 0) + 1
-    plan_display_name = (plan_row.name if plan_row else p.plan_id).strip() or p.plan_id
+    is_credits = (getattr(p, "kind", "subscription") or "subscription") == "credits"
+
+    if is_credits:
+        # Topup credits → cộng vào balance + ghi transaction
+        from app.services import credit_svc
+        await credit_svc.apply_topup(
+            db, user=user, pack_id=p.plan_id, payment_ref=p.id,
+        )
+        plan_display_name = f"Credits {p.plan_id}"
+    else:
+        # Subscription/LTD → activate plan + set expiration
+        from datetime import timedelta
+        user.plan = p.plan_id
+        if p.is_ltd:
+            user.plan_expires_at = None  # lifetime
+        else:
+            # +30 ngày từ now (hoặc từ expires_at hiện tại nếu còn hạn)
+            now = datetime.utcnow()
+            base = user.plan_expires_at if (
+                user.plan_expires_at and user.plan_expires_at > now
+            ) else now
+            user.plan_expires_at = base + timedelta(days=30)
+
+        plan_row = await db.get(Plan, p.plan_id)
+        if p.is_ltd and plan_row:
+            plan_row.ltd_slots_taken = (plan_row.ltd_slots_taken or 0) + 1
+        plan_display_name = (plan_row.name if plan_row else p.plan_id).strip() or p.plan_id
 
     # Safety net: auto-huỷ mọi pending KHÁC của cùng user.
     # (`create_payment` đã chặn ở khâu checkout, đây là phòng cho dữ liệu cũ.)

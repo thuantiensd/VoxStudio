@@ -349,26 +349,24 @@
         "price": "0đ",
         "desc": "Trải nghiệm đầy đủ, không cần thẻ",
         "features": [
-          "10 phút Auto Dub / tháng",
-          "30 phút Speech-to-Text / tháng",
+          "5.000 ký tự TTS / tháng (~6 phút)",
+          "5 phút lồng tiếng video / tháng",
           "1 voice clone",
           "15 lượt tải YouTube/ngày",
-          "Tối đa 5 project · 10 jobs/ngày",
-          "Hỗ trợ qua cộng đồng"
+          "Hỗ trợ cộng đồng"
         ],
         "cta": "Tải miễn phí"
       },
       "pro": {
         "name": "Pro",
-        "price": "$20",
-        "priceVnd": "520.000đ",
+        "price": "$8",
+        "priceVnd": "199.000đ",
         "desc": "Cho creator chuyên nghiệp",
         "features": [
-          "Mọi thứ trong gói Miễn phí",
-          "300 phút Auto Dub / tháng",
-          "1.000 phút Speech-to-Text / tháng",
-          "10 voice clones · 50 project",
-          "Tải YouTube/TikTok không giới hạn",
+          "1.000.000 ký tự TTS / tháng (~1.250 phút)",
+          "30 phút lồng tiếng video / tháng",
+          "5 voice clones · 50 project",
+          "Hết quota? Mua thêm credits topup",
           "Ưu tiên GPU · 2 jobs song song",
           "Hỗ trợ email — phản hồi 24h"
         ],
@@ -376,22 +374,29 @@
       },
       "studio": {
         "name": "Studio",
-        "price": "$69",
-        "priceVnd": "1.794.000đ",
+        "price": "$20",
+        "priceVnd": "499.000đ",
         "desc": "Cho studio & agency",
         "features": [
-          "Mọi thứ trong gói Pro",
-          "1.500 phút Auto Dub / tháng",
-          "Speech-to-Text không giới hạn",
-          "50 voice clones · project không giới hạn",
-          "Batch 5 jobs song song · jobs không giới hạn",
+          "5.000.000 ký tự TTS / tháng (~6.250 phút)",
+          "200 phút lồng tiếng video / tháng",
+          "Voice clones không giới hạn",
+          "Batch 5 jobs · jobs không giới hạn",
           "BYOK đầy đủ + API access",
           "Hỗ trợ ưu tiên qua Zalo"
         ],
         "cta": "Chọn Studio"
       },
-      "ltdHint": "Có ưu đãi mua trọn đời — xem chi tiết trong app sau khi cài đặt.",
-      "viewFull": "Xem bảng giá đầy đủ"
+      "ltdHint": "Có gói trọn đời — tiết kiệm tới 50% so với mua tháng. Liên hệ để biết chi tiết.",
+      "viewFull": "Xem bảng giá đầy đủ",
+      "creditsEyebrow": "MUA THÊM CREDITS",
+      "creditsTitle": "Hết quota? Topup linh hoạt — credits không hết hạn",
+      "creditsSubtitle": "Mua một lần, dùng mãi mãi. Phù hợp khi bạn cần thêm volume mà không muốn nâng cấp gói.",
+      "creditsBonus": "Tặng {percent}%",
+      "creditsTotal": "{total} credits",
+      "creditsBase": "{base} + bonus {bonus}",
+      "creditsBuy": "Mua ngay",
+      "creditsLoginRequired": "Đăng nhập để mua credits"
     },
     "faq": {
       "eyebrow": "Câu hỏi thường gặp",

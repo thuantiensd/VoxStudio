@@ -230,14 +230,14 @@ export default function AccountPage() {
           </div>
 
           <div className="flex items-center gap-2">
-            <div className="inline-flex items-center gap-1.5 rounded-md border border-border/60 bg-card/40 px-2.5 py-1.5 text-xs font-semibold">
+            <Link
+              href="/pricing"
+              className="inline-flex items-center gap-1.5 rounded-md border border-border/60 bg-card/40 px-2.5 py-1.5 text-xs font-semibold transition-colors hover:bg-muted/40"
+              title={t("topupCta")}
+            >
               <Zap className="h-3.5 w-3.5" />
-              {t("creditsAmount", { amount: 0 })}
-            </div>
-            <div className="inline-flex items-center gap-1.5 rounded-md border border-border/60 bg-card/40 px-2.5 py-1.5 text-xs font-semibold">
-              <Wallet className="h-3.5 w-3.5" />
-              $0.00
-            </div>
+              {(user.credit_balance || 0).toLocaleString("vi-VN")}
+            </Link>
           </div>
         </header>
 
@@ -306,6 +306,7 @@ export default function AccountPage() {
             )}
             {activeTab === "wallet" && (
               <WalletTab
+                user={user}
                 payments={payments}
                 loading={loading}
                 t={t}
@@ -465,12 +466,18 @@ function OverviewTab({
             </div>
           </div>
           <div className="flex flex-col gap-3 sm:flex-row">
-            <BalanceCard label={t("balanceUsd")} value="$0.00" />
             <BalanceCard
               label={t("creditsLabel")}
-              value="0"
+              value={(user.credit_balance || 0).toLocaleString("vi-VN")}
               icon={Zap}
             />
+            <Link
+              href="/pricing"
+              className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-foreground/40 bg-foreground px-5 py-3 text-sm font-semibold text-background transition-opacity hover:opacity-90"
+            >
+              <ArrowRight className="h-3.5 w-3.5" />
+              {t("topupCta")}
+            </Link>
           </div>
         </div>
       </section>
@@ -607,14 +614,17 @@ function ProfileTab({
 
 // ── WALLET TAB ────────────────────────────────────────────────────────
 function WalletTab({
+  user,
   payments,
   loading,
   t,
 }: {
+  user: NonNullable<ReturnType<typeof useAuth>["user"]>;
   payments: Payment[] | null;
   loading: boolean;
   t: ReturnType<typeof useTranslations>;
 }) {
+  const credits = user.credit_balance || 0;
   return (
     <div className="space-y-5">
       <div>
@@ -626,8 +636,17 @@ function WalletTab({
 
       {/* Summary cards */}
       <div className="grid gap-4 sm:grid-cols-3">
-        <BalanceCard label={t("balanceUsd")} value="$0.00" big />
-        <BalanceCard label={t("creditsLabel")} value="0" big icon={Zap} />
+        <BalanceCard
+          label={t("creditsLabel")}
+          value={credits.toLocaleString("vi-VN")}
+          big
+          icon={Zap}
+        />
+        <BalanceCard
+          label="Phút TTS tương đương"
+          value={`~${Math.floor(credits / 800).toLocaleString("vi-VN")} phút`}
+          big
+        />
         <Link
           href="/pricing"
           className="group flex items-center justify-between rounded-2xl border border-foreground/40 bg-foreground p-5 text-background transition-all hover:opacity-90"

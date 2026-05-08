@@ -2,6 +2,7 @@ import { useTranslations } from "next-intl";
 import { Link } from "@/i18n/navigation";
 import { PageShell } from "@/components/marketing/page-shell";
 import { Pricing } from "@/components/marketing/pricing";
+import { CreditPacks } from "@/components/marketing/credit-packs";
 import { FAQ } from "@/components/marketing/faq";
 import {
   Sparkles,
@@ -68,8 +69,11 @@ export default function PricingPage() {
         </div>
       </section>
 
-      {/* Pricing cards */}
+      {/* Pricing cards (gói tháng) */}
       <Pricing hideHeader />
+
+      {/* Credit packs (topup pay-as-you-go) */}
+      <CreditPacks />
 
       {/* Comparison table */}
       <section className="py-14 sm:py-20">

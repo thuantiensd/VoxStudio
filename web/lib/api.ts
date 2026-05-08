@@ -68,6 +68,7 @@ export type User = {
   plan: string;
   email_verified?: boolean;
   plan_expires_at?: string | null;
+  credit_balance?: number;
 };
 
 export type Plan = {
@@ -83,7 +84,9 @@ export type Plan = {
 export type Payment = {
   id: string;
   ref_code: string;
+  kind?: "subscription" | "credits";
   plan_id: string;
+  credits_amount?: number;
   amount_vnd: number;
   amount_usd: number;
   is_ltd: boolean;
@@ -91,6 +94,30 @@ export type Payment = {
   note: string | null;
   created_at: string | null;
   paid_at: string | null;
+};
+
+export type CreditPack = {
+  id: string;
+  name: string;
+  base_credits: number;
+  bonus_credits: number;
+  bonus_percent: number;
+  total_credits: number;
+  price_vnd: number;
+  price_usd: number;
+  sort_order: number;
+  is_active: boolean;
+  is_popular: boolean;
+};
+
+export type CreditTransaction = {
+  id: number;
+  kind: string;
+  delta: number;
+  balance_after: number;
+  ref_id: string | null;
+  note: string | null;
+  created_at: string | null;
 };
 
 export type Bank = {
@@ -173,4 +200,27 @@ export async function cancelMyPayment(refCode: string) {
 // ── Plans (public) ─────────────────────────────────────────
 export async function fetchPlans() {
   return api<{ plans: Plan[] }>("/plans");
+}
+
+// ── Credits ────────────────────────────────────────────────
+export async function fetchCreditPacks() {
+  return api<{ packs: CreditPack[] }>("/credits/packs");
+}
+
+export async function fetchCreditBalance() {
+  return api<{ balance: number }>("/credits/balance");
+}
+
+export async function listMyCreditTransactions() {
+  return api<{ transactions: CreditTransaction[] }>("/credits/transactions");
+}
+
+export async function topupCredits(packId: string) {
+  return api<{ payment: Payment; bank: Bank; qr_url: string | null }>(
+    "/credits/topup",
+    {
+      method: "POST",
+      body: JSON.stringify({ pack_id: packId }),
+    },
+  );
 }

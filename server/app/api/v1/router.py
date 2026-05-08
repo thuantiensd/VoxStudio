@@ -12,6 +12,7 @@ from app.api.v1.auth import router as auth_router
 from app.api.v1.jobs import router as jobs_router
 from app.api.v1.plans import router as plans_router
 from app.api.v1.billing import router as billing_router
+from app.api.v1.credits import router as credits_router
 from app.api.v1.admin import router as admin_router
 from app.api.v1.tts import router as tts_router
 from app.api.v1.voices import router as voices_router
@@ -26,6 +27,7 @@ api_router.include_router(auth_router)
 api_router.include_router(jobs_router)
 api_router.include_router(plans_router)
 api_router.include_router(billing_router)
+api_router.include_router(credits_router)
 api_router.include_router(admin_router)
 api_router.include_router(tts_router)
 api_router.include_router(voices_router)

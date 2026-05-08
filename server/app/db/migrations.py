@@ -47,6 +47,8 @@ async def _ensure_user_columns(db: AsyncSession):
         "verify_sent_at":   "DATETIME",
         "reset_token":      "VARCHAR(64)",
         "reset_sent_at":    "DATETIME",
+        "plan_expires_at":  "DATETIME",
+        "credit_balance":   "INTEGER NOT NULL DEFAULT 0",
     }
     for col, ddl in additions.items():
         if col not in existing:
@@ -55,6 +57,23 @@ async def _ensure_user_columns(db: AsyncSession):
                 logger.info("Added column users.%s", col)
             except Exception as e:
                 logger.warning("Could not add column users.%s: %s", col, e)
+    await db.commit()
+
+
+async def _ensure_payment_columns(db: AsyncSession):
+    """Thêm các cột mới cho payments (kind, credits_amount)."""
+    existing = await _columns_of(db, "payments")
+    additions = {
+        "kind":            "VARCHAR(16) NOT NULL DEFAULT 'subscription'",
+        "credits_amount":  "INTEGER NOT NULL DEFAULT 0",
+    }
+    for col, ddl in additions.items():
+        if col not in existing:
+            try:
+                await db.execute(text(f"ALTER TABLE payments ADD COLUMN {col} {ddl}"))
+                logger.info("Added column payments.%s", col)
+            except Exception as e:
+                logger.warning("Could not add column payments.%s: %s", col, e)
     await db.commit()
 
 
@@ -105,10 +124,10 @@ DEFAULT_PLANS = [
     },
     {
         "id": "pro", "name": "Pro",
-        # Giá USD chuẩn ($20). VND tính live theo tỷ giá USD→VND
-        # (cache 24h). Stored price_vnd là fallback khi API rate fail.
-        "price_vnd": 520_000, "price_usd": 2_000,  # $20 in cents
-        "ltd_price_vnd": 5_200_000, "ltd_price_usd": 20_000,  # $200 LTD
+        # Hybrid Option A: 199k VND/tháng (~$8 USD).
+        # 1M chars TTS (~1.250 phút) + 30 phút dubbing + 5 voice clones
+        "price_vnd": 199_000, "price_usd": 800,  # $8 in cents
+        "ltd_price_vnd": 3_999_000, "ltd_price_usd": 16_000,  # $160 LTD = 20 tháng
         "ltd_slots_total": 100,
         "sort_order": 2,
         "features": {
@@ -122,18 +141,20 @@ DEFAULT_PLANS = [
             "concurrent_jobs": 2,
             "daily_jobs": 100,
             "daily_downloads": -1,  # unlimited
-            "dubbing_min_month": 300,
+            "dubbing_min_month": 30,
             "stt_min_month": 1_000,
-            "tts_chars_month": 200_000,
-            "tts_max_chars_request": 25_000,   # 25k/lần — pro: text dài (sách, kịch bản)
-            "voice_clone_max": 10,
+            "tts_chars_month": 1_000_000,        # 1M chars/tháng (~1.250 phút)
+            "tts_max_chars_request": 25_000,
+            "voice_clone_max": 5,
             "project_max": 50,
         },
     },
     {
         "id": "studio", "name": "Studio",
-        "price_vnd": 1_794_000, "price_usd": 6_900,  # $69 in cents
-        "ltd_price_vnd": 17_940_000, "ltd_price_usd": 69_000,  # $690 LTD
+        # Hybrid Option A: 499k VND/tháng (~$20 USD).
+        # 5M chars TTS (~6.250 phút) + 200 phút dubbing + unlimited clones
+        "price_vnd": 499_000, "price_usd": 2_000,  # $20 in cents
+        "ltd_price_vnd": 9_999_000, "ltd_price_usd": 40_000,  # $400 LTD = 20 tháng
         "ltd_slots_total": 100,
         "sort_order": 3,
         "features": {
@@ -147,11 +168,11 @@ DEFAULT_PLANS = [
             "concurrent_jobs": 5,
             "daily_jobs": -1,
             "daily_downloads": -1,
-            "dubbing_min_month": 1_500,
+            "dubbing_min_month": 200,
             "stt_min_month": -1,
-            "tts_chars_month": -1,
-            "tts_max_chars_request": -1,        # studio: ko giới hạn/lần (vẫn show counter)
-            "voice_clone_max": 50,
+            "tts_chars_month": 5_000_000,       # 5M chars/tháng fair-use
+            "tts_max_chars_request": -1,
+            "voice_clone_max": -1,              # unlimited
             "project_max": -1,
         },
     },
@@ -166,8 +187,9 @@ async def _seed_plans(db: AsyncSession):
     # Giá USD legacy của lần seed trước — nếu match → force update
     LEGACY_USD = {
         "free":   [0],
-        "pro":    [600, 100],     # $6 (legacy) / $1 (very early)
-        "studio": [1_400, 200],   # $14 / $2
+        # Force-update plans created before Hybrid Option A pricing
+        "pro":    [600, 100, 2_000],     # $6 / $1 / $20 (pre-hybrid)
+        "studio": [1_400, 200, 6_900],   # $14 / $2 / $69 (pre-hybrid)
     }
     for spec in DEFAULT_PLANS:
         existing = await db.get(Plan, spec["id"])
@@ -237,6 +259,67 @@ async def _seed_plans(db: AsyncSession):
         )
         db.add(plan)
         logger.info("Seeded plan: %s", spec["id"])
+    await db.commit()
+
+
+# ── Seed credit packs ─────────────────────────────────────────
+
+DEFAULT_CREDIT_PACKS = [
+    {
+        "id": "mini", "name": "Mini",
+        "base_credits": 200_000, "bonus_credits": 0, "bonus_percent": 0,
+        "price_vnd": 49_000, "price_usd": 200,    # $2
+        "sort_order": 1, "is_popular": False,
+    },
+    {
+        "id": "starter", "name": "Starter",
+        "base_credits": 700_000, "bonus_credits": 0, "bonus_percent": 0,
+        "price_vnd": 119_000, "price_usd": 500,   # $5
+        "sort_order": 2, "is_popular": True,
+    },
+    {
+        "id": "credits_pro", "name": "Pro",
+        "base_credits": 2_000_000, "bonus_credits": 200_000, "bonus_percent": 10,
+        "price_vnd": 349_000, "price_usd": 1_400,   # $14
+        "sort_order": 3, "is_popular": False,
+    },
+    {
+        "id": "bulk", "name": "Bulk",
+        "base_credits": 6_000_000, "bonus_credits": 1_500_000, "bonus_percent": 25,
+        "price_vnd": 999_000, "price_usd": 4_000,   # $40
+        "sort_order": 4, "is_popular": False,
+    },
+    {
+        "id": "max", "name": "Max",
+        "base_credits": 16_000_000, "bonus_credits": 6_400_000, "bonus_percent": 40,
+        "price_vnd": 2_499_000, "price_usd": 9_999,  # $100
+        "sort_order": 5, "is_popular": False,
+    },
+]
+
+
+async def _seed_credit_packs(db: AsyncSession):
+    """Upsert default credit packs. Idempotent."""
+    from .models import CreditPack
+    for spec in DEFAULT_CREDIT_PACKS:
+        existing = await db.get(CreditPack, spec["id"])
+        if existing:
+            # Đã có — skip để admin có thể chỉnh giá
+            continue
+        pack = CreditPack(
+            id=spec["id"],
+            name=spec["name"],
+            base_credits=spec["base_credits"],
+            bonus_credits=spec["bonus_credits"],
+            bonus_percent=spec["bonus_percent"],
+            price_vnd=spec["price_vnd"],
+            price_usd=spec["price_usd"],
+            sort_order=spec["sort_order"],
+            is_active=True,
+            is_popular=spec.get("is_popular", False),
+        )
+        db.add(pack)
+        logger.info("Seeded credit pack: %s", spec["id"])
     await db.commit()
 
 
@@ -371,7 +454,9 @@ async def run_migrations():
     async with AsyncSessionLocal() as db:
         await _ensure_user_columns(db)
         await _ensure_voice_columns(db)
+        await _ensure_payment_columns(db)
         await _seed_plans(db)
+        await _seed_credit_packs(db)
         await _promote_admins(db)
         await _backfill_voices(db)
         # Migrate phải chạy SAU _backfill_voices vì cần DB rows để lookup owner

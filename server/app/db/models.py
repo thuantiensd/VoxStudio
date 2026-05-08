@@ -40,6 +40,13 @@ class User(Base):
     reset_token:     Mapped[str | None] = mapped_column(String(64), nullable=True)
     reset_sent_at:   Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
+    # Plan expiration — None nghĩa LTD (lifetime). Free plan cũng None.
+    plan_expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    # Credits balance (1 credit = 1 ký tự TTS). Topup không expire,
+    # cộng dồn theo từng lần mua. Consume từ đây sau khi hết monthly quota.
+    credit_balance:  Mapped[int] = mapped_column(Integer, default=0)
+
     created_at:    Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     def public_dict(self):
@@ -50,6 +57,8 @@ class User(Base):
             "name": self.name,
             "avatar": self.avatar_url,
             "plan": self.plan,
+            "plan_expires_at": self.plan_expires_at.isoformat() if self.plan_expires_at else None,
+            "credit_balance": self.credit_balance or 0,
             "role": self.role,
             "is_banned": self.is_banned,
             "email_verified": bool(self.email_verified),
@@ -197,7 +206,12 @@ class Payment(Base):
     id:         Mapped[str] = mapped_column(String(16), primary_key=True)  # = ref_code, unique
     user_id:    Mapped[int] = mapped_column(
                   ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    # kind: 'subscription' (gói tháng/LTD) | 'credits' (mua credit pack)
+    kind:       Mapped[str] = mapped_column(String(16), default="subscription", index=True)
+    # plan_id (subscription) hoặc pack_id (credits) — naming giữ legacy plan_id
     plan_id:    Mapped[str] = mapped_column(String(16), index=True)
+    # Số credits cộng vào balance khi paid (chỉ với kind=credits)
+    credits_amount: Mapped[int] = mapped_column(Integer, default=0)
     amount_vnd: Mapped[int] = mapped_column(default=0)
     amount_usd: Mapped[int] = mapped_column(default=0)  # cents
     is_ltd:     Mapped[bool] = mapped_column(Boolean, default=False)
@@ -213,6 +227,60 @@ class Payment(Base):
 
 
 Index("idx_payment_user_status", Payment.user_id, Payment.status)
+
+
+# ── Credit Pack catalog (admin edit được giống Plan) ──────────
+class CreditPack(Base):
+    """Catalog gói credits topup. 1 credit = 1 ký tự TTS.
+
+    Bonus: pack lớn được tặng thêm credits (vd 999k VND mua 8M credits +30%).
+    Final credits = base_credits + bonus_credits → cộng vào user.credit_balance
+    khi admin confirm payment.
+    """
+    __tablename__ = "credit_packs"
+
+    id:             Mapped[str] = mapped_column(String(16), primary_key=True)
+    # 'mini' | 'starter' | 'pro' | 'bulk' | 'max'
+    name:           Mapped[str] = mapped_column(String(64))
+    base_credits:   Mapped[int] = mapped_column(Integer, default=0)
+    bonus_credits:  Mapped[int] = mapped_column(Integer, default=0)
+    bonus_percent:  Mapped[int] = mapped_column(Integer, default=0)  # for display only
+    price_vnd:      Mapped[int] = mapped_column(Integer, default=0)
+    price_usd:      Mapped[int] = mapped_column(Integer, default=0)  # cents
+    sort_order:     Mapped[int] = mapped_column(Integer, default=0)
+    is_active:      Mapped[bool] = mapped_column(Boolean, default=True)
+    is_popular:     Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+# ── Credit Transactions (audit log cho mọi credit movement) ───
+class CreditTransaction(Base):
+    """Log chi tiết mọi thay đổi credit_balance.
+
+    kind:
+      - 'topup_paid':   user mua pack, admin confirmed → +credits
+      - 'consume_tts':  TTS consumed credits → -credits
+      - 'consume_dub':  dubbing consumed → -credits
+      - 'consume_clone': voice clone consumed → -credits
+      - 'admin_adjust': admin manual adjust (refund, gift, ...) → ±
+      - 'signup_bonus': tặng credits khi đăng ký → +credits
+    """
+    __tablename__ = "credit_transactions"
+
+    id:           Mapped[int] = mapped_column(primary_key=True)
+    user_id:      Mapped[int] = mapped_column(
+                    ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    kind:         Mapped[str] = mapped_column(String(32), index=True)
+    # delta: âm khi consume, dương khi topup/bonus
+    delta:        Mapped[int] = mapped_column(Integer, default=0)
+    balance_after: Mapped[int] = mapped_column(Integer, default=0)
+    # ref to source (payment_id cho topup, project_id cho consume, ...)
+    ref_id:       Mapped[str | None] = mapped_column(String(64), nullable=True)
+    note:         Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at:   Mapped[datetime] = mapped_column(
+                    DateTime, default=datetime.utcnow, index=True)
+
+
+Index("idx_credit_tx_user_recent", CreditTransaction.user_id, CreditTransaction.created_at.desc())
 
 
 # ── Dubbing project (per-user, DB-backed) ─────────────────────
