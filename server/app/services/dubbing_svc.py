@@ -576,6 +576,83 @@ def _ends_complete_sentence(text: str) -> bool:
     return s[-1] in _SENTENCE_END_CHARS
 
 
+def _has_low_density_gaps(segs: list[dict], total_dur: float, gap_threshold: float = 8.0) -> bool:
+    """Detect "thoại missing" — nếu có gap ≥8s giữa segments / từ start→seg đầu /
+    seg cuối→end audio mà total_dur > 30s, có khả năng STT vocals miss.
+
+    Lý do gap dài bất thường thường là: nhạc đè thoại nhỏ → vocals.wav ghi
+    silent mà thực tế có thoại trong original.
+    """
+    if not segs or total_dur < 30:
+        return False
+    if not isinstance(segs, list) or len(segs) < 1:
+        return True
+
+    # Gap đầu
+    first_start = float(segs[0].get("start", 0))
+    if first_start > gap_threshold:
+        return True
+    # Gap cuối
+    last_end = float(segs[-1].get("end", 0))
+    if total_dur - last_end > gap_threshold:
+        return True
+    # Gap giữa
+    for i in range(1, len(segs)):
+        prev_end = float(segs[i - 1].get("end", 0))
+        cur_start = float(segs[i].get("start", 0))
+        if cur_start - prev_end > gap_threshold:
+            return True
+    return False
+
+
+def _merge_dual_stt_segments(
+    primary: list[dict],
+    secondary: list[dict],
+    overlap_threshold: float = 0.3,
+) -> list[dict]:
+    """Merge 2 STT outputs: primary (vocals - chính xác) + secondary (original
+    - bắt thoại mềm).
+
+    Rule: giữ TẤT CẢ primary, add seg từ secondary CHỈ KHI không overlap
+    với bất kỳ primary nào (overlap_ratio < threshold). Sort by start.
+
+    overlap_ratio = overlap_dur / min(primary_dur, secondary_dur).
+    threshold 0.3 = chấp nhận seg secondary nếu < 30% overlap với mọi
+    primary (tức là chủ yếu nằm ở khoảng GAP của primary).
+    """
+    if not secondary:
+        return list(primary)
+    if not primary:
+        return list(secondary)
+
+    out = list(primary)
+    added = 0
+    for s in secondary:
+        s_start = float(s.get("start", 0))
+        s_end = float(s.get("end", 0))
+        s_dur = max(0.1, s_end - s_start)
+        # Check overlap với mọi primary
+        max_overlap_ratio = 0.0
+        for p in primary:
+            p_start = float(p.get("start", 0))
+            p_end = float(p.get("end", 0))
+            p_dur = max(0.1, p_end - p_start)
+            overlap = max(0.0, min(s_end, p_end) - max(s_start, p_start))
+            ratio = overlap / min(s_dur, p_dur)
+            if ratio > max_overlap_ratio:
+                max_overlap_ratio = ratio
+        if max_overlap_ratio < overlap_threshold:
+            # Seg này nằm chủ yếu ở gap → add (vocals đã miss)
+            new_seg = dict(s)
+            new_seg["_source"] = "original_dual_pass"  # mark debug
+            out.append(new_seg)
+            added += 1
+
+    # Sort by start time
+    out.sort(key=lambda x: float(x.get("start", 0)))
+    return out
+
+
 def _dedup_repeated_text(segs: list[dict]) -> list[dict]:
     """Drop segments có text trùng lặp với segment liền trước.
 
@@ -1195,20 +1272,44 @@ def transcribe_project(project_id: str) -> dict:
 
     raw_segs = result.get("segments", [])
 
-    # Fallback: if Demucs vocals are too degraded and no segments detected,
-    # retry on the original mixed audio
+    # ── Dual-STT smart merge ──
+    # Demucs làm méo / loại thoại MỀM, THÌ THẦM, XA MIC, ĐẦU/CUỐI CÂU bị
+    # nhạc đè → STT trên vocals.wav MISS các đoạn này.
+    # Strategy: nếu STT vocals trả ÍT segments hơn expected (heuristic
+    # 0.15 seg/sec audio) → chạy thêm 1 pass trên ORIGINAL audio và merge
+    # segments KHÔNG overlap với vocals segments.
+    audio_dur = float(project.get("video_duration") or project.get("audio_duration") or 0)
+    expected_segs = max(3, int(audio_dur * 0.15))  # rough lower bound
+    do_dual_pass = (
+        audio_to_transcribe != audio_path
+        and (
+            len(raw_segs) < expected_segs
+            or _has_low_density_gaps(raw_segs, audio_dur)
+        )
+    )
     if not raw_segs and audio_to_transcribe != audio_path:
-        logger.warning("No segments from vocals.wav — retrying on original mixed audio")
-        if used_whisperx:
-            try:
-                result = whisperx_svc.transcribe(
-                    audio_path, language=src_lang_norm, do_align=True, do_diarize=False,
-                )
-            except Exception:
-                result = whisper_svc.transcribe(audio_path, language=src_lang_norm)
-        else:
-            result = whisper_svc.transcribe(audio_path, language=src_lang_norm)
+        # Vocals fail hoàn toàn → original duy nhất
+        logger.warning("No segments from vocals.wav — fallback original audio")
+        result = whisper_svc.transcribe(audio_path, language=src_lang_norm)
         raw_segs = result.get("segments", [])
+    elif do_dual_pass:
+        try:
+            logger.info(
+                "Dual-STT: vocals trả %d segs (expected ≥%d) — chạy 2nd pass trên original để bắt thoại mềm",
+                len(raw_segs), expected_segs,
+            )
+            orig_result = whisper_svc.transcribe(audio_path, language=src_lang_norm)
+            orig_segs = orig_result.get("segments", [])
+            merged_segs = _merge_dual_stt_segments(raw_segs, orig_segs)
+            added = len(merged_segs) - len(raw_segs)
+            if added > 0:
+                logger.info(
+                    "Dual-STT merge: +%d seg từ original (vocals MISS) → total %d",
+                    added, len(merged_segs),
+                )
+            raw_segs = merged_segs
+        except Exception as e:
+            logger.warning("Dual-STT 2nd pass failed: %s — giữ vocals only", e)
 
     # ── Dedup repeated-text hallucination (Whisper Chinese drama hay loop) ──
     # Phải làm TRƯỚC music filter + post-process để tránh nhân lên các bug.
