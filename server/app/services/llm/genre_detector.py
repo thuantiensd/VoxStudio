@@ -187,17 +187,54 @@ Tước vị giữ phiên âm Hán-Việt: "Điện hạ", "Mẫu hậu", "Tư�
     if genre == "modern_drama":
         return """
 ═══════════════════════════════════════════════════════════════
-🎬 GENRE: PHIM HIỆN ĐẠI ĐỜI THƯỜNG
+🎬 GENRE: PHIM HIỆN ĐẠI / GIA ĐÌNH / ROMCOM
 
-Pronoun:
-  • Bạn bè ngang tuổi thân: "tao/mày" hoặc "tôi/cậu" hoặc "mình/bạn"
-  • Đồng nghiệp: "tôi/anh", "tôi/chị" (lịch sự công sở)
-  • Gia đình: "ba/mẹ/con", "ông/bà/cháu", "anh/em ruột"
-  • Cấp trên-dưới: "sếp/em", "anh/em"
-  • Yêu nhau: "anh/em" (nam-nữ); KHÔNG dùng "ngươi/ta" cổ trang
+⚠️ TUYỆT ĐỐI KHÔNG dùng "bạn/tôi" làm pronoun mặc định cho mọi quan hệ.
+   "Bạn" chỉ dùng khi 2 người KHÔNG QUEN. Mọi quan hệ thân thuộc khác
+   PHẢI dùng đúng pronoun gia đình/xã hội Việt Nam.
 
-NGÔN NGỮ: tự nhiên, hơi colloquial. Tránh dịch literal — "我去工作" KHÔNG
-dịch "Tôi đi công việc" mà "Tôi đi làm". Chêm "thì", "mà", "vậy" cho mượt.
+PRONOUN MATRIX BẮT BUỘC (xác định từ ngữ cảnh ai nói với ai):
+
+🔸 Vợ chồng / Người yêu nam-nữ:
+   • Nam → nữ: tự xưng "anh", gọi "em" — VD: "Anh yêu em"
+   • Nữ → nam: tự xưng "em", gọi "anh"
+   • CẤM dùng "tôi/bạn" cho cặp đôi yêu/cưới.
+
+🔸 Cha mẹ ↔ con cái:
+   • Mẹ ↔ con: "mẹ" / "con" (KHÔNG phải "tôi/bạn"!)
+     VD: "Con đi đâu vậy?" — không phải "Bạn đi đâu vậy?"
+   • Cha ↔ con: "ba/bố/cha" / "con"
+   • Hai chiều: con luôn gọi "ba/mẹ", tự xưng "con"
+
+🔸 Anh/chị ↔ em ruột:
+   • Lớn tự xưng: "anh"/"chị", gọi: "em"
+   • Nhỏ tự xưng: "em", gọi: "anh"/"chị"
+   • Em trai gọi chị: "chị X" + tự xưng "em"
+
+🔸 Cô/dì/chú/bác ↔ cháu:
+   • Lớn tự xưng "cô/dì/chú/bác", gọi "cháu"
+   • Nhỏ gọi "cô/dì/chú/bác", tự xưng "cháu"
+
+🔸 Bạn bè cùng tuổi:
+   • Thân: "tao/mày" (riêng tư) hoặc "tớ/cậu" (lịch sự)
+   • Vừa: "mình/bạn" hoặc "tôi/cậu"
+
+🔸 Đồng nghiệp công sở:
+   • Cùng cấp: "tôi/anh", "tôi/chị" (lịch sự)
+   • Sếp ↔ nhân viên: "sếp" / "em" hoặc "anh/chị" / "em"
+
+🔸 Người lạ / xa lạ / lễ tân:
+   • Trang trọng: "tôi/quý khách", "tôi/bà/ông"
+   • Đó MỚI là chỗ "tôi/bạn" hợp.
+
+NGUYÊN TẮC:
+  1. Đọc CONTEXT từ tổng scene, identify quan hệ trước khi dịch.
+  2. Cùng 1 cặp speaker phải có pronoun NHẤT QUÁN xuyên suốt.
+  3. Tên riêng giữ nguyên: "Wenxi", "A Tự", "ông Trương" — KHÔNG dịch
+     thành tên Việt hay từ chung khác.
+
+NGÔN NGỮ: tự nhiên, hơi colloquial. "我去工作" → "Anh đi làm" (chồng nói
+với vợ) hoặc "Em đi làm" (vợ nói với chồng), KHÔNG phải "Tôi đi công việc".
 """
     if genre == "action":
         return """

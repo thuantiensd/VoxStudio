@@ -81,6 +81,86 @@ def _max_chars_for_seg(seg: dict) -> int:
     return max(8, int(dur * 11.5))
 
 
+def _extract_anchor_entities(text: str) -> set[str]:
+    """Trích anchor entity từ text gốc — số, từ riêng (CJK uppercase),
+    từ kỹ thuật giữ nguyên trong dịch.
+
+    Anchor = từ phải xuất hiện trong translation (sau khi normalize) để
+    đảm bảo Gemini không "đoán" content. Nếu input có "钻石/diamond/100"
+    mà output không có "kim cương/đá quý/100" → flag semantic drift.
+    """
+    anchors: set[str] = set()
+    # Numbers
+    for m in re.findall(r"\d+", text):
+        if len(m) >= 2 or int(m) >= 5:  # bỏ 1-2 single digit (vô nghĩa)
+            anchors.add(m)
+    # Common entity words (Chinese drama / general)
+    # Mỗi từ key kèm danh sách synonym được chấp nhận trong tiếng Việt.
+    # Pipeline check: nếu text có key → translation phải chứa ít nhất 1 synonym.
+    return anchors
+
+
+# Map từ key Chinese → list các translation Việt được chấp nhận.
+# Nếu output không có bất kỳ synonym nào → semantic drift.
+ANCHOR_DICT_ZH_VI: dict[str, list[str]] = {
+    # Tài sản, đồ vật
+    "钻石": ["kim cương", "đá quý", "diamond"],
+    "婚戒": ["nhẫn cưới", "nhẫn"],
+    "戒指": ["nhẫn"],
+    "项链": ["dây chuyền", "vòng cổ"],
+    "手机": ["điện thoại", "phone"],
+    # Quan hệ
+    "夫人": ["bà", "phu nhân", "phu"],
+    "先生": ["ông", "ngài", "anh"],
+    "妈妈": ["mẹ", "má"],
+    "爸爸": ["ba", "bố", "cha"],
+    "姐姐": ["chị", "chị gái"],
+    "妹妹": ["em", "em gái"],
+    "哥哥": ["anh", "anh trai"],
+    "弟弟": ["em", "em trai"],
+    "老板": ["sếp", "ông chủ", "boss"],
+    "太太": ["bà", "phu nhân"],
+    # Đồ ăn
+    "咖啡": ["cà phê", "coffee"],
+    "牛奶": ["sữa"],
+    "果汁": ["nước trái cây", "nước ép"],
+    "水": ["nước"],
+    # Action
+    "送": ["mang", "đưa", "gửi", "tặng"],
+    "选": ["chọn", "lựa", "pick"],
+    "回": ["về", "trở", "lại"],
+    "来": ["đến", "tới", "lại"],
+    # Tài chính
+    "钱": ["tiền"],
+    "万": ["vạn", "10000", "ngàn"],
+    "亿": ["tỷ", "ti"],
+}
+
+
+def _check_semantic_drift(orig_text: str, translated: str) -> "str | None":
+    """Check anchor words trong orig có ít nhất 1 synonym trong translation.
+
+    Returns lý do drift hoặc None nếu pass.
+    """
+    if not orig_text or not translated:
+        return None
+    trans_lower = translated.lower()
+    missing_anchors = []
+    for zh_key, vi_syns in ANCHOR_DICT_ZH_VI.items():
+        if zh_key not in orig_text:
+            continue
+        # Check ít nhất 1 synonym có trong translation
+        if not any(syn.lower() in trans_lower for syn in vi_syns):
+            missing_anchors.append(f"{zh_key}→{vi_syns[0]}")
+    if missing_anchors:
+        # Chỉ flag nếu thiếu nhiều — 1-2 anchor có thể OK do paraphrase hợp lý
+        if len(missing_anchors) >= 2 or (
+            len(missing_anchors) == 1 and len(orig_text) < 15
+        ):
+            return f"semantic drift — thiếu anchor: {', '.join(missing_anchors[:3])}"
+    return None
+
+
 def _validate_translations(
     parsed: list[dict],
     batch: list[dict],
@@ -93,6 +173,7 @@ def _validate_translations(
     for i, seg in enumerate(batch):
         result = parsed[i] if i < len(parsed) else {}
         translated = (result.get("translated_text") or "").strip()
+        orig = (seg.get("original_text") or "").strip()
         reasons: list[str] = []
 
         # Empty / placeholder
@@ -108,18 +189,24 @@ def _validate_translations(
             reasons.append("chứa SPK marker leak từ prompt")
         if "max " in translated.lower() and "chars" in translated.lower():
             reasons.append("chứa 'max chars' leak từ prompt")
-        # Slash-form pronoun chưa giải quyết: "anh/em", "tôi/mình"
+        # Slash-form pronoun chưa giải quyết
         if re.search(r"\b(anh|em|tôi|tao|chú|cô|nàng|chàng|ngươi|ta)/(anh|em|tôi|tao|chú|cô|nàng|chàng|ngươi|ta)\b", translated, re.IGNORECASE):
             reasons.append("chứa dạng pronoun 'X/Y' chưa chọn")
 
-        # Char budget — chấp nhận BUDGET_SLACK% slack
+        # Char budget
         max_chars = _max_chars_for_seg(seg)
         if len(translated) > int(max_chars * BUDGET_SLACK):
             reasons.append(f"vượt {len(translated)}>{int(max_chars*BUDGET_SLACK)} chars (budget={max_chars})")
 
+        # Semantic drift — check anchor entities (Chinese → Việt)
+        drift_msg = _check_semantic_drift(orig, translated)
+        if drift_msg:
+            reasons.append(drift_msg)
+
         if reasons:
             errors.append({"batch_index": i, "global_index": seg["index"], "reasons": reasons,
-                            "translated": translated[:60], "max_chars": max_chars})
+                            "translated": translated[:60], "max_chars": max_chars,
+                            "original": orig[:60]})
     return errors
 
 
