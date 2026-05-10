@@ -27,6 +27,12 @@ logger = logging.getLogger(__name__)
 
 # ── Helpers ─────────────────────────────────────────
 
+def _has_env_gemini_key() -> bool:
+    """Server có sẵn GEMINI_API_KEY trong env hay không. Nếu có → fallback
+    chain có thể dùng gemini cho user không cung cấp key (free tier server)."""
+    return bool(os.environ.get("GEMINI_API_KEY", "").strip())
+
+
 def _detect_tts_engine() -> str:
     """Auto-detect best TTS engine: OmniVoice if installed, else Edge TTS."""
     try:
@@ -1485,15 +1491,58 @@ def translate_project(
     from app.services import cloud_translate_svc
     texts = [seg["original_text"] for seg in project["segments"]]
     logger.info("Translating %d segs via %s…", len(texts), eng)
-    try:
-        translated = cloud_translate_svc.translate_texts(
-            texts=texts, target=target_lang, source=source_lang,
-            engine=eng, api_key=api_key,
-            topic_hint=topic_hint, glossary=glossary,
+
+    # Engine fallback chain: nếu primary fail (quota/network/auth) → tự thử
+    # engine khác. Đảm bảo pipeline KHÔNG fail vì 1 engine duy nhất.
+    # Order: user_choice → các free engine sau (google_free luôn cuối, không cần key).
+    fallback_chain = [eng]
+    for fallback_eng in ("gemini", "openai", "google_cloud", "google_free"):
+        if fallback_eng != eng and fallback_eng not in fallback_chain:
+            # Chỉ thêm vào chain nếu có key (gemini/openai/google_cloud cần BYOK)
+            # — google_free luôn available
+            if fallback_eng == "google_free":
+                fallback_chain.append(fallback_eng)
+            elif fallback_eng == "gemini" and (api_key or _has_env_gemini_key()):
+                fallback_chain.append(fallback_eng)
+            # OpenAI/Cloud không có key trong server → skip silently
+
+    translated: list[str] = []
+    last_error: Exception | None = None
+    used_engine = eng
+    for idx, try_eng in enumerate(fallback_chain):
+        try:
+            translated = cloud_translate_svc.translate_texts(
+                texts=texts, target=target_lang, source=source_lang,
+                engine=try_eng, api_key=api_key if try_eng == eng else None,
+                topic_hint=topic_hint, glossary=glossary,
+            )
+            # Check thực sự có output (không phải all empty)
+            non_empty = sum(1 for t in translated if t and t.strip())
+            if non_empty < max(1, len(texts) // 3):
+                # < 1/3 segments có dịch — coi như fail, thử fallback
+                raise ValueError(
+                    f"Engine {try_eng} chỉ trả {non_empty}/{len(texts)} segments — fallback",
+                )
+            used_engine = try_eng
+            if idx > 0:
+                logger.warning(
+                    "Translate fallback %s → %s thành công (primary fail: %s)",
+                    eng, try_eng, last_error,
+                )
+            break
+        except Exception as e:
+            last_error = e
+            logger.warning("Engine %s failed: %s", try_eng, e)
+            translated = []
+            continue
+
+    if not translated:
+        raise ValueError(
+            f"Mọi engine dịch đều fail. Last error: {last_error}. "
+            f"Đã thử: {fallback_chain}",
         )
-    except Exception as e:
-        # Surface lỗi cho worker → user thấy cụ thể (sai key / quota / mạng)
-        raise ValueError(f"Lỗi engine dịch '{eng}': {e}") from e
+    if used_engine != eng:
+        logger.info("Final engine = %s (yêu cầu ban đầu = %s)", used_engine, eng)
 
     for seg, trans in zip(project["segments"], translated):
         if trans:

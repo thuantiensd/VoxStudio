@@ -131,6 +131,7 @@ def _lang_display(lang: str) -> str:
 # ── Google Cloud Translate v2 ──────────────────────────────
 
 def _google_cloud(texts: list[str], target: str, source: str, api_key: str) -> list[str]:
+    api_key = _sanitize_api_key(api_key, "Google Cloud Translate")
     url = "https://translation.googleapis.com/language/translate/v2"
     params = {"key": api_key}
     data = {"target": _lang_code(target), "format": "text", "q": texts}
@@ -144,6 +145,7 @@ def _google_cloud(texts: list[str], target: str, source: str, api_key: str) -> l
 # ── DeepL ──────────────────────────────────────────────────
 
 def _deepl(texts: list[str], target: str, source: str, api_key: str) -> list[str]:
+    api_key = _sanitize_api_key(api_key, "DeepL")
     # DeepL lang codes thường dùng EN/VI/ZH/JA/… (uppercase). Nó không hỗ trợ 'vi'!
     tgt = _lang_code(target).upper().replace("ZH-CN", "ZH")
     # api-free dùng cho key có đuôi ':fx'; pro dùng api.deepl.com
@@ -198,30 +200,60 @@ def _gemini(texts: list[str], target: str, source: str, api_key: str,
 
 # ── OpenAI ─────────────────────────────────────────────────
 
+def _sanitize_api_key(api_key: str, provider: str) -> str:
+    """Strip whitespace/zero-width/non-ASCII từ key. HTTP header bắt buộc
+    ASCII — copy key từ web hay dính NBSP/smart-quote/zero-width space →
+    httpx/requests fail với 'ascii codec can't encode' (xảy ra trong code
+    cũ). Strip rồi check trước khi gửi để fail fast với message rõ ràng.
+    """
+    if not api_key:
+        raise ValueError(f"Thiếu API key cho {provider}")
+    cleaned = api_key.strip()
+    # Loại zero-width / NBSP / control chars
+    cleaned = "".join(c for c in cleaned if c.isprintable() and ord(c) >= 0x21)
+    try:
+        cleaned.encode("ascii")
+    except UnicodeEncodeError:
+        raise ValueError(
+            f"API key {provider} chứa ký tự không hợp lệ (non-ASCII). "
+            f"Hãy copy lại key từ dashboard chính thức.",
+        )
+    if len(cleaned) < 8:
+        raise ValueError(f"API key {provider} quá ngắn — có thể sai")
+    return cleaned
+
+
 def _openai(texts: list[str], target: str, source: str, api_key: str,
             model: str | None = None,
             topic_hint: str | None = None,
             glossary_block: str | None = None) -> list[str]:
+    api_key = _sanitize_api_key(api_key, "OpenAI")
     model = model or DEFAULT_MODELS["openai"]
     tgt_name = _lang_display(target)
     src_name = _lang_display(source) if source and source.lower() != "auto" else "auto-detected source"
-    numbered = "\n".join(f"{i+1}. {t}" for i, t in enumerate(texts))
     sys_extras = []
     if topic_hint: sys_extras.append(topic_hint)
     if glossary_block: sys_extras.append(glossary_block)
     extra_block = ("\n\n" + "\n\n".join(sys_extras)) if sys_extras else ""
+    # OpenAI: dùng JSON mode response_format → đảm bảo output schema đúng,
+    # tránh parse fail. Output schema: {"translations": [{"index": N, "text": "..."}]}
     system = (
-        f"You are a precise {tgt_name} translator. Input is numbered lines in {src_name}. "
-        f"Translate each line into natural, idiomatic {tgt_name}. "
-        f"Output ONLY the translated lines in format 'N. <text>'. No preamble, no code fences."
-        f"{extra_block}"
+        f"You are a precise {tgt_name} film/drama translator. Input là JSON array "
+        f"các line {src_name}. Dịch sang {tgt_name} tự nhiên + idiomatic. "
+        f"Output JSON: {{\"translations\": [{{\"index\": int, \"text\": str}}, ...]}}. "
+        f"Mỗi index match input. KHÔNG markdown, KHÔNG preamble.{extra_block}"
+    )
+    user_input = json.dumps(
+        [{"index": i + 1, "text": t} for i, t in enumerate(texts)],
+        ensure_ascii=False,
     )
     payload = {
         "model": model,
         "temperature": 0.2,
+        "response_format": {"type": "json_object"},
         "messages": [
             {"role": "system", "content": system},
-            {"role": "user", "content": numbered},
+            {"role": "user", "content": user_input},
         ],
     }
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
@@ -231,7 +263,24 @@ def _openai(texts: list[str], target: str, source: str, api_key: str,
         raw = r.json()["choices"][0]["message"]["content"]
     except (KeyError, IndexError):
         raise ValueError("OpenAI trả về dữ liệu không đúng định dạng. Vui lòng thử lại.")
-    return _parse_numbered(raw, len(texts))
+
+    # Parse JSON object → list theo index
+    out = [""] * len(texts)
+    try:
+        parsed = json.loads(raw)
+        items = parsed.get("translations") or parsed.get("data") or []
+        if isinstance(items, list):
+            for it in items:
+                idx = int(it.get("index", 0)) - 1
+                text = (it.get("text") or it.get("translated") or "").strip()
+                if 0 <= idx < len(texts) and text:
+                    out[idx] = text
+    except (json.JSONDecodeError, ValueError, TypeError):
+        # Fallback: numbered parse
+        out = _parse_numbered(raw, len(texts))
+    if not any(out):
+        out = _parse_numbered(raw, len(texts))
+    return out
 
 
 # ── Anthropic Claude ───────────────────────────────────────
@@ -240,6 +289,7 @@ def _claude(texts: list[str], target: str, source: str, api_key: str,
             model: str | None = None,
             topic_hint: str | None = None,
             glossary_block: str | None = None) -> list[str]:
+    api_key = _sanitize_api_key(api_key, "Claude")
     model = model or DEFAULT_MODELS["claude"]
     tgt_name = _lang_display(target)
     src_name = _lang_display(source) if source and source.lower() != "auto" else "auto-detected source"
