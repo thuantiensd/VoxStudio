@@ -43,24 +43,129 @@ import numpy as np
 logger = logging.getLogger(__name__)
 
 
-def _voice_chain(sr: int):
-    """Build voice processing chain: clean, present, leveled."""
+def _voice_chain(sr: int, gender: str | None = None):
+    """Build voice processing chain — neutral default + gender-tuned variants.
+
+    Studio mixing per gender:
+      - Male: warm low-mid boost (200-500Hz) + slight presence + soft de-ess
+      - Female: bright air boost (8-12kHz) + cut mud (250Hz) + stronger de-ess
+        (female sibilance higher, more prominent)
+      - None/unknown: neutral
+    """
     from pedalboard import (
-        Pedalboard, HighpassFilter, HighShelfFilter, PeakFilter,
+        Pedalboard, HighpassFilter, HighShelfFilter, LowShelfFilter, PeakFilter,
         Compressor, Gain,
     )
+    g = (gender or "").lower()
+
+    # Soften values — feedback "rè rè chói chói" do quá nhiều high-shelf
+    # cut + compression dồn dập. Giảm de-esser, presence boost, gain để
+    # voice nghe tự nhiên hơn.
+    if g == "male":
+        return Pedalboard([
+            HighpassFilter(cutoff_frequency_hz=70),
+            LowShelfFilter(cutoff_frequency_hz=250, gain_db=1.0),
+            # Light de-esser, không cut mạnh
+            HighShelfFilter(cutoff_frequency_hz=8000, gain_db=-1.0),
+            # Soft presence
+            PeakFilter(cutoff_frequency_hz=3000, gain_db=0.8, q=1.0),
+            # Compression nhẹ hơn
+            Compressor(threshold_db=-20, ratio=2.5, attack_ms=8, release_ms=120),
+            Gain(gain_db=1.0),
+        ])
+
+    if g == "female":
+        return Pedalboard([
+            HighpassFilter(cutoff_frequency_hz=90),
+            # Light mud cut
+            PeakFilter(cutoff_frequency_hz=300, gain_db=-0.8, q=1.0),
+            # De-esser nhẹ — không narrow cut nữa (đó là cause chói)
+            HighShelfFilter(cutoff_frequency_hz=7500, gain_db=-1.5),
+            # Soft presence
+            PeakFilter(cutoff_frequency_hz=3500, gain_db=0.5, q=1.0),
+            # Air boost giảm
+            HighShelfFilter(cutoff_frequency_hz=11000, gain_db=0.8),
+            # Compression nhẹ
+            Compressor(threshold_db=-22, ratio=2.5, attack_ms=8, release_ms=100),
+            Gain(gain_db=1.0),
+        ])
+
+    # Default neutral chain — gentle
     return Pedalboard([
-        # 1. Remove mic rumble / HVAC noise below speech range
         HighpassFilter(cutoff_frequency_hz=80),
-        # 2. De-esser (approximation): tame harsh sibilance 6-8kHz
-        HighShelfFilter(cutoff_frequency_hz=7000, gain_db=-2.5),
-        # 3. Presence boost for intelligibility (consonant clarity)
-        PeakFilter(cutoff_frequency_hz=3000, gain_db=1.5, q=1.0),
-        # 4. Compression to even out loud/quiet parts
-        Compressor(threshold_db=-18, ratio=3.0, attack_ms=5, release_ms=80),
-        # 5. Make-up gain
-        Gain(gain_db=2.0),
+        HighShelfFilter(cutoff_frequency_hz=7500, gain_db=-1.0),
+        PeakFilter(cutoff_frequency_hz=3000, gain_db=0.8, q=1.0),
+        Compressor(threshold_db=-20, ratio=2.5, attack_ms=8, release_ms=120),
+        Gain(gain_db=1.0),
     ])
+
+
+def apply_voice_chain(audio: np.ndarray, sr: int, gender: str | None = None) -> np.ndarray:
+    """Apply gender-tuned voice processing chain to a TTS batch audio."""
+    if audio.size == 0:
+        return audio
+    try:
+        chain = _voice_chain(sr, gender=gender)
+        if audio.ndim > 1:
+            audio = audio.mean(axis=1)
+        return chain(audio.astype(np.float32), sr)
+    except Exception as e:
+        logger.warning("apply_voice_chain failed (%s, gender=%s) — return raw", e, gender)
+        return audio.astype(np.float32) if audio.dtype != np.float32 else audio
+
+
+def normalize_loudness_rms(audio: np.ndarray, target_dbfs: float = -20.0,
+                           max_gain_db: float = 12.0) -> np.ndarray:
+    """RMS-normalize audio to target dBFS. Cap gain to ±max_gain_db để
+    không boost noise floor lên thành tiếng ồn lớn.
+
+    Dùng cho mỗi batch TTS để tất cả segment cùng volume khi mix vào track —
+    tránh batch nào nhỏ hơn batch nào.
+    """
+    if audio.size == 0:
+        return audio
+    rms = float(np.sqrt(np.mean(audio.astype(np.float64) ** 2) + 1e-12))
+    if rms < 1e-6:
+        return audio
+    cur_dbfs = 20.0 * np.log10(rms)
+    gain_db = target_dbfs - cur_dbfs
+    gain_db = max(-max_gain_db, min(max_gain_db, gain_db))
+    factor = 10.0 ** (gain_db / 20.0)
+    return (audio * factor).astype(np.float32)
+
+
+def crossfade_concat(prev: np.ndarray, cur: np.ndarray, fade_samples: int) -> np.ndarray:
+    """Concat 2 audio buffers với crossfade ở junction để tránh click/pop.
+    Cur sẽ overlap fade_samples cuối của prev. Trả buffer mới length =
+    len(prev) + len(cur) - fade_samples.
+    """
+    if fade_samples <= 0 or len(prev) < fade_samples or len(cur) < fade_samples:
+        return np.concatenate([prev, cur])
+    fade_in = np.linspace(0.0, 1.0, fade_samples, dtype=np.float32)
+    fade_out = 1.0 - fade_in
+    out = np.zeros(len(prev) + len(cur) - fade_samples, dtype=np.float32)
+    out[: len(prev) - fade_samples] = prev[: -fade_samples]
+    # Overlap region
+    overlap = prev[-fade_samples:] * fade_out + cur[:fade_samples] * fade_in
+    out[len(prev) - fade_samples : len(prev)] = overlap
+    out[len(prev) :] = cur[fade_samples:]
+    return out
+
+
+def fade_edges(audio: np.ndarray, sr: int, fade_ms: float = 30.0) -> np.ndarray:
+    """Apply linear fade-in + fade-out cho audio (default 30ms mỗi đầu).
+    Dùng khi place batch vào silent track — tránh click khi voice start/end abrupt."""
+    if audio.size == 0:
+        return audio
+    fade_samples = min(int(sr * fade_ms / 1000), len(audio) // 4)
+    if fade_samples <= 0:
+        return audio
+    out = audio.astype(np.float32).copy()
+    fade_in = np.linspace(0.0, 1.0, fade_samples, dtype=np.float32)
+    fade_out = np.linspace(1.0, 0.0, fade_samples, dtype=np.float32)
+    out[:fade_samples] *= fade_in
+    out[-fade_samples:] *= fade_out
+    return out
 
 
 def _bgm_chain(sr: int):

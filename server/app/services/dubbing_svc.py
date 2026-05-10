@@ -1354,8 +1354,7 @@ def transcribe_project(project_id: str) -> dict:
             )
         except Exception as e:
             logger.warning("speaker_pipeline failed (%s) — segments without speaker info", e)
-            import traceback
-            logger.debug("speaker_pipeline traceback:\n%s", traceback.format_exc())
+            logger.exception("speaker_pipeline full traceback:")
 
     segments = []
     for i, seg in enumerate(merged):

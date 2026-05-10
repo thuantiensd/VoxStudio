@@ -41,17 +41,27 @@ def _load_inference() -> object:
                 "EULA at https://huggingface.co/pyannote/embedding"
             )
         try:
-            from pyannote.audio import Inference
+            from pyannote.audio import Inference, Model
         except ImportError as e:
             raise RuntimeError("pyannote.audio not installed") from e
 
         logger.info("Loading pyannote/embedding model...")
-        # pyannote 4.x đổi `use_auth_token` → `token`. Compat cả 2 version.
+        # Try pyannote 4.x: load Model.from_pretrained → pass to Inference.
+        # Fallback pyannote 3.x: Inference("name", token/use_auth_token=...).
         kwargs = {"window": "whole", "device": "cpu"}
         try:
-            _inference = Inference("pyannote/embedding", token=token, **kwargs)
+            model = Model.from_pretrained("pyannote/embedding", token=token)
+            _inference = Inference(model, **kwargs)
         except TypeError:
-            _inference = Inference("pyannote/embedding", use_auth_token=token, **kwargs)
+            try:
+                model = Model.from_pretrained("pyannote/embedding", use_auth_token=token)
+                _inference = Inference(model, **kwargs)
+            except TypeError:
+                # Very old API
+                try:
+                    _inference = Inference("pyannote/embedding", token=token, **kwargs)
+                except TypeError:
+                    _inference = Inference("pyannote/embedding", use_auth_token=token, **kwargs)
         logger.info("pyannote/embedding ready")
         return _inference
 

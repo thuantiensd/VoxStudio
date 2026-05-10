@@ -141,13 +141,16 @@ def group_words_into_sentences(
     # AND có short combined duration AND không có pause lớn — fix quá fragment
     merged: list[SpeakerSentence] = []
     for s in sentences:
+        prev_words = merged[-1].words if merged else []
+        prev_last_word = prev_words[-1].word if prev_words else ""
         if (
             merged
             and merged[-1].speaker_id == s.speaker_id
             and merged[-1].speaker_id is not None
             and (s.start - merged[-1].end) < 0.4
             and (s.end - merged[-1].start) <= max_duration
-            and not _ends_sentence(merged[-1].words[-1].word) if merged[-1].words else False
+            and prev_last_word
+            and not _ends_sentence(prev_last_word)
         ):
             # Merge into prev
             prev = merged[-1]
