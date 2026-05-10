@@ -296,6 +296,75 @@ def detect_speaker_genders(
     return {spk: info["gender"] for spk, info in full.items()}
 
 
+def _classify_gender_ensemble(
+    f0: float, f0_std: float, centroid: float, f1: float,
+    spectral_rolloff_85: float = 0.0,
+) -> tuple[str, float]:
+    """Ensemble classifier — vote 3 features.
+
+    Mỗi feature vote male/female/abstain, weighted:
+      - F0 (weight 0.4): F0 < 145 → male, > 195 → female, mid → abstain
+      - Spectral centroid (weight 0.3): < 2100 male, > 2600 female
+      - Formant F1 (weight 0.3): < 550 male, > 700 female
+
+    Confidence = winning_score / total_weight. ≥ 0.7 → trusted.
+    """
+    male_score = 0.0
+    female_score = 0.0
+
+    # F0 vote (weight 0.4)
+    if f0 > 0:
+        if f0 < 145:
+            male_score += 0.4
+        elif f0 > 195:
+            female_score += 0.4
+        else:
+            # Borderline — split vote
+            if f0 < 170:
+                male_score += 0.2
+                female_score += 0.05
+            else:
+                female_score += 0.2
+                male_score += 0.05
+
+    # Spectral centroid (weight 0.3)
+    if centroid > 0:
+        if centroid < 2100:
+            male_score += 0.3
+        elif centroid > 2600:
+            female_score += 0.3
+        else:
+            # Borderline
+            if centroid < 2350:
+                male_score += 0.15
+            else:
+                female_score += 0.15
+
+    # Formant F1 (weight 0.3)
+    if f1 > 0:
+        if f1 < 550:
+            male_score += 0.3
+        elif f1 > 700:
+            female_score += 0.3
+        else:
+            # Borderline
+            if f1 < 625:
+                male_score += 0.15
+            else:
+                female_score += 0.15
+
+    total = male_score + female_score
+    if total < 0.4:  # Quá ít data
+        return "unknown", 0.3
+
+    if male_score > female_score:
+        return "male", male_score / max(total, 1.0)
+    elif female_score > male_score:
+        return "female", female_score / max(total, 1.0)
+    else:
+        return "unknown", 0.5
+
+
 def detect_speaker_genders_with_confidence(
     audio_path: str,
     turns: list[DiarizationTurn],
@@ -320,32 +389,81 @@ def detect_speaker_genders_with_confidence(
 
     audio16, sr16 = _resample_16k(audio, sr)
 
-    out: dict[str, dict] = {}
+    # Pass 1: extract features cho mọi speaker
+    features_per_spk: dict[str, dict] = {}
     for spk in speakers:
         seg_audio = _gather_speaker_audio(audio16, sr16, turns, spk)
         if seg_audio is None:
-            out[spk] = {"gender": "unknown", "confidence": 0.0, "features": {}}
             continue
-        features = _extract_4_features(seg_audio, sr16)
-        if features is None:
-            out[spk] = {"gender": "unknown", "confidence": 0.0, "features": {}}
-            continue
-        gender, conf = _classify_gender(features)
-        # Force "unknown" nếu confidence quá thấp — voice mapping cycle slot
-        if conf < 0.7:
-            display_gender = "unknown"
+        feat = _extract_4_features(seg_audio, sr16)
+        if feat:
+            features_per_spk[spk] = feat
+
+    # Pass 2: classify ensemble — và cross-compare với nhau khi 2+ speakers
+    # Logic mới: nếu có 2 speakers, so sánh F0 RELATIVE — speaker có F0
+    # cao hơn rõ rệt (>30Hz diff) → female, thấp hơn → male, dù
+    # individual classification borderline.
+    out: dict[str, dict] = {}
+
+    if len(features_per_spk) >= 2:
+        # Sort theo F0
+        sorted_spk = sorted(
+            features_per_spk.items(),
+            key=lambda kv: kv[1].get("f0_median", 0),
+        )
+        # Speaker thấp nhất + cao nhất
+        low_spk, low_feat = sorted_spk[0]
+        high_spk, high_feat = sorted_spk[-1]
+        f0_diff = high_feat.get("f0_median", 0) - low_feat.get("f0_median", 0)
+
+        # Cross-compare CHỈ kick khi:
+        # 1. F0 spread > 30Hz
+        # 2. AND lowest ở male range (<170Hz) AND highest ở female range (>190Hz)
+        # → tránh case 2 nữ thật F0=200 vs 240 (spread 40Hz) bị nhầm
+        low_f0 = low_feat.get("f0_median", 0)
+        high_f0 = high_feat.get("f0_median", 0)
+        if f0_diff > 30 and low_f0 < 170 and high_f0 > 190:
+            cross_decisions = {low_spk: ("male", 0.85), high_spk: ("female", 0.85)}
+            logger.info(
+                "Gender cross-compare: low=%s %.0fHz (male range), high=%s %.0fHz (female range) → confident",
+                low_spk, low_f0, high_spk, high_f0,
+            )
         else:
-            display_gender = gender
+            cross_decisions = {}
+            logger.info(
+                "Gender cross-compare: low=%s %.0fHz, high=%s %.0fHz → fallback ensemble (cả 2 cùng range)",
+                low_spk, low_f0, high_spk, high_f0,
+            )
+    else:
+        cross_decisions = {}
+
+    for spk in speakers:
+        feat = features_per_spk.get(spk)
+        if not feat:
+            out[spk] = {"gender": "unknown", "confidence": 0.0, "features": {}}
+            continue
+        # Cross-compare wins if available (high confidence)
+        if spk in cross_decisions:
+            gender, conf = cross_decisions[spk]
+        else:
+            gender, conf = _classify_gender_ensemble(
+                feat.get("f0_median", 0),
+                feat.get("f0_std", 0),
+                feat.get("spectral_centroid", 0),
+                feat.get("formant_f1", 0),
+            )
+        # Force unknown nếu conf < 0.7 → voice mapping cycle slot
+        display_gender = gender if conf >= 0.7 else "unknown"
         out[spk] = {
             "gender": display_gender,
-            "raw_gender": gender,  # giữ raw cho debug
+            "raw_gender": gender,
             "confidence": round(conf, 2),
-            "features": {k: round(v, 1) for k, v in features.items()},
+            "features": {k: round(v, 1) for k, v in feat.items()},
         }
         logger.info(
             "Gender %s: F0=%.0fHz±%.0f centroid=%.0f F1=%.0f → %s (conf=%.2f)",
-            spk, features["f0_median"], features["f0_std"],
-            features["spectral_centroid"], features["formant_f1"],
+            spk, feat["f0_median"], feat["f0_std"],
+            feat["spectral_centroid"], feat["formant_f1"],
             display_gender, conf,
         )
     return out
