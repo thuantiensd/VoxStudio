@@ -833,7 +833,12 @@ export default function AccountPage() {
   const credits = user.credit_balance || 0;
 
   return (
-    <div className="theme-black flex min-h-screen bg-background text-foreground">
+    <div
+      key={`user-${user.id}`}
+      className="theme-black flex min-h-screen bg-background text-foreground"
+    >
+      {/* key={user.id} → khi đổi user, React unmount toàn bộ children + remount
+         fresh. Tránh leak state (projects, voice settings, ...) giữa accounts. */}
       {/* SIDEBAR */}
       {sidebarOpen && (
         <aside className="hidden w-[270px] shrink-0 border-r border-border/60 bg-card/60 lg:flex lg:flex-col">
