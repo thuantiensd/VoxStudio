@@ -166,11 +166,13 @@ def _estimate_formant_f1(audio: np.ndarray, sr: int) -> float:
             return 0.0
         angles = np.angle(roots)
         freqs = angles * sr / (2 * np.pi)
-        # F1 = thấp nhất trong 90-1500 Hz
-        candidates = [f for f in freqs if 90 < f < 1500]
+        # F1 typical range: 250-900 Hz (nam ~500, nữ ~700).
+        # <250 là noise/F0 confusion, >900 là F2 nhầm.
+        candidates = [f for f in freqs if 250 < f < 900]
         if not candidates:
             return 0.0
-        return float(min(candidates))
+        # Pick MEDIAN thay vì min để robust hơn với LPC noise
+        return float(np.median(candidates))
     except Exception as e:
         logger.warning("formant LPC failed: %s", e)
         return 0.0
@@ -416,16 +418,16 @@ def detect_speaker_genders_with_confidence(
         high_spk, high_feat = sorted_spk[-1]
         f0_diff = high_feat.get("f0_median", 0) - low_feat.get("f0_median", 0)
 
-        # Cross-compare CHỈ kick khi:
-        # 1. F0 spread > 30Hz
-        # 2. AND lowest ở male range (<170Hz) AND highest ở female range (>190Hz)
-        # → tránh case 2 nữ thật F0=200 vs 240 (spread 40Hz) bị nhầm
+        # Cross-compare kick khi:
+        # 1. F0 spread > 25Hz (relaxed từ 30)
+        # 2. AND lowest ở range nam-ish (<185Hz) AND highest ở range nữ-ish (>185Hz)
+        # → tránh case 2 nữ thật F0=200 vs 240 (cả 2 >190) nhầm
         low_f0 = low_feat.get("f0_median", 0)
         high_f0 = high_feat.get("f0_median", 0)
-        if f0_diff > 30 and low_f0 < 170 and high_f0 > 190:
-            cross_decisions = {low_spk: ("male", 0.85), high_spk: ("female", 0.85)}
+        if f0_diff > 25 and low_f0 < 185 and high_f0 > 185:
+            cross_decisions = {low_spk: ("male", 0.80), high_spk: ("female", 0.80)}
             logger.info(
-                "Gender cross-compare: low=%s %.0fHz (male range), high=%s %.0fHz (female range) → confident",
+                "Gender cross-compare: low=%s %.0fHz (male-ish), high=%s %.0fHz (female-ish) → confident",
                 low_spk, low_f0, high_spk, high_f0,
             )
         else:
@@ -452,8 +454,11 @@ def detect_speaker_genders_with_confidence(
                 feat.get("spectral_centroid", 0),
                 feat.get("formant_f1", 0),
             )
-        # Force unknown nếu conf < 0.7 → voice mapping cycle slot
-        display_gender = gender if conf >= 0.7 else "unknown"
+        # Force unknown nếu conf < 0.55 (relaxed từ 0.7) — vẫn dùng gender
+        # info cho translation pronoun ground truth ngay cả confidence thấp.
+        # Voice mapping có riêng confidence_threshold = 0.7 (strict cho voice
+        # slot match — nếu thấp sẽ cycle slot).
+        display_gender = gender if conf >= 0.55 else "unknown"
         out[spk] = {
             "gender": display_gender,
             "raw_gender": gender,
