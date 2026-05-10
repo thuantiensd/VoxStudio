@@ -54,6 +54,78 @@ def _genre_block_for_gemini(film_genre: str | None) -> str:
     return f"\n\n6. **Film Genre Context**:\n{block}\n"
 
 
+MAX_RETRY = 3
+# Cho phép vượt budget 25% — soft limit. >25% → fail validate, retry.
+BUDGET_SLACK = 1.25
+
+
+def _max_chars_for_seg(seg: dict) -> int:
+    """Tính budget chars cho 1 seg dựa trên duration. Đồng bộ với prompt."""
+    dur = max(0.3, seg.get("end", 0) - seg.get("start", 0))
+    return max(8, int(dur * 11.5))
+
+
+def _validate_translations(
+    parsed: list[dict],
+    batch: list[dict],
+) -> list[dict]:
+    """Validate parsed output. Trả list error dicts cho seg nào không pass.
+
+    Mỗi error: {index, reasons: [str]}. Empty list = all OK.
+    """
+    errors: list[dict] = []
+    for i, seg in enumerate(batch):
+        result = parsed[i] if i < len(parsed) else {}
+        translated = (result.get("translated_text") or "").strip()
+        reasons: list[str] = []
+
+        # Empty / placeholder
+        if not translated:
+            reasons.append("trống — không có dịch")
+        elif translated in ("...", "…", "TBD", "TODO", "?", "—", "/"):
+            reasons.append(f"placeholder ({translated!r})")
+        elif len(translated) < 2:
+            reasons.append("quá ngắn (<2 ký tự)")
+
+        # Leak prompt artifacts
+        if "[SPK" in translated or "[SPEAKER" in translated:
+            reasons.append("chứa SPK marker leak từ prompt")
+        if "max " in translated.lower() and "chars" in translated.lower():
+            reasons.append("chứa 'max chars' leak từ prompt")
+        # Slash-form pronoun chưa giải quyết: "anh/em", "tôi/mình"
+        if re.search(r"\b(anh|em|tôi|tao|chú|cô|nàng|chàng|ngươi|ta)/(anh|em|tôi|tao|chú|cô|nàng|chàng|ngươi|ta)\b", translated, re.IGNORECASE):
+            reasons.append("chứa dạng pronoun 'X/Y' chưa chọn")
+
+        # Char budget — chấp nhận BUDGET_SLACK% slack
+        max_chars = _max_chars_for_seg(seg)
+        if len(translated) > int(max_chars * BUDGET_SLACK):
+            reasons.append(f"vượt {len(translated)}>{int(max_chars*BUDGET_SLACK)} chars (budget={max_chars})")
+
+        if reasons:
+            errors.append({"batch_index": i, "global_index": seg["index"], "reasons": reasons,
+                            "translated": translated[:60], "max_chars": max_chars})
+    return errors
+
+
+def _build_retry_prompt_addendum(errors: list[dict]) -> str:
+    """Build error feedback section cho retry prompt. Liệt kê line + lý do
+    cụ thể để LLM hiểu cần fix gì."""
+    if not errors:
+        return ""
+    lines = ["", "═══════════════════════════════════════════════════════════════",
+             "⚠️ LẦN TRƯỚC CÓ LỖI — SỬA NGAY CHO CÁC LINE SAU:"]
+    for e in errors:
+        idx = e["global_index"] + 1
+        reason_str = "; ".join(e["reasons"])
+        prev = e.get("translated", "")
+        lines.append(f"  • Line {idx}: {reason_str}")
+        if prev:
+            lines.append(f"    Lần trước: {prev!r}")
+    lines.append("Phải fix ĐÚNG các line trên. KHÔNG được lặp lại lỗi cũ.")
+    lines.append("")
+    return "\n".join(lines)
+
+
 def translate_segments(
     segments: list[dict],
     target_language: str,
@@ -65,13 +137,11 @@ def translate_segments(
 ) -> list[dict]:
     """Translate film dialogue segments with full context awareness.
 
-    Args:
-        segments: list of {"index", "start", "end", "original_text"}
-        target_language: e.g. "vietnamese"
-        source_language: e.g. "chinese", "auto"
-
-    Returns:
-        list of {"translated_text", "speech_text", "emotion"}
+    Quality control:
+      - Validate output (char budget, missing index, prompt leak, placeholder).
+      - Retry tối đa MAX_RETRY lần với prompt addendum chỉ rõ line lỗi.
+      - Sau retry vẫn fail → giữ partial result, log warning, không silent corrupt.
+      - Per-segment fallback: nếu 1-2 seg trong batch fail, retry CHỈ những seg đó.
     """
     if not GEMINI_API_KEY:
         raise ValueError("Gemini API key not configured. Set GEMINI_API_KEY in Settings.")
@@ -107,23 +177,88 @@ def translate_segments(
             film_genre=film_genre,
         )
 
-        try:
-            response = model.generate_content(prompt)
-            parsed = _parse_response(response.text, len(batch))
+        # Translate batch với retry-on-validation-fail
+        batch_results, retry_count = _translate_batch_with_retry(
+            model=model, prompt_base=prompt, batch=batch,
+            max_retry=MAX_RETRY,
+        )
 
-            for i, result in enumerate(parsed):
-                if result["translated_text"]:
-                    results[batch_start + i] = result
+        for i, result in enumerate(batch_results):
+            if result["translated_text"]:
+                results[batch_start + i] = result
 
-            logger.info("Gemini translated batch %d-%d (%d segments)",
-                        batch_start + 1, batch_end, len(batch))
+        logger.info(
+            "Gemini batch %d-%d (%d segs) — retried %d time(s)",
+            batch_start + 1, batch_end, len(batch), retry_count,
+        )
 
-        except Exception as e:
-            logger.error("Gemini translation failed for batch %d-%d: %s",
-                         batch_start + 1, batch_end, e)
-            # Don't raise — partial results are OK, caller can fallback
+    # Final stats
+    missing = sum(1 for r in results if not r["translated_text"])
+    if missing:
+        logger.warning(
+            "Gemini final: %d/%d segments missing translation (caller should fallback engine)",
+            missing, len(results),
+        )
 
     return results
+
+
+def _translate_batch_with_retry(
+    *, model, prompt_base: str, batch: list[dict], max_retry: int,
+) -> tuple[list[dict], int]:
+    """Run translate + validate, retry với prompt addendum khi có error.
+
+    Returns (results, retry_count).
+    """
+    parsed = [{"translated_text": "", "speech_text": "", "emotion": "neutral"}
+              for _ in batch]
+    addendum = ""
+    last_errors: list[dict] = []
+
+    for attempt in range(max_retry):
+        prompt = prompt_base + addendum
+        try:
+            response = model.generate_content(prompt)
+            new_parsed = _parse_response(response.text, len(batch))
+        except Exception as e:
+            logger.error("Gemini API call failed attempt %d: %s", attempt + 1, e)
+            if attempt == max_retry - 1:
+                break
+            continue
+
+        # Merge new results — chỉ override những seg lần trước fail/empty
+        if attempt == 0:
+            parsed = new_parsed
+        else:
+            # Retry: chỉ thay những seg trong last_errors (failed last attempt)
+            failed_idx = {e["batch_index"] for e in last_errors}
+            for i, r in enumerate(new_parsed):
+                if i in failed_idx and r["translated_text"]:
+                    parsed[i] = r
+
+        # Validate
+        errors = _validate_translations(parsed, batch)
+        if not errors:
+            return parsed, attempt + 1
+
+        last_errors = errors
+        if attempt < max_retry - 1:
+            logger.info(
+                "Gemini retry %d/%d — %d/%d seg cần sửa",
+                attempt + 1, max_retry, len(errors), len(batch),
+            )
+            addendum = _build_retry_prompt_addendum(errors)
+        else:
+            logger.warning(
+                "Gemini batch giữ partial result sau %d retry — %d seg vẫn fail validate",
+                max_retry, len(errors),
+            )
+            for e in errors[:5]:  # log 5 sample errors
+                logger.warning("  Line %d: %s — %r",
+                                e["global_index"] + 1, "; ".join(e["reasons"]),
+                                e.get("translated", ""))
+
+    return parsed, max_retry
 
 
 def _build_prompt(
