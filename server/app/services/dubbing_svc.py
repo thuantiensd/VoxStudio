@@ -1266,12 +1266,21 @@ def transcribe_project(project_id: str) -> dict:
     src_lang = project.get("source_language_input", "auto")
     src_lang_norm = src_lang if src_lang != "auto" else None
 
-    # WhisperX opt-in path — bật khi:
-    #   1. project.quality_mode == "high" (per-project setting từ UI), HOẶC
-    #   2. USE_WHISPERX=true env (global override)
-    # AND whisperx đã pip-installed. Nếu fail → fallback whisper_svc (zero risk).
-    quality_mode = (project.get("quality_mode") or "fast").lower()
-    use_whisperx_for_proj = quality_mode == "high" or USE_WHISPERX
+    # WhisperX opt-in path — priority:
+    #   1. project.quality_mode (per-project user setting từ UI) WIN: nếu
+    #      user explicitly chọn "fast" hay "high", luôn respect.
+    #   2. Nếu meta KHÔNG có quality_mode (project cũ trước feature) →
+    #      fallback USE_WHISPERX env (global override admin set).
+    #   3. AND whisperx đã pip-installed. Nếu fail → fallback whisper_svc.
+    raw_quality_mode = project.get("quality_mode")
+    if raw_quality_mode:
+        # User-explicit choice → respect tuyệt đối
+        quality_mode = raw_quality_mode.lower()
+        use_whisperx_for_proj = quality_mode == "high"
+    else:
+        # Default per-project chưa set → dùng env
+        quality_mode = "fast"
+        use_whisperx_for_proj = USE_WHISPERX
     used_whisperx = False
     whisperx_speakers: list[str] = []  # nếu pyannote diarize chạy được
     if use_whisperx_for_proj and whisperx_svc.is_available():
