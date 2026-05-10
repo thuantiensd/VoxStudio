@@ -1214,10 +1214,25 @@ def _detect_genders_for_whisperx_speakers(
 
 
 def transcribe_project(project_id: str) -> dict:
-    """Run Demucs (auto) → Whisper on vocals for cleaner transcription."""
+    """Run Demucs (auto) → Whisper on vocals for cleaner transcription.
+
+    Idempotent: nếu project đã có segments + status >= editing → skip toàn bộ
+    re-transcribe (tránh duplicate work khi pipeline restart hoặc user click
+    "Dùng lại" — không cần Whisper lần 2 trên cùng audio).
+    """
     project = _load_meta(project_id)
     if not project:
         raise ValueError(f"Project '{project_id}' not found")
+
+    # Skip nếu đã transcribed (segments có sẵn + status đã qua transcribing)
+    existing_segs = project.get("segments") or []
+    skip_states = {"editing", "translating", "generating", "tts", "exporting", "done"}
+    if existing_segs and project.get("status") in skip_states:
+        logger.info(
+            "Skip transcribe: project=%s đã có %d segments, status=%s",
+            project_id, len(existing_segs), project.get("status"),
+        )
+        return project
 
     project["status"] = "transcribing"
     _save_meta(project)
@@ -2821,8 +2836,8 @@ def export_video(project_id: str, keep_original_audio: bool = False,
                     try:
                         from app.services.audio_mix_svc import fade_edges as _fe
                         fade_edges_fn = _fe
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.warning("fade_edges import failed (%s) — TTS edges có thể click/pop", e)
                 for seg in project["segments"]:
                     seg_audio_path = _segments_dir(project_id) / f"{seg['id']}.wav"
                     if not seg_audio_path.exists():
@@ -3876,8 +3891,8 @@ def auto_dub(project_id: str, engine: str = "google", api_key: str | None = None
             if meta and meta.get("status") not in ("done", "error"):
                 meta["status"] = "canceled"
                 _save_meta(meta)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Cannot mark project=%s as canceled: %s", project_id, e)
         yield {"step": "canceled", "label": "Đã huỷ", "progress": -1}
     except Exception as e:
         logger.error("Auto-dub failed at pipeline: %s", e, exc_info=True)
@@ -3885,3 +3900,16 @@ def auto_dub(project_id: str, engine: str = "google", api_key: str | None = None
         yield {"step": "error", "label": f"Lỗi: {e}", "progress": -1}
     finally:
         _reset_cancel(project_id)
+        # VRAM cleanup — đảm bảo dù pipeline xong, fail, hay canceled,
+        # GPU models đều unload. Trước đây thiếu → 10 project consecutive
+        # → VRAM full → next project OOM crash.
+        try:
+            gpu.unload_tts()
+        except Exception as e:
+            logger.warning("VRAM cleanup: unload_tts failed: %s", e)
+        try:
+            import torch
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        except Exception:
+            pass
