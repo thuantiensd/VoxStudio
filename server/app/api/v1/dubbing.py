@@ -178,7 +178,21 @@ async def create_project(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_session),
 ):
-    """Upload video và tạo project. Tạo cả filesystem files lẫn DB row."""
+    """Upload video và tạo project. Tạo cả filesystem files lẫn DB row.
+
+    QUOTA CHECK upfront — fail fast trước khi user upload file lớn xong mới
+    biết hết quota. Trải nghiệm cũ: upload xong, qua step auto-dub mới 429
+    → user mất thời gian upload vô ích. Giờ check ngay khi mở connection.
+    """
+    from app.auth.rate_limit import check_quota
+    try:
+        await check_quota(user, "dubbing", db)
+    except HTTPException:
+        raise
+    except Exception as e:
+        # Bất kỳ lỗi quota check nào → log và bypass (đừng block user vì server bug)
+        logger.warning("Quota check failed for user=%s: %s", user.id, e)
+
     try:
         filename = _validate_upload_metadata(request, video)
         data = await _read_upload_with_limit(video)
