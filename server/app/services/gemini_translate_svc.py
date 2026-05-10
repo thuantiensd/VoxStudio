@@ -171,68 +171,109 @@ def _build_prompt(
         ctx_lines = [f'  {c["index"]}. {c["original"]} → {c["translated"]}' for c in context_before]
         context_section = f"\n\nPrevious dialogue (for context, do NOT translate these):\n" + "\n".join(ctx_lines)
 
-    prompt = f"""You are a professional film/drama translator and subtitle localizer.
+    prompt = f"""Bạn là dịch giả phim chuyên nghiệp đã làm 10+ năm phim Trung/Hàn cho VTV/HTV.
+NHIỆM VỤ: dịch lời thoại từ {src_name} → {tgt_name} cho phụ đề/lồng tiếng.
 
-TASK: Translate the following film dialogue from {src_name} to {tgt_name}.
+═══════════════════════════════════════════════════════════════
+QUY TRÌNH BẮT BUỘC — THỰC HIỆN TUẦN TỰ:
 
-CRITICAL RULES for {tgt_name} translation:
-1. **Pronouns & Honorifics**: Use correct Vietnamese pronouns based on speaker relationships:
-   - Young man to older man: "anh" (speaker) / "em" (self)
-   - Young woman to older woman: "chị" (speaker) / "em" (self)
-   - Between lovers/couples: "anh/em" (male/female)
-   - Child to parent: "ba/mẹ/bố/mẹ" + "con" (self)
-   - To elders: "bác/chú/cô/dì" + "cháu" (self)
-   - Between friends same age: "tao/mày" (casual) or "tôi/bạn" (formal)
-   - Boss/subordinate: "sếp/giám đốc" + "tôi/em"
+BƯỚC 0 — ĐỌC TOÀN BỘ SCENE TRƯỚC:
+   Đọc HẾT mọi dòng trước khi dịch. Xác định:
+   • Bối cảnh: cổ trang (sử dụng 朕/郡主/公子/妾/陛下/微臣/在下…) HAY hiện đại?
+   • Quan hệ giữa các speaker: vua-tôi, vợ chồng, bạn bè, đồng nghiệp, kẻ thù?
+   • Tone: trang trọng / thân mật / căng thẳng / hài hước / bi tráng?
+   • Mỗi SPKx nói gì → planning pronoun nhất quán XUYÊN SUỐT scene.
 
-2. **Character Consistency**: The SAME character should use the SAME pronouns throughout.
-   Identify speakers by context (timestamps, dialogue flow, who responds to whom).
-   When [SPKx:gender] prefix is present, use it as ground truth for pronoun choice:
-   - SPKx:male → use anh/ông/chú/cậu/tao (NEVER cô/chị)
-   - SPKx:female → use chị/em/cô/bà/tao (NEVER anh/ông)
-   - SPKx:unknown → infer from context
-   In heated/argument scenes, use stronger pronouns (mày/tao) matching the speaker's
-   gender — do NOT default to soft "cô/anh" for fights.
-   Do NOT include [SPKx:gender] in the output.
+BƯỚC 1 — PICK REGISTER (quan trọng nhất):
 
-3. **Natural Vietnamese**: Write how Vietnamese people actually speak in films/dramas.
-   - Use natural contractions and colloquial speech
-   - Avoid literal/stiff translation
-   - Match the emotional tone of the original
+   ▸ CỔ TRANG (có 朕/陛下/郡主/公子/小姐/微臣/在下/本宫/姑娘/夫君/妾身):
+     • Vua xưng: "trẫm" / gọi quan: "khanh" / gọi dân: "ngươi"
+     • Quan xưng vua: "bệ hạ" / xưng mình: "thần" / "vi thần"
+     • Công chúa/quận chúa xưng: "bổn cung" / "ta" — gọi nam: "ngươi" / "công tử"
+     • Nam nhân với người yêu/vợ: "ta" / "chàng" gọi nữ: "nàng" / "thiếp"
+     • Nữ nhân với người yêu/chồng: "thiếp" gọi nam: "chàng"
+     • Người ngang vai: "ngươi/ta", "huynh/đệ", "tỷ/muội"
+     • TUYỆT ĐỐI KHÔNG dùng "anh/em/bạn/tôi/mình" cho phim cổ trang!
 
-4. **Emotion Detection**: Detect the emotion in each line from context.
-   Valid emotions: neutral, happy, sad, angry, whisper, surprised, fearful
+   ▸ HIỆN ĐẠI (đời thường, công sở, romcom):
+     • Bạn bè / đồng nghiệp ngang tuổi: "tôi/cậu" hoặc "mình/bạn"
+     • Nam-nữ yêu nhau: "anh/em" (KHÔNG đảo ngược!)
+     • Cấp trên-dưới: "sếp/em", "anh/em"
+     • Thân mật/cãi nhau: "tao/mày" (đúng ngữ cảnh)
+     • Gia đình: ba/mẹ/con, ông/bà/cháu, anh/em ruột
 
-5. **Film Context**: These are consecutive dialogue lines from a film scene.
-   Use the flow of conversation to understand relationships and context.
+BƯỚC 2 — PRONOUN GROUND TRUTH từ [SPKx:gender]:
+   • SPKx:male → speaker là NAM → KHÔNG được tự xưng "em" với người ngang tuổi.
+   • SPKx:female → speaker là NỮ → KHÔNG được tự xưng "anh".
+   • SPKx:unknown → suy ra từ ngữ cảnh + tên gọi (郡主=nữ, 公子=nam, 朕=vua…).
+   • CÙNG SPKx phải dùng CÙNG cách xưng hô từ đầu đến cuối scene.
+   • KHÔNG include "[SPKx:...]" trong output.
 
-6. **TIMING BUDGET (CRITICAL for dubbing)**: Each line has a `[max N chars]` budget
-   reflecting how long the original audio slot is. Vietnamese dub MUST fit in this
-   slot otherwise the audio will overflow into the next character's line, causing
-   "đọc dồn vào nhau" / out-of-sync.
-   - **PRIORITY**: meaning > nuance > literal completeness. Cut filler words,
-     rephrase for brevity, use shorter synonyms when needed.
-   - Example: "Tôi nghĩ rằng có lẽ chúng ta nên đi ngay bây giờ" (~50 chars)
-     can be tightened to "Mình đi ngay đi" (~16 chars) for short slot.
-   - HARD RULE: do NOT exceed `max N chars` for any line. If original is dense
-     (Chinese/Japanese), translate to the most concise idiomatic Vietnamese form.
+BƯỚC 3 — DỊCH TỪNG DÒNG:
+   • Tiếng Việt mượt như phim VTV — KHÔNG word-by-word literal.
+   • Match emotion: cãi → giọng gắt, yêu → giọng mềm, sợ → giọng run.
+   • Giữ nghĩa CỐT LÕI, bỏ filler/lặp lại không cần thiết.
+   • Nếu nhân vật gọi tên/xưng hô → giữ nguyên (郡主→"Quận chúa", 朕→"Trẫm").
+
+═══════════════════════════════════════════════════════════════
+TIMING BUDGET (BẮT BUỘC tuân thủ):
+   Mỗi dòng có `[max N chars]` — số ký tự TỐI ĐA cho dub đúng nhịp.
+   • Tiếng Việt SẼ DÀI HƠN Trung 30-40% nếu dịch literal → vượt slot → dub dồn.
+   • Phải RÚT GỌN: cắt filler ("thì là", "vậy đó"), dùng từ ngắn, bỏ chủ ngữ
+     thừa nếu vẫn rõ nghĩa.
+   • Nếu original dày đặc → ưu tiên Ý CHÍNH, bỏ chi tiết phụ.
+   • HARD RULE: KHÔNG vượt max chars. Đếm trước khi xuất.
+
+═══════════════════════════════════════════════════════════════
+VÍ DỤ ĐÚNG / SAI cho phim CỔ TRANG:
+
+❌ SAI: "郡主, 你说你来我这里十多回" → "Công chúa, bạn nói bạn đã đến chỗ tôi hơn mười lần"
+✅ ĐÚNG: → "Quận chúa, nàng đã đến chỗ ta hơn mười lần rồi"
+
+❌ SAI: "我早就帮你了" → "Tôi đã giúp bạn rồi"
+✅ ĐÚNG: → "Ta giúp nàng từ lâu rồi"
+
+❌ SAI: "朕大霉了" → "Vua xui xẻo"
+✅ ĐÚNG: → "Trẫm xui xẻo lắm"
+
+❌ SAI (literal cho slot ngắn 1.0s = max ~11 chars):
+   "你说你来我这十多回 有谁能帮你"
+   → "Ngươi nói ngươi đã tới chỗ ta hơn mười lần rồi, ai có thể giúp được nàng đây"
+✅ ĐÚNG: → "Nàng tới đây nhiều lần rồi" (cắt phần lặp lại, giữ ý chính)
+
+VÍ DỤ ĐÚNG / SAI cho phim HIỆN ĐẠI:
+
+❌ SAI: "我以为你不来了" (giữa cặp đôi) → "Tôi tưởng bạn không đến nữa"
+✅ ĐÚNG: → "Em tưởng anh không đến nữa"
+
+❌ SAI: "你给我滚" (cãi nhau) → "Bạn cuốn xéo cho tôi"
+✅ ĐÚNG: → "Cút đi cho tao!" (giận dữ, không dùng "bạn/tôi")
+
+═══════════════════════════════════════════════════════════════
+EMOTION TAGS hợp lệ: neutral, happy, sad, angry, whisper, surprised, fearful
 {_extra_block(topic_hint, glossary)}{_genre_block_for_gemini(film_genre)}{context_section}
 
-DIALOGUE TO TRANSLATE:
+═══════════════════════════════════════════════════════════════
+DIALOGUE CẦN DỊCH (đọc HẾT trước khi dịch):
 {chr(10).join(seg_lines)}
 
-RESPOND in this exact JSON format (no markdown, no code blocks):
+═══════════════════════════════════════════════════════════════
+TRẢ VỀ CHÍNH XÁC JSON sau (KHÔNG markdown, KHÔNG code fence):
 [
   {{"index": 1, "translated": "...", "speech": "...", "emotion": "neutral"}},
   {{"index": 2, "translated": "...", "speech": "...", "emotion": "happy"}}
 ]
 
-Where:
-- "index": the line number
-- "translated": accurate translation with proper pronouns
-- "speech": same text optimized for TTS (add ... for pauses, natural speech flow)
-- "emotion": detected emotion tag
-"""
+• "translated": câu Việt mượt + đúng pronoun + KHÔNG vượt max_chars
+• "speech": cùng text nhưng tối ưu TTS — thêm "..." giữa cụm cho ngắt nhịp tự nhiên
+• "emotion": 1 trong 7 tag trên
+
+KIỂM TRA TRƯỚC KHI XUẤT:
+[ ] Mọi line ≤ max_chars?
+[ ] Pronoun nhất quán cho mỗi SPKx?
+[ ] Cổ trang dùng "ta/nàng/chàng/khanh/trẫm/thiếp" — KHÔNG có "anh/em/bạn/tôi"?
+[ ] Hiện đại không bị cứng/word-by-word?
+[ ] JSON hợp lệ?"""
     return prompt
 
 
