@@ -558,9 +558,24 @@ _SENTENCE_END_CHARS = set(".!?。！？…؟।。")
 # Mid-clause chars: comma/semicolon/colon → câu chưa đủ ý, NÊN merge với next.
 _MID_CLAUSE_CHARS = set(",，、;；:：")
 
+# Particle/connector cuối câu cho Chinese — Whisper Chinese không có dấu
+# chấm rõ, nhưng có particle 啊/呢/吗/吧/了/嘛/呀/啦 cuối câu = câu hoàn
+# chỉnh; còn 的/和/与/而/但 = câu chưa hết → cần merge với next.
+_ZH_END_PARTICLES = set("啊呢吗吧了嘛呀啦哦哈嘿喂")
+# Connector từ ZH thường nằm cuối nửa câu, signals continue
+_ZH_CONTINUE_CHARS = set("的和与而但所以因为如果虽然但是")
+
+
 def _ends_complete_sentence(text: str) -> bool:
     """Đoạn text này đã kết thúc 1 câu hoàn chỉnh chưa?
-    Dấu chấm/than/hỏi → True. Comma/colon/semicolon hoặc không có dấu → False.
+
+    Logic:
+      1. Có dấu chấm/than/hỏi tận cùng → True
+      2. Tận cùng bằng particle Chinese (啊/吗/吧/了…) → True
+      3. Tận cùng bằng connector Chinese (的/和/而…) → False (câu chưa hết)
+      4. Comma/colon/semicolon → False
+      5. Không có gì → False (Chinese Whisper output chỉ Hán tự, no period)
+
     Quote ngoặc cuối được skip để check char trước nó.
     """
     if not text:
@@ -568,12 +583,24 @@ def _ends_complete_sentence(text: str) -> bool:
     s = text.rstrip()
     if not s:
         return False
-    # Bỏ dấu ngoặc đóng cuối: ")"  "]"  "}"  ‘"  "'"  "”" để check char trước
     while s and s[-1] in '")]}\'’”':
         s = s[:-1]
     if not s:
         return False
-    return s[-1] in _SENTENCE_END_CHARS
+    last = s[-1]
+    # Hard: dấu chấm
+    if last in _SENTENCE_END_CHARS:
+        return True
+    # Chinese particle cuối câu
+    if last in _ZH_END_PARTICLES:
+        return True
+    # Chinese connector → chưa hết câu
+    if last in _ZH_CONTINUE_CHARS:
+        return False
+    # Comma/colon/semicolon → chưa hết
+    if last in _MID_CLAUSE_CHARS:
+        return False
+    return False
 
 
 def _has_low_density_gaps(segs: list[dict], total_dur: float, gap_threshold: float = 8.0) -> bool:
@@ -1383,11 +1410,15 @@ def transcribe_project(project_id: str) -> dict:
     logger.info("Post-process: %d segments after trim-sparse", len(trimmed))
 
     # 4. Merge adjacent short segments (Tier 1.1: min 3s, gap 1.0s, combined 9s)
-    # Aggressive merge: giữ câu liền mạch, đỡ vụn.
-    # min_duration 3.0 → 4.0 (segment <4s được merge với neighbor)
-    # max_gap    1.0 → 1.5 (cho phép gap dài hơn nếu sentence chưa end)
-    # max_combined 9.0 → 12.0 (case sentence_continues còn cho +2s = 14s tối đa)
-    merged = _merge_short_segments(trimmed, min_duration=4.0, max_gap=1.5, max_combined=12.0)
+    # Aggressive merge: giữ câu liền mạch, đỡ vụn — đặc biệt quan trọng
+    # cho Chinese vì Whisper KHÔNG output dấu chấm rõ → mọi seg trông như
+    # "chưa hết câu" → cần merge mạnh.
+    # min_duration 4.0 (segment <4s thử merge)
+    # max_gap 1.8 (cho phép pause dài hơn nếu sentence chưa end — Chinese
+    #              drama có nhiều pause cảm xúc)
+    # max_combined 14.0 (rule sentence_continues còn +2s = 16s tối đa cho
+    #                    câu cổ trang dài)
+    merged = _merge_short_segments(trimmed, min_duration=4.0, max_gap=1.8, max_combined=14.0)
     logger.info("Post-process: %d segments after merge-short (final)", len(merged))
 
     # ── Speaker analysis: NEW production-ready pipeline ──

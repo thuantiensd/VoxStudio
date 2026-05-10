@@ -23,6 +23,21 @@ def _max_chars(seg: dict) -> int:
     return max(8, int(dur * VN_SPEECH_RATE))
 
 
+def _pronoun_hint_for_gender(gender: str) -> str:
+    """Hint pronoun cụ thể cho LLM tránh nhầm. Inject thẳng vào mỗi seg
+    line thay vì chỉ rule chung.
+
+    Đọc gender + register sau (LLM tự pick từ context). Hint chỉ là
+    REMINDER MẠNH cho LLM — không lock 1 từ duy nhất.
+    """
+    g = (gender or "").lower().strip()
+    if g == "male":
+        return "tự xưng anh/tôi/ông/cha/ba/chú; KHÔNG tự xưng em/chị/cô"
+    if g == "female":
+        return "tự xưng em/chị/cô/mẹ/bà; KHÔNG tự xưng anh/ông/chú"
+    return ""
+
+
 def _lang_display_name(lang: str) -> str:
     names = {
         "vietnamese": "Tiếng Việt", "vi": "Tiếng Việt",
@@ -60,7 +75,8 @@ def build_translation_prompt(
     tgt_name = _lang_display_name(target_lang)
     src_name = _lang_display_name(source_lang)
 
-    # Build segment list — kèm budget + speaker info
+    # Build segment list — kèm budget + STRONG pronoun anchor per line
+    # (không chỉ rule chung — mỗi line có hint pronoun cụ thể để LLM follow)
     has_speakers = bool(speaker_genders) and any(seg.get("speaker") for seg in segments)
     seg_lines = []
     for seg in segments:
@@ -68,11 +84,17 @@ def build_translation_prompt(
         if not text:
             continue
         budget = _max_chars(seg)
-        prefix = f'[{seg["start"]:.1f}s-{seg["end"]:.1f}s, max {budget} chars]'
+        prefix = f'[max {budget} chars]'
         if has_speakers and seg.get("speaker"):
             spk = seg["speaker"]
             g = (speaker_genders or {}).get(spk, "unknown")
-            prefix = f'{prefix} [{spk}:{g}]'
+            # STRONG hint: kèm pronoun cụ thể cho gender (theo register VN)
+            # → LLM khó nhầm hơn so với chỉ "[SPK:female]"
+            pronoun_hint = _pronoun_hint_for_gender(g)
+            if pronoun_hint:
+                prefix = f'[{spk}, {g}, {pronoun_hint}, max {budget} chars]'
+            else:
+                prefix = f'[{spk}, {g}, max {budget} chars]'
         seg_lines.append(f'{seg["index"] + 1}. {prefix} {text}')
 
     # Context section
