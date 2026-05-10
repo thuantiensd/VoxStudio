@@ -3990,6 +3990,7 @@ function DubbingTab({ setActiveTab }: { setActiveTab: (t: Tab) => void }) {
     setSubMargin(tpl.style.margin);
   }
   const [busy, setBusy] = useState(false);
+  const [uploadPct, setUploadPct] = useState(0);
   const [error, setError] = useState("");
   const [projects, setProjects] = useState<DubbingListProject[]>([]);
   const [loadingProjects, setLoadingProjects] = useState(false);
@@ -4269,6 +4270,7 @@ function DubbingTab({ setActiveTab }: { setActiveTab: (t: Tab) => void }) {
       return;
     }
     setBusy(true);
+    setUploadPct(0);
     try {
       const targetName = DUB_LANG_MAP[targetLang] || targetLang;
       const sourceName = sourceLang === "auto" ? "auto" : (DUB_LANG_MAP[sourceLang] || sourceLang);
@@ -4279,6 +4281,7 @@ function DubbingTab({ setActiveTab }: { setActiveTab: (t: Tab) => void }) {
         voice_id: ttsEngine === "premium" ? (voiceId || null) : null,
         enable_dubbing: enableDubbing,
         enable_subtitle: enableSubtitle,
+        onProgress: (pct) => setUploadPct(pct),
       });
 
       // Project đã tạo trên backend — switch sang tab "Dự án" NGAY để user
@@ -4797,12 +4800,21 @@ function DubbingTab({ setActiveTab }: { setActiveTab: (t: Tab) => void }) {
         <button
           onClick={createProject}
           disabled={busy || !file || (!enableDubbing && !enableSubtitle)}
-          className="inline-flex h-14 w-full items-center justify-center gap-3 rounded-2xl bg-foreground text-sm font-black text-background shadow-lg transition hover:scale-[1.01] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:scale-100"
+          className="relative inline-flex h-14 w-full items-center justify-center gap-3 overflow-hidden rounded-2xl bg-foreground text-sm font-black text-background shadow-lg transition hover:scale-[1.01] disabled:cursor-not-allowed disabled:opacity-90 disabled:hover:scale-100"
         >
           {busy ? (
             <>
-              <Loader2 className="h-5 w-5 animate-spin" />
-              <span>Đang khởi tạo dự án...</span>
+              {/* Progress fill — cho user thấy upload % thật, đỡ cảm giác app treo */}
+              <span
+                className="absolute inset-y-0 left-0 bg-primary/35 transition-[width] duration-150 ease-out"
+                style={{ width: `${uploadPct}%` }}
+              />
+              <Loader2 className="relative z-10 h-5 w-5 animate-spin" />
+              <span className="relative z-10">
+                {uploadPct < 100
+                  ? `Đang tải video lên... ${uploadPct}%`
+                  : "Đang khởi tạo dự án..."}
+              </span>
             </>
           ) : !file ? (
             <>
