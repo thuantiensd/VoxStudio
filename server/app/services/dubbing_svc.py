@@ -161,7 +161,15 @@ def _pick_omni_voice_id_for_segment(seg: dict, project: dict) -> str | None:
             if slot_idx < len(voice_slots) and voice_slots[slot_idx]:
                 return voice_slots[slot_idx]
 
-    # 4. Legacy single-voice
+    # 4. STRICT FALLBACK: voice_count > 1 + có voice_slots → CHỈ dùng giọng
+    # user đã chọn. Khi speaker_id = None hoặc không match map → slot 0.
+    # KHÔNG fallback về project.voice_id (giọng ngoài N slot user chọn).
+    if voice_count > 1 and voice_slots:
+        for slot_v in voice_slots[:voice_count]:
+            if slot_v:
+                return slot_v
+
+    # 5. Legacy single-voice (voice_count == 1 hoặc không có slot nào)
     return project.get("voice_id") or None
 
 
@@ -227,14 +235,17 @@ def _build_speaker_voice_assignments(project: dict, voice_slots: list, voice_cou
 def _pick_edge_voice_for_segment(seg: dict, project: dict) -> str | None:
     """Choose an Edge TTS voice for this segment.
 
-    Priority (NO gender classifier, per production spec):
-      1. speaker_voice_map[speaker_id] — explicit mapping từ analyze-speakers
-         (Phase 12). User có thể override qua UI.
+    Priority:
+      1. speaker_voice_map[speaker_id] — explicit mapping từ analyze-speakers.
       2. voice_count > 1 + voice_slots: cycle qua slots theo thứ tự xuất hiện
          speaker (đảm bảo mỗi speaker có voice riêng).
-      3. Single-voice override `edge_voice`.
-      4. Default voice cho target_language (no gender — first voice in lang).
-      5. None (Edge tự pick).
+      3. **Multi-voice STRICT FALLBACK**: nếu voice_count > 1 và voice_slots
+         có giá trị (user đã chọn), khi seg.speaker = None hoặc không match
+         map → dùng slot 0 (KHÔNG ra ngoài giọng user đã chọn). Đây là rule
+         "chọn 2 giọng thì chỉ đọc 2 giọng đấy thôi".
+      4. Single-voice override `edge_voice`.
+      5. Default voice cho target_language (chỉ khi single-voice mode).
+      6. None.
     """
     speaker_id = seg.get("speaker")
     voice_count = int(project.get("voice_count") or 1)
@@ -249,10 +260,8 @@ def _pick_edge_voice_for_segment(seg: dict, project: dict) -> str | None:
             return v
 
     # ── Priority 2: Multi-speaker mode without explicit map ──
-    # Build stable speaker_id → slot_idx mapping, cycle qua slots
-    # (đảm bảo 2+ speakers không dồn cùng 1 voice).
+    # Build stable speaker_id → slot_idx mapping, cycle qua slots.
     if voice_count > 1 and speaker_id:
-        # Cache mapping qua project key (computed lazily)
         cache_key = "_edge_slot_cache_v2"
         if cache_key not in project:
             speakers_seen: list[str] = []
@@ -272,19 +281,28 @@ def _pick_edge_voice_for_segment(seg: dict, project: dict) -> str | None:
             if slot_idx < len(voice_slots) and voice_slots[slot_idx]:
                 return voice_slots[slot_idx]
 
-    # ── Priority 3: Single-voice override ──
+    # ── Priority 3: Multi-voice STRICT FALLBACK ──
+    # User đã chọn N giọng → kết quả CHỈ được dùng các giọng đó. Khi
+    # seg.speaker = None (Whisper segment không match diarization), thay
+    # vì rơi xuống Lang default (giọng ngoài), pick slot 0 (giọng nam thường
+    # — slot 0 theo UI convention).
+    if voice_count > 1 and voice_slots:
+        for slot_v in voice_slots[:voice_count]:
+            if slot_v:
+                return slot_v
+
+    # ── Priority 4: Single-voice override ──
     if project.get("edge_voice"):
         return project["edge_voice"]
 
-    # ── Priority 4: Lang-based default (first male voice cho language,
-    # no gender inference — chỉ là first voice in DEFAULT_EDGE_VOICES_BY_LANG) ──
-    if target_lang:
+    # ── Priority 5: Lang-based default (CHỈ khi single-voice mode) ──
+    if voice_count <= 1 and target_lang:
         lang = target_lang.lower().strip()
         pair = DEFAULT_EDGE_VOICES_BY_LANG.get(lang)
         if pair:
             return pair.get("male") or pair.get("female")
 
-    # ── Priority 5: None — Edge default ──
+    # ── Priority 6: None — Edge default ──
     return None
 
 
