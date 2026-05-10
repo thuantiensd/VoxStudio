@@ -4255,15 +4255,15 @@ function DubbingTab({ setActiveTab }: { setActiveTab: (t: Tab) => void }) {
         onProgress: (pct) => setUploadPct(pct),
       });
 
-      // Project đã tạo trên backend — switch sang tab "Dự án" NGAY để user
-      // thấy progress card thay vì đứng đợi spinner ở tab dubbing.
+      // Project đã tạo trên backend — STAY ở tab Lồng tiếng, project mới
+      // hiện ở sidebar phải "Dự án gần đây" với progress card 0→100%.
       // Settings + autoDub chạy fire-and-forget ở background.
       setFile(null);
       setBusy(false);
+      setUploadPct(0);
       void reloadProjects();
-      setActiveTab("projects");
       toast.success("Đã tạo dự án lồng tiếng", {
-        description: "Pipeline đang chạy nền. Theo dõi tiến trình ở đây.",
+        description: "Pipeline đang chạy nền — xem ở 'Dự án gần đây' bên phải.",
         duration: 3000,
       });
 
