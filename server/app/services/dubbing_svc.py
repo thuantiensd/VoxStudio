@@ -1455,14 +1455,37 @@ def transcribe_project(project_id: str) -> dict:
                 analyze_speakers as run_speaker_pipeline,
                 build_speaker_voice_map,
             )
+            import threading, queue as _queue
             logger.info("Running speaker_pipeline (Phase 3-11)...")
-            sp_result = run_speaker_pipeline(
-                str(vocals_path) if vocals_path.exists() else audio_path,
-                embedding_audio_path=audio_path,
-                language=src_lang_norm,
-                min_speakers=1,
-                max_speakers=max(6, voice_count_meta),
-            )
+
+            # Watchdog 4 phút cho speaker pipeline — tránh treo vô hạn nếu
+            # bất kỳ phase nào (gender librosa, overlap pyannote, ...) hang.
+            SP_TIMEOUT = 240
+            sp_q: _queue.Queue = _queue.Queue()
+            def _sp_run():
+                try:
+                    r = run_speaker_pipeline(
+                        str(vocals_path) if vocals_path.exists() else audio_path,
+                        embedding_audio_path=audio_path,
+                        language=src_lang_norm,
+                        min_speakers=1,
+                        max_speakers=max(6, voice_count_meta),
+                    )
+                    sp_q.put(("ok", r))
+                except Exception as ex:
+                    sp_q.put(("err", ex))
+            t_sp = threading.Thread(target=_sp_run, daemon=True)
+            t_sp.start()
+            try:
+                kind, value = sp_q.get(timeout=SP_TIMEOUT)
+            except _queue.Empty:
+                raise TimeoutError(
+                    f"speaker_pipeline treo >{SP_TIMEOUT}s — abort, "
+                    f"segments KHÔNG có speaker info (fallback)",
+                )
+            if kind == "err":
+                raise value
+            sp_result = value
             # Pipeline mới có speaker_genders (F0 heuristic) — populate vào
             # speaker_genders dict để Gemini prompt + voice_map dùng.
             speaker_genders = dict(getattr(sp_result, "speaker_genders", {}) or {})

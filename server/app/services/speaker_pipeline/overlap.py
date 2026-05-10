@@ -22,32 +22,14 @@ _pipeline: object | None = None
 
 
 def _load_pipeline() -> object | None:
-    """Lazy-load pyannote overlap pipeline. None if unavailable."""
-    global _pipeline
-    if _pipeline is not None:
-        return _pipeline
-    with _pipeline_lock:
-        if _pipeline is not None:
-            return _pipeline
-        token = os.getenv("HF_TOKEN") or os.getenv("HUGGINGFACE_TOKEN")
-        if not token:
-            return None
-        try:
-            from pyannote.audio import Pipeline
-            logger.info("Loading pyannote/overlapped-speech-detection...")
-            try:
-                _pipeline = Pipeline.from_pretrained(
-                    "pyannote/overlapped-speech-detection", token=token,
-                )
-            except TypeError:
-                _pipeline = Pipeline.from_pretrained(
-                    "pyannote/overlapped-speech-detection", use_auth_token=token,
-                )
-            logger.info("Overlap detection pipeline ready")
-            return _pipeline
-        except Exception as e:
-            logger.warning("Cannot load overlap pipeline (%s) — fallback heuristic", e)
-            return None
+    """Pyannote overlap pipeline — SKIP trong pyannote 4.x vì API broken.
+
+    Pyannote/overlapped-speech-detection model thường có API change qua
+    versions → để dành Phase 5 dùng heuristic (đủ tốt cho production).
+    """
+    # Skip pyannote overlap — heuristic đủ tốt + tránh hang
+    logger.info("Skip pyannote overlap (4.x API broken) — use heuristic")
+    return None
 
 
 def detect_overlaps_pyannote(audio_path: str) -> list[OverlapRegion]:
