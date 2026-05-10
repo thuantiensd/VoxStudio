@@ -125,13 +125,17 @@ async def _run_sync_generator(gen_factory, progress_cb):
         item = await queue.get()
         if item is SENTINEL:
             break
-        if item.get("step") == "error" and item.get("_exception"):
-            raise item["_exception"]
         last_update = item
         progress = item.get("progress")
         if progress is not None and progress < 0:
             progress = None  # -1 sentinel nghĩa là state change, không phải %
         await progress_cb(progress=progress, step=item.get("step") or item.get("label"))
+        if item.get("step") == "error":
+            if item.get("_exception"):
+                raise item["_exception"]
+            raise RuntimeError(item.get("label") or item.get("error") or "Xử lý thất bại.")
+        if item.get("step") == "canceled":
+            raise asyncio.CancelledError()
     return last_update
 
 
@@ -157,12 +161,13 @@ async def dubbing_handler(payload: dict, *, job_id: str, progress_cb) -> dict:
     # Ước tính thời lượng audio/video để tính usage (phút)
     minutes = 0.0
     try:
-        from app.services.dubbing_svc import _load_project
-        proj = _load_project(project_id)
-        if proj and proj.get("duration"):
-            minutes = float(proj["duration"]) / 60.0
+        from app.services.dubbing_svc import _load_meta
+        proj = _load_meta(project_id)
+        duration = proj.get("video_duration") if proj else 0
+        if duration:
+            minutes = float(duration) / 60.0
     except Exception:
-        pass
+        logger.warning("[dubbing] cannot estimate usage for project=%s", project_id, exc_info=True)
 
     return {
         "project_id": project_id,
@@ -299,9 +304,12 @@ async def voice_preview_handler(payload: dict, *, job_id: str, progress_cb) -> d
         clean_path = preprocess_ref_audio(audio_path)
 
         await progress_cb(step="creating_voice_prompt", progress=30)
+        # preprocess_prompt=False: audio đã clean ở step preprocess_ref_audio.
+        # Để OmniVoice không silence-remove lần 2 → ref_text/audio mismatch.
         voice_prompt = gpu.create_voice_prompt(
             ref_audio=clean_path,
             ref_text=payload.get("ref_text") or None,
+            preprocess_prompt=False,
         )
 
         cfg = {

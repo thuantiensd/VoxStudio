@@ -16,11 +16,13 @@ Cấu trúc:
 
 import json
 import logging
+import mimetypes
 import os
 import sys
 import traceback
+from urllib.parse import urlencode
 
-from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from pydantic import BaseModel
 from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -30,6 +32,7 @@ from app.models.dubbing_schemas import (
 )
 
 from app.auth.deps import get_current_user
+from app.auth.audio_sig import sign as sign_resource, verify as verify_sig
 from app.auth.rate_limit import require_quota
 from app.db.models import User
 from app.db.session import get_session
@@ -42,9 +45,123 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/dubbing", tags=["Dubbing"])
 
+MAX_DUB_UPLOAD_MB = int(os.getenv("DUBBING_MAX_UPLOAD_MB", "500"))
+MAX_DUB_UPLOAD_BYTES = MAX_DUB_UPLOAD_MB * 1024 * 1024
+ALLOWED_UPLOAD_EXTENSIONS = {
+    ".mp4", ".mov", ".mkv", ".avi", ".webm",
+    ".mp3", ".wav", ".m4a", ".aac", ".flac",
+}
+ALLOWED_UPLOAD_CONTENT_PREFIXES = ("video/", "audio/")
+SIGNED_RESOURCE_TTL_SECONDS = 3600
+SIGNED_RESOURCES = {
+    "export/stream", "export/download", "video", "thumbnail",
+    "subtitles/srt", "subtitles/ass", "subtitles/vtt",
+}
+
 
 def _client_ip(request: Request) -> str | None:
     return request.client.host if request and request.client else None
+
+
+def _safe_upload_filename(filename: str | None) -> str:
+    return os.path.basename(filename or "video.mp4") or "video.mp4"
+
+
+def _validate_upload_metadata(request: Request, video: UploadFile):
+    filename = _safe_upload_filename(video.filename)
+    ext = os.path.splitext(filename)[1].lower()
+    if ext not in ALLOWED_UPLOAD_EXTENSIONS:
+        raise HTTPException(
+            status_code=400,
+            detail="Định dạng file không hỗ trợ. Vui lòng dùng MP4, MOV, MKV, AVI, WebM, MP3, WAV hoặc M4A.",
+        )
+
+    content_type = (video.content_type or "").lower()
+    if content_type and content_type != "application/octet-stream":
+        if not content_type.startswith(ALLOWED_UPLOAD_CONTENT_PREFIXES):
+            raise HTTPException(status_code=400, detail="File upload phải là video hoặc audio.")
+
+    raw_len = request.headers.get("content-length")
+    if raw_len:
+        try:
+            if int(raw_len) > MAX_DUB_UPLOAD_BYTES:
+                raise HTTPException(
+                    status_code=413,
+                    detail=f"File quá lớn. Giới hạn hiện tại là {MAX_DUB_UPLOAD_MB}MB.",
+                )
+        except ValueError:
+            pass
+
+    return filename
+
+
+async def _read_upload_with_limit(video: UploadFile) -> bytes:
+    data = bytearray()
+    while True:
+        chunk = await video.read(1024 * 1024)
+        if not chunk:
+            break
+        if len(data) + len(chunk) > MAX_DUB_UPLOAD_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail=f"File quá lớn. Giới hạn hiện tại là {MAX_DUB_UPLOAD_MB}MB.",
+            )
+        data.extend(chunk)
+    return bytes(data)
+
+
+def _resource_sig_id(project_id: str, resource: str) -> str:
+    return f"dubbing:{project_id}:{resource}"
+
+
+def _serve_project_resource(project_id: str, resource: str):
+    if resource == "video":
+        path = dubbing_svc.get_video_path(project_id)
+        if not path:
+            raise HTTPException(status_code=404, detail="Video not found")
+        media_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+        return FileResponse(str(path), media_type=media_type)
+
+    if resource == "thumbnail":
+        path = dubbing_svc.get_thumbnail_path(project_id)
+        if not path:
+            raise HTTPException(status_code=404, detail="Thumbnail not found")
+        return FileResponse(str(path), media_type="image/jpeg")
+
+    if resource in ("export/stream", "export/download"):
+        path = dubbing_svc.get_export_path(project_id)
+        if not path:
+            raise HTTPException(status_code=404, detail="Export not found")
+        if resource == "export/download":
+            project = dubbing_svc.get_project(project_id)
+            base = (project or {}).get("video_filename") or "dubbed"
+            filename = base.rsplit(".", 1)[0] + "_dubbed.mp4"
+            return FileResponse(str(path), media_type="video/mp4", filename=filename)
+        return FileResponse(str(path), media_type="video/mp4")
+
+    if resource.startswith("subtitles/"):
+        fmt = resource.split("/", 1)[1]
+        if fmt not in ("srt", "ass", "vtt"):
+            raise HTTPException(status_code=400, detail="Format must be 'srt', 'vtt' or 'ass'")
+        try:
+            if fmt == "srt":
+                dubbing_svc.generate_srt(project_id)
+            elif fmt == "vtt":
+                dubbing_svc.generate_vtt(project_id)
+            else:
+                dubbing_svc.generate_ass(project_id)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+
+        path = dubbing_svc.get_subtitle_path(project_id, fmt)
+        if not path:
+            raise HTTPException(status_code=404, detail="Subtitle not found")
+
+        project = dubbing_svc.get_project(project_id)
+        base = ((project or {}).get("video_filename") or "subtitles").rsplit(".", 1)[0]
+        return FileResponse(str(path), media_type="text/plain", filename=f"{base}.{fmt}")
+
+    raise HTTPException(status_code=404, detail="Resource not found")
 
 
 # ── Projects ────────────────────────────────────────
@@ -63,11 +180,12 @@ async def create_project(
 ):
     """Upload video và tạo project. Tạo cả filesystem files lẫn DB row."""
     try:
-        data = await video.read()
+        filename = _validate_upload_metadata(request, video)
+        data = await _read_upload_with_limit(video)
         # 1. Tạo files + meta.json (project_id sinh trong service)
         project = dubbing_svc.create_project(
             video_data=data,
-            video_filename=video.filename or "video.mp4",
+            video_filename=filename,
             target_language=target_language,
             voice_id=voice_id,
             source_language=source_language,
@@ -80,8 +198,8 @@ async def create_project(
                 db,
                 project_id=project["id"],
                 user_id=user.id,
-                title=video.filename or "",
-                video_filename=video.filename or "",
+                title=filename,
+                video_filename=filename,
                 duration_sec=float(project.get("video_duration", 0.0)),
                 file_size_bytes=len(data),
                 source_language=source_language,
@@ -207,6 +325,55 @@ async def get_thumbnail(
     return FileResponse(str(path), media_type="image/jpeg")
 
 
+@router.get("/projects/{project_id}/signed-url")
+async def get_signed_resource_url(
+    project_id: str,
+    resource: str = Query(...),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_session),
+):
+    """Return short-lived signed URL for <video>/<a> without Blob buffering."""
+    if resource not in SIGNED_RESOURCES:
+        raise HTTPException(status_code=400, detail="Unsupported resource")
+    await dubbing_project_svc.require_owned(db, project_id, user)
+    params = sign_resource(_resource_sig_id(project_id, resource), user.id, SIGNED_RESOURCE_TTL_SECONDS)
+    return {
+        "url": f"/api/v1/dubbing/signed/projects/{project_id}/{resource}?{urlencode(params)}",
+        "expires_at": int(params["exp"]),
+    }
+
+
+@router.get("/signed/projects/{project_id}/{resource:path}")
+async def signed_project_resource(
+    project_id: str,
+    resource: str,
+    sig: str | None = Query(None),
+    u: str | None = Query(None),
+    exp: str | None = Query(None),
+    db: AsyncSession = Depends(get_session),
+):
+    if resource not in SIGNED_RESOURCES:
+        raise HTTPException(status_code=400, detail="Unsupported resource")
+    if not u:
+        raise HTTPException(status_code=403, detail="Missing signature")
+    try:
+        user_id = int(u)
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=403, detail="Invalid signature")
+    verify_sig(
+        _resource_sig_id(project_id, resource),
+        user_id_request=user_id,
+        sig=sig, u=u, exp=exp,
+        is_admin=False,
+    )
+    row = await dubbing_project_svc.get(db, project_id)
+    signed_user = await db.get(User, user_id)
+    signed_user_is_admin = signed_user is not None and signed_user.role == "admin"
+    if row is None or row.deleted_at is not None or (row.user_id != user_id and not signed_user_is_admin):
+        raise HTTPException(status_code=404, detail="Project not found")
+    return _serve_project_resource(project_id, resource)
+
+
 # ── Transcribe ──────────────────────────────────────
 
 @router.post("/projects/{project_id}/transcribe")
@@ -270,6 +437,7 @@ async def generate_subtitles(
     await dubbing_project_svc.require_owned(db, project_id, user)
     try:
         dubbing_svc.generate_srt(project_id)
+        dubbing_svc.generate_vtt(project_id)
         dubbing_svc.generate_ass(project_id)
         return {"ok": True}
     except ValueError as e:
@@ -283,25 +451,9 @@ async def download_subtitle(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_session),
 ):
-    """Download subtitle file (srt or ass)."""
+    """Download subtitle file (srt, vtt or ass)."""
     await dubbing_project_svc.require_owned(db, project_id, user)
-    if fmt not in ("srt", "ass"):
-        raise HTTPException(status_code=400, detail="Format must be 'srt' or 'ass'")
-    try:
-        if fmt == "srt":
-            dubbing_svc.generate_srt(project_id)
-        else:
-            dubbing_svc.generate_ass(project_id)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-    path = dubbing_svc.get_subtitle_path(project_id, fmt)
-    if not path:
-        raise HTTPException(status_code=404, detail="Subtitle not found")
-
-    project = dubbing_svc.get_project(project_id)
-    base = project["video_filename"].rsplit(".", 1)[0] if project else "subtitles"
-    return FileResponse(str(path), media_type="text/plain", filename=f"{base}.{fmt}")
+    return _serve_project_resource(project_id, f"subtitles/{fmt}")
 
 
 # ── Translate ──────────────────────────────────────

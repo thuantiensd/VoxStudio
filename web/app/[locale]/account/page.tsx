@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import Image from "next/image";
 import { useRouter } from "@/i18n/navigation";
@@ -63,7 +63,7 @@ import {
   updateSubtitleStyle,
   deleteDubbingProject,
   startDubbingAutoDub,
-  fetchDubbingResourceBlobUrl,
+  getDubbingResourceUrl,
   downloadToProject,
   fetchCreditPacks,
   fetchDownloadInfo,
@@ -81,13 +81,10 @@ import {
   type CreditPack,
   type DownloadInfo,
   type DubbingListProject,
-  type DubbingProject,
   type EdgeVoice,
   type Job,
   type Payment,
   type PremiumVoice,
-  type SttResult,
-  type TtsResult,
   type Voice,
 } from "@/lib/api";
 
@@ -148,6 +145,14 @@ function mediaUrl(url: string) {
   } catch {
     return url;
   }
+}
+
+function subscribeClientMounted() {
+  return () => undefined;
+}
+
+function useClientMounted() {
+  return useSyncExternalStore(subscribeClientMounted, () => true, () => false);
 }
 
 // ── Language metadata: ISO 639-1 → flag + native + English name ─────────────
@@ -389,12 +394,6 @@ function languageOptionsFromVoices(voices: { locale: string }[]): string[] {
     if (prefix && LANGUAGE_META[prefix]) codes.add(prefix);
   }
   return Array.from(codes);
-}
-
-function languageDisplay(code: string) {
-  const meta = LANGUAGE_META[code];
-  if (!meta) return code.toUpperCase();
-  return `${meta.flag}  ${meta.native} (${meta.english})`;
 }
 
 function formatSrtTime(seconds: number) {
@@ -784,13 +783,6 @@ function saveTtsHistory(items: TtsHistoryItem[]) {
   try {
     localStorage.setItem(TTS_HISTORY_KEY, JSON.stringify(items.slice(0, TTS_HISTORY_LIMIT)));
   } catch {}
-}
-
-function formatDuration(seconds?: number) {
-  if (typeof seconds !== "number" || Number.isNaN(seconds) || seconds <= 0) return "--:--";
-  const total = Math.round(seconds);
-  const minutes = Math.floor(total / 60);
-  return `${minutes}:${String(total % 60).padStart(2, "0")}`;
 }
 
 function formatHistoryTime(iso: string) {
@@ -1434,7 +1426,6 @@ function TtsTab({ setActiveTab }: { setActiveTab: (t: Tab) => void }) {
   const [voices, setVoices] = useState<Voice[]>([]);
   const [premiumVoices, setPremiumVoices] = useState<PremiumVoice[]>([]);
   const [edgeVoices, setEdgeVoices] = useState<EdgeVoice[]>([]);
-  const [result, setResult] = useState<TtsResult | null>(null);
   const [history, setHistory] = useState<TtsHistoryItem[]>(loadTtsHistory);
   const [historyNewestFirst, setHistoryNewestFirst] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -1459,11 +1450,6 @@ function TtsTab({ setActiveTab }: { setActiveTab: (t: Tab) => void }) {
   }, []);
 
   const overLimit = charLimit !== null && text.length > charLimit;
-  const filteredEdgeVoices = edgeVoices.filter((voice) => {
-    if (!language) return true;
-    const prefix = language === "vi" ? "vi-" : `${language}-`;
-    return voice.locale?.toLowerCase().startsWith(prefix);
-  });
   const premiumVoiceLabel =
     premiumVoices.find((voice) => voice.slug === voiceId)?.display_name ||
     voices.find((voice) => voice.id === voiceId)?.name ||
@@ -1558,14 +1544,12 @@ function TtsTab({ setActiveTab }: { setActiveTab: (t: Tab) => void }) {
     else setEdgeVoice(item.voiceKey);
     setTab("text");
     setPanel("settings");
-    setResult(null);
     setError("");
     window.setTimeout(() => textareaRef.current?.focus(), 0);
   }
 
   async function generate() {
     setError("");
-    setResult(null);
     if (!text.trim()) {
       setError("Nhập văn bản trước khi tạo giọng nói.");
       return;
@@ -1617,7 +1601,6 @@ function TtsTab({ setActiveTab }: { setActiveTab: (t: Tab) => void }) {
               audio_chunk_duration: audioChunkDuration,
             })
           : await generateCloudTts({ text, voice: edgeVoice || null, language, speed });
-      setResult(next);
       // 2. Update item status = "done" với audio url
       writeHistory((items) =>
         items.map((it) =>
@@ -1760,7 +1743,6 @@ function TtsTab({ setActiveTab }: { setActiveTab: (t: Tab) => void }) {
 
   function clearText() {
     setText("");
-    setResult(null);
     setError("");
   }
 
@@ -3569,18 +3551,6 @@ function useSmoothProgress(targetPct: number, isRunning: boolean) {
   useEffect(() => { targetRef.current = targetPct; }, [targetPct]);
   useEffect(() => { runningRef.current = isRunning; }, [isRunning]);
 
-  // Snap về target khi stop (done/error/queued)
-  useEffect(() => {
-    if (!isRunning) {
-      setDisplayPct(targetPct);
-    }
-  }, [isRunning, targetPct]);
-
-  // Snap 100 khi done
-  useEffect(() => {
-    if (targetPct >= 100) setDisplayPct(100);
-  }, [targetPct]);
-
   useEffect(() => {
     if (!isRunning) return;
     let raf = 0;
@@ -3609,9 +3579,10 @@ function useSmoothProgress(targetPct: number, isRunning: boolean) {
     };
     raf = requestAnimationFrame(step);
     return () => cancelAnimationFrame(raf);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isRunning]);
 
+  if (targetPct >= 100) return 100;
+  if (!isRunning) return targetPct;
   return displayPct;
 }
 
@@ -4929,11 +4900,7 @@ type DubAdvancedModalProps = {
 
 function DubAdvancedModal(p: DubAdvancedModalProps) {
   const [tab, setTab] = useState<"quality" | "video" | "subtitle" | "audio" | "auto" | "translate">("quality");
-  const [mounted, setMounted] = useState(false);
-
-  useEffect(() => {
-    setMounted(true);
-  }, []);
+  const mounted = useClientMounted();
 
   useEffect(() => {
     if (!p.open) return;
@@ -5525,7 +5492,7 @@ function DubAdvancedModal(p: DubAdvancedModalProps) {
                     <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-600" />
                     <p className="text-[11px] leading-5 text-amber-700 dark:text-amber-300">
                       Đang dùng audio thô từ Edge TTS. Voice có thể nghe nhỏ/lớn không đều, khô, hoặc gắt.
-                      Bật lại "Mixing chuẩn phòng thu" để pipeline tự xử lý.
+                      Bật lại &quot;Mixing chuẩn phòng thu&quot; để pipeline tự xử lý.
                     </p>
                   </div>
                 )}
@@ -5919,7 +5886,7 @@ function ColorField({ label, value, onChange }: { label: string; value: string; 
 
 // ── DUB PROJECT VIEWER MODAL ─────────────────────────────────────────
 // Mở khi user click project status=done. Stream video qua /export/stream
-// (fetch + blob URL vì cần Bearer token). Cho phép tải về MP4 + SRT/VTT.
+// bằng signed URL ngắn hạn để <video> stream trực tiếp, không buffer Blob MP4.
 function DubProjectViewer({
   projectId,
   project,
@@ -5929,46 +5896,37 @@ function DubProjectViewer({
   project: DubbingListProject | null;
   onClose: () => void;
 }) {
-  const [mounted, setMounted] = useState(false);
+  const mounted = useClientMounted();
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [downloading, setDownloading] = useState<string | null>(null);
 
   useEffect(() => {
-    setMounted(true);
-  }, []);
+    if (!projectId) return;
+    let cancelled = false;
 
-  useEffect(() => {
-    if (!projectId) {
-      setVideoUrl(null);
-      setError(null);
-      return;
-    }
-    let revoked = false;
-    let currentUrl: string | null = null;
-
-    setLoading(true);
-    setError(null);
-    fetchDubbingResourceBlobUrl(projectId, "export/stream")
+    Promise.resolve()
+      .then(() => {
+        if (cancelled) return null;
+        setLoading(true);
+        setError(null);
+        setVideoUrl(null);
+        return getDubbingResourceUrl(projectId, "export/stream");
+      })
       .then((url) => {
-        if (revoked) {
-          URL.revokeObjectURL(url);
-          return;
-        }
-        currentUrl = url;
+        if (cancelled || !url) return;
         setVideoUrl(url);
       })
       .catch((e) => {
-        if (revoked) return;
+        if (cancelled) return;
         const msg = e instanceof Error ? e.message : "Không tải được video.";
         setError(msg);
       })
-      .finally(() => { if (!revoked) setLoading(false); });
+      .finally(() => { if (!cancelled) setLoading(false); });
 
     return () => {
-      revoked = true;
-      if (currentUrl) URL.revokeObjectURL(currentUrl);
+      cancelled = true;
     };
   }, [projectId]);
 
@@ -5985,15 +5943,13 @@ function DubProjectViewer({
     if (!projectId) return;
     setDownloading(resource);
     try {
-      const url = await fetchDubbingResourceBlobUrl(projectId, resource);
+      const url = await getDubbingResourceUrl(projectId, resource);
       const a = document.createElement("a");
       a.href = url;
       a.download = suggestedName;
       document.body.appendChild(a);
       a.click();
       a.remove();
-      // Revoke sau 1s — Chrome cần thời gian để start download
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Tải file thất bại.";
       toast.error("Tải thất bại", { description: msg });
@@ -6206,36 +6162,6 @@ function VoiceModelsTab() {
 // ── SAVED VOICES TAB ───────────────────────────────────────────────────
 // ── AUDIO TRIM HELPERS ─────────────────────────────────────────────────
 const MAX_RAW_DURATION = 10; // giây — vượt quá phải cắt trước khi chạy STT
-
-// ── Avatar helpers ──────────────────────────────────────────────────
-function getVoiceInitials(name: string): string {
-  const trimmed = name.trim();
-  if (!trimmed) return "?";
-  const parts = trimmed.split(/\s+/);
-  if (parts.length >= 2) {
-    return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
-  }
-  return trimmed.slice(0, 2).toUpperCase();
-}
-
-const AVATAR_GRADIENTS = [
-  "from-violet-500 to-fuchsia-500",
-  "from-blue-500 to-cyan-500",
-  "from-emerald-500 to-teal-500",
-  "from-orange-500 to-amber-500",
-  "from-rose-500 to-pink-500",
-  "from-indigo-500 to-purple-500",
-  "from-sky-500 to-blue-600",
-  "from-fuchsia-500 to-rose-500",
-  "from-lime-500 to-emerald-500",
-  "from-red-500 to-orange-500",
-];
-
-function getVoiceGradient(seed: string): string {
-  let hash = 0;
-  for (let i = 0; i < seed.length; i++) hash = (hash * 31 + seed.charCodeAt(i)) | 0;
-  return AVATAR_GRADIENTS[Math.abs(hash) % AVATAR_GRADIENTS.length];
-}
 
 // ── IndexedDB cho preview audio blob (lưu permanent local) ──────────────
 // Audio sinh 1 lần ở /voices/preview lúc clone → fetch + lưu blob → play sau này
@@ -6479,7 +6405,7 @@ function SavedVoicesTab({ setActiveTab }: { setActiveTab: (t: Tab) => void }) {
   const [currentTime, setCurrentTime] = useState(0);
   const [trimming, setTrimming] = useState(false);
   const [editorOpen, setEditorOpen] = useState(false);
-  const [editorMounted, setEditorMounted] = useState(false);
+  const editorMounted = useClientMounted();
   const [waveform, setWaveform] = useState<number[]>([]);
   const [draggingHandle, setDraggingHandle] = useState<"start" | "end" | "pan" | null>(null);
   const previewAudioRef = useRef<HTMLAudioElement | null>(null);
@@ -6610,13 +6536,11 @@ function SavedVoicesTab({ setActiveTab }: { setActiveTab: (t: Tab) => void }) {
     const audio = new Audio(mediaUrl(url));
     audio.onended = () => setPreviewingId(null);
     audio.onerror = () => {
-      // eslint-disable-next-line no-console
       console.error("[preview] audio error", audio.error);
       setPreviewingId(null);
     };
     previewVoiceAudioRef.current = audio;
     void audio.play().catch((err) => {
-      // eslint-disable-next-line no-console
       console.error("[preview] play() reject", err);
       setPreviewingId(null);
     });
@@ -6658,7 +6582,6 @@ function SavedVoicesTab({ setActiveTab }: { setActiveTab: (t: Tab) => void }) {
         return;
       }
     } catch (e) {
-      // eslint-disable-next-line no-console
       console.warn("[preview] IndexedDB fail, fallback URL", e);
     }
 
@@ -6686,10 +6609,7 @@ function SavedVoicesTab({ setActiveTab }: { setActiveTab: (t: Tab) => void }) {
 
   // Generate waveform peaks từ file audio (decode 1 lần)
   useEffect(() => {
-    if (!file) {
-      setWaveform([]);
-      return;
-    }
+    if (!file) return;
     let cancelled = false;
     (async () => {
       try {
@@ -6741,7 +6661,7 @@ function SavedVoicesTab({ setActiveTab }: { setActiveTab: (t: Tab) => void }) {
     setDraggingHandle(mode);
     const t = pointerToTime(e.clientX);
     if (mode === "start") {
-      let s = Math.max(0, Math.min(t, trimEnd - 0.1));
+      const s = Math.max(0, Math.min(t, trimEnd - 0.1));
       let endLocal = trimEnd;
       if (isOversize && endLocal - s > MAX_RAW_DURATION) {
         endLocal = Math.min(audioDuration, s + MAX_RAW_DURATION);
@@ -6749,7 +6669,7 @@ function SavedVoicesTab({ setActiveTab }: { setActiveTab: (t: Tab) => void }) {
       }
       setTrimStart(s);
     } else if (mode === "end") {
-      let endLocal = Math.min(audioDuration, Math.max(t, trimStart + 0.1));
+      const endLocal = Math.min(audioDuration, Math.max(t, trimStart + 0.1));
       let s = trimStart;
       if (isOversize && endLocal - s > MAX_RAW_DURATION) {
         s = Math.max(0, endLocal - MAX_RAW_DURATION);
@@ -6766,13 +6686,13 @@ function SavedVoicesTab({ setActiveTab }: { setActiveTab: (t: Tab) => void }) {
     if (!draggingHandle) return;
     const t = pointerToTime(e.clientX);
     if (draggingHandle === "start") {
-      let s = Math.max(0, Math.min(t, trimEnd - 0.1));
+      const s = Math.max(0, Math.min(t, trimEnd - 0.1));
       if (isOversize && trimEnd - s > MAX_RAW_DURATION) {
         setTrimEnd(Math.min(audioDuration, s + MAX_RAW_DURATION));
       }
       setTrimStart(s);
     } else if (draggingHandle === "end") {
-      let endLocal = Math.min(audioDuration, Math.max(t, trimStart + 0.1));
+      const endLocal = Math.min(audioDuration, Math.max(t, trimStart + 0.1));
       if (isOversize && endLocal - trimStart > MAX_RAW_DURATION) {
         setTrimStart(Math.max(0, endLocal - MAX_RAW_DURATION));
       }
@@ -6798,10 +6718,6 @@ function SavedVoicesTab({ setActiveTab }: { setActiveTab: (t: Tab) => void }) {
   }
 
   useEffect(() => {
-    setEditorMounted(true);
-  }, []);
-
-  useEffect(() => {
     if (!editorOpen) return;
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") setEditorOpen(false);
@@ -6815,21 +6731,10 @@ function SavedVoicesTab({ setActiveTab }: { setActiveTab: (t: Tab) => void }) {
   }, [editorOpen]);
 
   useEffect(() => {
-    if (!file) {
-      if (audioUrl) URL.revokeObjectURL(audioUrl);
-      setAudioUrl("");
-      setAudioDuration(0);
-      setTrimStart(0);
-      setTrimEnd(0);
-      return;
-    }
-    const url = URL.createObjectURL(file);
-    setAudioUrl(url);
     return () => {
-      URL.revokeObjectURL(url);
+      if (audioUrl) URL.revokeObjectURL(audioUrl);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [file]);
+  }, [audioUrl]);
 
   // Pause khi vượt quá trimEnd
   useEffect(() => {
@@ -6839,7 +6744,7 @@ function SavedVoicesTab({ setActiveTab }: { setActiveTab: (t: Tab) => void }) {
     if (currentTime >= trimEnd && trimEnd > 0) {
       audio.pause();
       audio.currentTime = trimStart;
-      setCurrentTime(trimStart);
+      window.requestAnimationFrame(() => setCurrentTime(trimStart));
     }
   }, [currentTime, playing, trimEnd, trimStart]);
 
@@ -6930,9 +6835,19 @@ function SavedVoicesTab({ setActiveTab }: { setActiveTab: (t: Tab) => void }) {
 
   function handleFileChange(next: File | null) {
     setFile(next);
+    setWaveform([]);
+    setAudioDuration(0);
+    setTrimStart(0);
+    setTrimEnd(0);
+    setCurrentTime(0);
+    setPlaying(false);
+    setAudioUrl(next ? URL.createObjectURL(next) : "");
     if (next) {
       setEditorOpen(true);
       // Whisper sẽ chỉ chạy sau khi metadata load + duration ≤ 10s (xem useEffect)
+    } else {
+      setEditorOpen(false);
+      transcribedForRef.current = null;
     }
   }
 
@@ -6977,7 +6892,7 @@ function SavedVoicesTab({ setActiveTab }: { setActiveTab: (t: Tab) => void }) {
       setName("");
       setOriginalText("");
       setPreviewText("");
-      setFile(null);
+      handleFileChange(null);
       setVoiceGender("");
       setBusy(false);
       reloadVoices();
@@ -7491,7 +7406,7 @@ function SavedVoicesTab({ setActiveTab }: { setActiveTab: (t: Tab) => void }) {
                             setTrimming(true);
                             try {
                               const trimmed = await sliceAudioFile(file, trimStart, trimEnd);
-                              setFile(trimmed);
+                              handleFileChange(trimmed);
                               // STT sẽ tự chạy qua onLoadedMetadata khi audio mới load (duration ≤ 10s)
                               toast.success(`Đã cắt audio (${fmtSec(trimEnd - trimStart)})`, { duration: 1800 });
                             } catch (e) {
@@ -8191,14 +8106,10 @@ function VoiceLibraryModal({
   const [sortMode, setSortMode] = useState<"name-asc" | "name-desc" | "lang">("name-asc");
   const [favorites, setFavorites] = useState<Set<string>>(() => loadFavorites());
   const [previewKey, setPreviewKey] = useState<string | null>(null);
-  const [mounted, setMounted] = useState(false);
+  const mounted = useClientMounted();
   const [engineMenuOpen, setEngineMenuOpen] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const engineMenuRef = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    setMounted(true);
-  }, []);
 
   useEffect(() => {
     if (!engineMenuOpen) return;
@@ -8211,12 +8122,11 @@ function VoiceLibraryModal({
     return () => document.removeEventListener("mousedown", handler);
   }, [engineMenuOpen]);
 
-  // Reset filter khi đổi engine
-  useEffect(() => {
+  function resetVoiceFilters() {
     setFilterLang("all");
     setFilterGender("all");
     setFilterStyle("all");
-  }, [engine]);
+  }
 
   useEffect(() => {
     if (!open) return;
@@ -8234,7 +8144,6 @@ function VoiceLibraryModal({
   useEffect(() => {
     if (!open) {
       audioRef.current?.pause();
-      setPreviewKey(null);
     }
   }, [open]);
 
@@ -8474,6 +8383,7 @@ function VoiceLibraryModal({
                     desc="Giọng đọc tự nhiên, model riêng, tiếng Việt chuẩn"
                     engineId="premium"
                     onClick={() => {
+                      resetVoiceFilters();
                       onEngineChange("premium");
                       setTab("default");
                       setQuery("");
@@ -8486,6 +8396,7 @@ function VoiceLibraryModal({
                     desc="400+ giọng, 100+ ngôn ngữ, miễn phí siêu rẻ"
                     engineId="cloud"
                     onClick={() => {
+                      resetVoiceFilters();
                       onEngineChange("cloud");
                       setTab("default");
                       setQuery("");
@@ -8990,14 +8901,17 @@ function LanguageCombobox({
   }, [open]);
 
   useEffect(() => {
-    if (open) {
-      window.setTimeout(() => inputRef.current?.focus(), 30);
+    if (!open) return;
+    const timer = window.setTimeout(() => {
+      inputRef.current?.focus();
       setHighlight(0);
-    }
+    }, 30);
+    return () => window.clearTimeout(timer);
   }, [open]);
 
   useEffect(() => {
-    setHighlight(0);
+    const timer = window.setTimeout(() => setHighlight(0), 0);
+    return () => window.clearTimeout(timer);
   }, [query]);
 
   useEffect(() => {
@@ -9176,61 +9090,6 @@ function SelectField({ label, value }: { label: string; value: string }) {
         <span>{value}</span>
         <span className="text-[10px] font-bold uppercase text-muted-foreground">Cố định</span>
       </div>
-    </div>
-  );
-}
-
-function SelectControl({
-  label,
-  value,
-  onChange,
-  options,
-}: {
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-  options: [string, string][];
-}) {
-  return (
-    <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-      {label}
-      <select
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        className="mt-1.5 h-10 w-full rounded-lg border border-border/60 bg-background/40 px-3 text-sm outline-none focus:border-primary/40"
-      >
-        {options.map(([optionValue, optionLabel]) => (
-          <option key={optionValue} value={optionValue}>
-            {optionLabel}
-          </option>
-        ))}
-      </select>
-    </label>
-  );
-}
-
-function ToggleRow({
-  label,
-  value,
-  onChange,
-}: {
-  label: string;
-  value: boolean;
-  onChange: (v: boolean) => void;
-}) {
-  return (
-    <div className="flex items-center justify-between rounded-xl border border-border/40 bg-background/30 px-4 py-3">
-      <span className="text-sm">{label}</span>
-      <button
-        onClick={() => onChange(!value)}
-        className={`relative h-5 w-9 rounded-full transition-colors ${value ? "bg-primary" : "bg-muted/60"}`}
-      >
-        <span
-          className={`absolute top-0.5 h-4 w-4 rounded-full bg-background transition-transform ${
-            value ? "translate-x-4" : "translate-x-0.5"
-          }`}
-        />
-      </button>
     </div>
   );
 }

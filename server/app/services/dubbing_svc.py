@@ -2749,6 +2749,29 @@ def generate_srt(project_id: str, use_translated: bool = True) -> str:
     return content
 
 
+def generate_vtt(project_id: str, use_translated: bool = True) -> str:
+    """Generate WebVTT subtitle content."""
+    project = _load_meta(project_id)
+    if not project:
+        raise ValueError("Project not found")
+
+    lines = ["WEBVTT", ""]
+    for seg in project["segments"]:
+        text = seg["translated_text"] if use_translated and seg["translated_text"].strip() else seg["original_text"]
+        if not text.strip():
+            continue
+        start = _fmt_time(seg["start"])
+        end = _fmt_time(seg["end"])
+        lines.append(f"{start} --> {end}")
+        lines.append(text.strip())
+        lines.append("")
+
+    content = "\n".join(lines)
+    vtt_path = _project_dir(project_id) / "subtitles.vtt"
+    vtt_path.write_text(content, encoding="utf-8")
+    return content
+
+
 def _split_text_for_subtitle(text: str, max_chars: int = 84) -> list[str]:
     """Chia 1 đoạn text dài thành nhiều subtitle cues ≤ max_chars.
 

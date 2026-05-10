@@ -517,7 +517,7 @@ export async function createDubbingProject(body: {
       xhr.onload = () => {
         if (xhr.status >= 200 && xhr.status < 300) {
           try { resolve(JSON.parse(xhr.responseText)); }
-          catch (e) { reject(new ApiError(xhr.status, "Invalid JSON response")); }
+          catch { reject(new ApiError(xhr.status, "Invalid JSON response")); }
         } else {
           let detail = xhr.statusText;
           try { detail = JSON.parse(xhr.responseText)?.detail || detail; } catch {}
@@ -648,6 +648,17 @@ export async function fetchDubbingResourceBlobUrl(
   }
   const blob = await res.blob();
   return URL.createObjectURL(blob);
+}
+
+export async function getDubbingResourceUrl(
+  projectId: string,
+  resource: "export/stream" | "export/download" | "video" | "thumbnail" | `subtitles/${string}`,
+): Promise<string> {
+  const params = new URLSearchParams({ resource });
+  const res = await api<{ url: string; expires_at: number }>(
+    `/dubbing/projects/${projectId}/signed-url?${params.toString()}`,
+  );
+  return res.url.startsWith("http") ? res.url : `${API_URL}${res.url}`;
 }
 
 /**

@@ -4,19 +4,21 @@ import asyncio
 import json
 import logging
 import threading
-from pathlib import Path
 
-from fastapi import APIRouter, Body, Depends, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.rate_limit import require_download_quota
 from app.db.models import User
 from app.db.session import AsyncSessionLocal
-from app.services import social_download_svc, usage_svc
+from app.services import audit_svc, dubbing_project_svc, dubbing_svc, social_download_svc, usage_svc
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/download", tags=["Download"])
+
+
+def _client_ip(request: Request) -> str | None:
+    return request.client.host if request and request.client else None
 
 
 @router.post("/info")
@@ -40,6 +42,7 @@ async def fetch_info(
 
 @router.post("/to-project")
 async def download_to_project(
+    request: Request,
     url: str = Body(..., embed=True),
     target_language: str = Body("vietnamese", embed=True),
     source_language: str = Body("auto", embed=True),
@@ -85,17 +88,58 @@ async def download_to_project(
         while True:
             item = await q.get()
             if item is SENTINEL: break
-            # Record usage 1 lần khi có project_id (download thành công)
-            if not recorded["done"] and item.get("project_id"):
+            # Gắn ownership DB trước khi báo done cho client; nếu lỗi thì xoá
+            # files vừa tải để tránh orphan project user không mở được.
+            project_id = item.get("project_id")
+            if not recorded["done"] and project_id:
                 recorded["done"] = True
                 try:
+                    project_meta = dubbing_svc.get_project(project_id) or {}
+                    filename = item.get("filename") or project_meta.get("video_filename") or "video.mp4"
+                    title = item.get("title") or filename
+                    duration = float(item.get("duration") or project_meta.get("video_duration") or 0.0)
+                    video_path = dubbing_svc.get_video_path(project_id)
+                    file_size = video_path.stat().st_size if video_path and video_path.exists() else 0
                     async with AsyncSessionLocal() as db:
+                        existing = await dubbing_project_svc.get(db, project_id)
+                        if existing is None:
+                            await dubbing_project_svc.create(
+                                db,
+                                project_id=project_id,
+                                user_id=user.id,
+                                title=title,
+                                video_filename=filename,
+                                duration_sec=duration,
+                                file_size_bytes=file_size,
+                                source_language=source_language,
+                                target_language=target_language,
+                            )
                         await usage_svc.record(
                             db, user_id=user.id, feature="download",
-                            project_id=item.get("project_id"),
+                            project_id=project_id,
+                        )
+                        await audit_svc.log(
+                            db, user_id=user.id, action="download.to_project",
+                            ip=_client_ip(request),
+                            user_agent=request.headers.get("user-agent"),
+                            metadata={
+                                "project_id": project_id,
+                                "url": url[:120],
+                                "platform": item.get("platform"),
+                                "duration_sec": duration,
+                            },
                         )
                 except Exception as e:
-                    logger.warning("record download usage failed: %s", e)
+                    logger.exception("download project ownership create failed: %s", e)
+                    try:
+                        dubbing_svc.delete_project(project_id)
+                    except Exception:
+                        pass
+                    item = {
+                        "step": "error",
+                        "progress": -1,
+                        "label": "Không lưu được dự án sau khi tải video. Vui lòng thử lại.",
+                    }
             yield f"data: {json.dumps(item, ensure_ascii=False)}\n\n"
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
