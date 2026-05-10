@@ -41,6 +41,16 @@ PROVIDER_DISPLAY = {
 }
 
 
+# Fatal status — KHÔNG retry, KHÔNG fallback. User-correctable error.
+# Pipeline phải fail NGAY thay vì waste time chuyển engine khác.
+FATAL_STATUSES = {401, 403, 402}  # auth, forbidden, payment required
+
+
+class FatalAuthError(ValueError):
+    """Key sai/hết hạn/quota → user phải fix, không fallback engine khác."""
+    pass
+
+
 def _friendly_error(engine: str, status: int, body: str) -> str:
     """Chuyển HTTP error từ provider thành message user-friendly (không leak raw)."""
     name = PROVIDER_DISPLAY.get(engine, engine)
@@ -93,7 +103,12 @@ def _post_with_retry(engine: str, url: str, *, params=None, json_body=None, data
     status = last_resp.status_code if last_resp is not None else 0
     raw = last_resp.text[:500] if last_resp is not None else ""
     logger.error("[%s] final failure %d: %s", engine, status, raw)
-    raise ValueError(_friendly_error(engine, status, raw))
+    msg = _friendly_error(engine, status, raw)
+    # Fatal status (401/403/402) → raise FatalAuthError để dubbing_svc
+    # KHÔNG fallback engine khác — user phải fix key trước.
+    if status in FATAL_STATUSES:
+        raise FatalAuthError(msg)
+    raise ValueError(msg)
 
 # Default model mỗi engine — có thể override qua body request nếu cần.
 # Gemini 1.5 đã bị Google retire (04/2025). Dùng 2.5-flash (fast + free tier).

@@ -1704,6 +1704,16 @@ def translate_project(
                     eng, try_eng, last_error,
                 )
             break
+        except cloud_translate_svc.FatalAuthError as e:
+            # 401/403/402 — KHÔNG fallback. User phải fix key trước.
+            # Bypass cả engine fallback chain, fail NGAY với message rõ.
+            logger.error("Engine %s FATAL auth error — abort fallback: %s",
+                          try_eng, e)
+            raise ValueError(
+                f"❌ {try_eng}: {e}\n\n"
+                f"Hãy kiểm tra API key trong Cài đặt và thử lại. "
+                f"Pipeline KHÔNG tự đổi engine khác vì lỗi key cần user fix.",
+            ) from e
         except Exception as e:
             last_error = e
             logger.warning("Engine %s failed: %s", try_eng, e)
