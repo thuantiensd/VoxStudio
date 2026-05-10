@@ -1434,6 +1434,23 @@ def translate_project(
         from app.services import glossary_svc
         glossary = glossary_svc.parse_glossary(project.get("glossary") or "")
 
+    # Auto-detect genre nếu chưa có (user-explicit luôn ưu tiên).
+    # Detect 1 lần từ tổng original_text rồi persist vào meta để LLM prompt
+    # các batch sau dùng nhất quán + UI hiển thị genre cho user verify.
+    if not project.get("film_genre") or project.get("film_genre") == "auto":
+        try:
+            from app.services.llm import detect_genre
+            full_text = " ".join(
+                (s.get("original_text") or "") for s in project.get("segments", [])
+            )
+            detected = detect_genre(full_text)
+            if detected and detected != "generic":
+                project["film_genre"] = detected
+                _save_meta(project)
+                logger.info("Auto-detected genre: %s", detected)
+        except Exception as e:
+            logger.warning("Genre detection failed: %s — fallback generic", e)
+
     # ── Path A: Gemini — server-side context-aware (env key) ──
     # Giữ path cũ để backward-compat khi user KHÔNG truyền api_key (admin
     # set env GEMINI_API_KEY). Nếu user truyền key → đi path BYOK chung.

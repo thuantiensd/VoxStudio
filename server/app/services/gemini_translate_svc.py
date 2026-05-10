@@ -44,14 +44,30 @@ def _extra_block(topic_hint: str | None,
 
 
 def _genre_block_for_gemini(film_genre: str | None) -> str:
-    """Inject genre-specific guidance vào Gemini prompt."""
-    if not film_genre:
+    """Inject genre-specific pronoun matrix + ngôn ngữ guide vào Gemini prompt.
+
+    Ưu tiên block từ `app.services.llm.genre_detector` (chi tiết, có pronoun
+    matrix cổ trang/hiện đại/action/romcom). Fallback block cũ nếu module
+    chưa có.
+    """
+    if not film_genre or film_genre == "auto":
         return ""
-    from app.services.llm_translate_svc import _genre_prompt_block
-    block = _genre_prompt_block(film_genre)
-    if not block:
-        return ""
-    return f"\n\n6. **Film Genre Context**:\n{block}\n"
+    try:
+        from app.services.llm import get_genre_prompt_block
+        block = get_genre_prompt_block(film_genre)
+        if block:
+            return "\n" + block + "\n"
+    except Exception:
+        pass
+    # Fallback block cũ (giữ tương thích)
+    try:
+        from app.services.llm_translate_svc import _genre_prompt_block
+        block = _genre_prompt_block(film_genre)
+        if block:
+            return f"\n\n6. **Film Genre Context**:\n{block}\n"
+    except Exception:
+        pass
+    return ""
 
 
 MAX_RETRY = 3
