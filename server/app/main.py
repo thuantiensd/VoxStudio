@@ -56,6 +56,54 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+def _cleanup_stale_dubbing_jobs() -> None:
+    """Scan dubbing_projects/, mark mọi job đang dở (transcribing/editing/
+    exporting/processing) → "error". Worker process đã chết khi backend
+    restart → không có cơ chế nào tiếp tục được, để status cũ sẽ làm
+    frontend hiện "đang chạy" giả lẽn lẽn.
+    """
+    from app.config import DUBBING_DIR
+    import json
+
+    # "created" thường là project tạo nhưng worker chưa pickup → restart
+    # backend trước khi pipeline start → project mồ côi mãi mãi.
+    # Auto-mark error để user xoá hoặc retry.
+    in_progress_states = {
+        "created",
+        "transcribing", "translating", "editing", "generating",
+        "tts", "exporting", "rendering", "processing", "running", "pending",
+    }
+    base = DUBBING_DIR
+    if not base.exists():
+        return
+    cleaned = 0
+    for proj_dir in base.iterdir():
+        meta_path = proj_dir / "project.json"
+        if not meta_path.exists():
+            continue
+        try:
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        status = (meta.get("status") or "").lower()
+        if status in in_progress_states:
+            meta["status"] = "error"
+            meta["error"] = (
+                "Pipeline bị gián đoạn do server restart. "
+                "Vui lòng xoá dự án và tạo lại."
+            )
+            try:
+                meta_path.write_text(
+                    json.dumps(meta, ensure_ascii=False, indent=2),
+                    encoding="utf-8",
+                )
+                cleaned += 1
+            except Exception:
+                pass
+    if cleaned:
+        logger.info("[startup] Marked %d stale dubbing job(s) as error", cleaned)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Load models on startup, cleanup on shutdown."""
@@ -73,6 +121,16 @@ async def lifespan(app: FastAPI):
         gpu.load_all()
     else:
         logger.info("[lifespan] worker disabled — skipping model load + queue thread")
+
+    # ── Stale job cleanup ──
+    # Khi backend stop giữa chừng (Ctrl+C, crash, kill), worker thread chết
+    # nhưng project meta giữ status "transcribing/editing/exporting" → frontend
+    # hiển thị "đang chạy" giả mãi mãi. Cleanup: scan tất cả meta, mark mọi
+    # status đang dở thành "error" với note rõ ràng.
+    try:
+        _cleanup_stale_dubbing_jobs()
+    except Exception as e:
+        logger.warning("Stale job cleanup failed: %s", e)
 
     # Background TTL cleanup cho audio_output/ — chạy 1h/lần. Lần đầu chạy
     # ngay khi boot để dọn rác từ phiên trước.
@@ -97,7 +155,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="VoxStudio API",
     version="0.1.0",
-    description="TTS + STT API powered by OmniVoice & Whisper",
+    description="TTS + STT API powered by Vox Premium & Whisper",
     lifespan=lifespan,
 )
 

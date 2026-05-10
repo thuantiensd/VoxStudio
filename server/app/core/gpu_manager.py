@@ -90,22 +90,22 @@ class GPUManager:
         logger.info("Server ready. TTS will load on first generate request.")
 
     def _ensure_tts(self):
-        """Lazy-load OmniVoice TTS on first use."""
+        """Lazy-load Vox Premium TTS engine on first use."""
         if self.tts_model is not None:
             return
         if not OMNIVOICE_AVAILABLE:
             raise RuntimeError(
-                "OmniVoice package not installed. "
-                "Install: pip install -e /content/OmniVoice-master (Colab cell 3)"
+                "Vox Premium engine not installed. "
+                "Install: pip install -e /path/to/voice-engine (see docs)"
             )
-        logger.info("Loading OmniVoice from %s (first TTS request)...", TTS_MODEL)
+        logger.info("Loading Vox Premium engine from %s (first TTS request)...", TTS_MODEL)
         self.tts_model = OmniVoice.from_pretrained(
             TTS_MODEL,
             device_map=DEVICE,
             dtype=DTYPE,
             load_asr=False,
         )
-        logger.info("OmniVoice loaded.")
+        logger.info("Vox Premium engine loaded.")
 
     @property
     def ready(self) -> bool:
@@ -130,10 +130,20 @@ class GPUManager:
             self._load_faster_whisper()
         with self._lock:
             def _run(vad: bool):
+                # Anti-hallucination cho Chinese drama / video có nhạc nền:
+                # condition_on_previous_text=True (default) khiến model dùng
+                # hypothesis trước làm context → loop output cùng text khi
+                # gặp silence/music. Tắt + thêm hallucination_silence_threshold
+                # + no_repeat_ngram để chặn repeat ngay tại generation.
                 kwargs = {
                     "beam_size": 5,
                     "vad_filter": vad,
-                    "word_timestamps": True,   # critical: actual time per word
+                    "word_timestamps": True,
+                    "condition_on_previous_text": False,
+                    "hallucination_silence_threshold": 2.0,
+                    "no_repeat_ngram_size": 3,
+                    "temperature": [0.0, 0.2, 0.4, 0.6, 0.8, 1.0],
+                    "compression_ratio_threshold": 2.2,
                 }
                 if vad:
                     kwargs["vad_parameters"] = {
@@ -162,6 +172,11 @@ class GPUManager:
                         "end": s.end,
                         "text": s.text.strip(),
                         "words": words,
+                        # Confidence metrics — dùng filter music/song segments
+                        # no_speech_prob cao = audio không phải speech (music)
+                        # avg_logprob âm sâu = LM confidence thấp (gibberish/music)
+                        "no_speech_prob": float(getattr(s, "no_speech_prob", 0.0) or 0.0),
+                        "avg_logprob": float(getattr(s, "avg_logprob", 0.0) or 0.0),
                     })
                 return segs, info
 
@@ -250,11 +265,11 @@ class GPUManager:
             self._log_vram("after unload_llm")
 
     def unload_tts(self):
-        """Free OmniVoice from VRAM (~2-3GB). Reloads lazily on next generate."""
+        """Free Vox Premium TTS from VRAM (~2-3GB). Reloads lazily on next generate."""
         with self._lock:
             if self.tts_model is None:
                 return
-            logger.info("Unloading OmniVoice TTS...")
+            logger.info("Unloading Vox Premium TTS engine...")
             del self.tts_model
             self.tts_model = None
             import gc
@@ -290,20 +305,34 @@ class GPUManager:
             elif not self._use_faster_whisper and self.whisper_pipe is None:
                 self._load_hf_whisper()
 
-    def create_voice_prompt(self, ref_audio: str, ref_text: str = None):
-        """Create a reusable VoiceClonePrompt from reference audio."""
+    def create_voice_prompt(self, ref_audio: str, ref_text: str = None,
+                            preprocess_prompt: bool = True):
+        """Create a reusable VoiceClonePrompt from reference audio.
+
+        preprocess_prompt: nếu False → OmniVoice KHÔNG chạy silence removal
+        lần 2. Dùng khi caller đã preprocess audio (vd voice_svc gọi
+        preprocess_ref_audio trước). Tránh bug ref_text/audio mismatch.
+        """
         with self._lock:
             self._ensure_tts()
             self._clear_cache()
             if ref_text is None:
                 logger.info("Auto-transcribing reference audio...")
-                whisper_result = self.whisper_pipe(ref_audio)
-                ref_text = whisper_result["text"].strip()
-                logger.info("Transcribed: %s", ref_text[:80])
+                # Fallback: whisper_pipe (HF) → faster-whisper → None để
+                # OmniVoice tự load ASR. Tránh crash khi whisper_pipe is None.
+                if self.whisper_pipe is not None:
+                    whisper_result = self.whisper_pipe(ref_audio)
+                    ref_text = whisper_result["text"].strip()
+                elif getattr(self, "_fw_model", None) is not None:
+                    fw_result = self.transcribe_faster(ref_audio)
+                    ref_text = (fw_result.get("text") or "").strip()
+                if ref_text:
+                    logger.info("Transcribed: %s", ref_text[:80])
 
             prompt = self.tts_model.create_voice_clone_prompt(
                 ref_audio=ref_audio,
                 ref_text=ref_text,
+                preprocess_prompt=preprocess_prompt,
             )
             self._clear_cache()
             return prompt

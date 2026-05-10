@@ -785,6 +785,170 @@ async def cancel_auto_dub(
     return {"ok": True, "project_id": project_id}
 
 
+# ── Phase 11: Speaker analysis pipeline (production-ready) ───
+
+@router.post("/projects/{project_id}/analyze-speakers")
+async def analyze_speakers_endpoint(
+    project_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_session),
+):
+    """Run speaker analysis pipeline trên audio của project.
+
+    Output: editable JSON với
+      - sentences (text + speaker_id + voice_id + confidence + need_review)
+      - speakers (stable IDs SPEAKER_00, SPEAKER_01...)
+      - overlaps (regions có 2+ người nói cùng lúc)
+
+    Pipeline phases:
+      1. Audio preprocess (đã chạy ở transcribe step — vocals.wav)
+      2. VAD (qua Silero — built-in pyannote)
+      3. Pyannote diarization
+      4. Embedding extraction + cross-scene reID clustering
+      5. Overlap detection
+      6-7. Faster-whisper transcribe + WhisperX align
+      8. Word-level speaker assignment (theo time overlap)
+      9. Sentence grouping (majority duration)
+      10. Confidence engine
+      11. Output JSON ready for FE editor
+
+    KHÔNG dùng gender classifier — voice mapping qua speaker_id.
+    """
+    await dubbing_project_svc.require_owned(db, project_id, user)
+    project = dubbing_svc.get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    pdir = dubbing_svc._project_dir(project_id)
+    vocals_path = pdir / "vocals.wav"
+    audio_path = vocals_path if vocals_path.exists() else (pdir / "original_audio.wav")
+    if not audio_path.exists():
+        raise HTTPException(status_code=400, detail="No audio file in project")
+
+    try:
+        from app.services.speaker_pipeline import analyze_speakers, build_speaker_voice_map
+
+        src_lang = project.get("source_language_input", "auto")
+        result = analyze_speakers(
+            str(audio_path),
+            embedding_audio_path=str(pdir / "original_audio.wav"),
+            language=src_lang if src_lang != "auto" else None,
+            min_speakers=1,
+            max_speakers=int(project.get("voice_count") or 6),
+        )
+
+        # Build initial voice mapping từ voice_slots — user có thể override sau
+        voice_slots = project.get("voice_slots") or []
+        user_overrides = project.get("speaker_voice_map") or {}
+        voice_map = build_speaker_voice_map(
+            speakers=result.speakers,
+            voice_slots=voice_slots,
+            user_overrides=user_overrides,
+        )
+        for s in result.sentences:
+            s.voice_id = voice_map.get(s.speaker_id) if s.speaker_id else None
+
+        project["speaker_analysis"] = result.to_json()
+        project["speaker_voice_map"] = voice_map
+        dubbing_svc._save_meta(project)
+
+        return {
+            "ok": True,
+            "project_id": project_id,
+            "speakers": result.speakers,
+            "voice_map": voice_map,
+            "sentences_count": len(result.sentences),
+            "need_review_count": sum(1 for s in result.sentences if s.need_review),
+            "stats": result.stats,
+        }
+    except Exception as e:
+        logger.exception("analyze_speakers failed for project %s", project_id)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/projects/{project_id}/speakers")
+async def get_speaker_analysis(
+    project_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_session),
+):
+    """Get latest speaker analysis JSON cho FE editor."""
+    await dubbing_project_svc.require_owned(db, project_id, user)
+    project = dubbing_svc.get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    analysis = project.get("speaker_analysis")
+    if not analysis:
+        raise HTTPException(
+            status_code=404,
+            detail="No analysis yet — call POST /analyze-speakers first",
+        )
+    return {
+        "project_id": project_id,
+        "voice_map": project.get("speaker_voice_map", {}),
+        **analysis,
+    }
+
+
+@router.put("/projects/{project_id}/speakers/voice-map")
+async def update_voice_map(
+    project_id: str,
+    body: dict,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_session),
+):
+    """Update speaker_id → voice_id mapping (user-edited).
+
+    Body: {"voice_map": {"SPEAKER_00": "edge_vi_namminh", ...}}
+    """
+    await dubbing_project_svc.require_owned(db, project_id, user)
+    project = dubbing_svc.get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    voice_map = body.get("voice_map") or {}
+    if not isinstance(voice_map, dict):
+        raise HTTPException(status_code=400, detail="voice_map must be dict")
+    project["speaker_voice_map"] = voice_map
+    if "speaker_analysis" in project:
+        for s in project["speaker_analysis"].get("sentences", []):
+            spk = s.get("speaker_id")
+            if spk and spk in voice_map:
+                s["voice_id"] = voice_map[spk]
+    dubbing_svc._save_meta(project)
+    return {"ok": True, "voice_map": voice_map}
+
+
+@router.put("/projects/{project_id}/speakers/sentence/{sentence_id}")
+async def update_sentence_speaker(
+    project_id: str,
+    sentence_id: int,
+    body: dict,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_session),
+):
+    """Edit sentence: text hoặc speaker_id (manual override).
+
+    Body: {"text": "...", "speaker_id": "SPEAKER_00"}
+    """
+    await dubbing_project_svc.require_owned(db, project_id, user)
+    project = dubbing_svc.get_project(project_id)
+    if not project or "speaker_analysis" not in project:
+        raise HTTPException(status_code=404, detail="No analysis to edit")
+    sentences = project["speaker_analysis"].get("sentences") or []
+    target = next((s for s in sentences if s.get("sentence_id") == sentence_id), None)
+    if target is None:
+        raise HTTPException(status_code=404, detail="Sentence not found")
+    if "text" in body:
+        target["text"] = str(body["text"])
+    if "speaker_id" in body:
+        target["speaker_id"] = body["speaker_id"]
+        vmap = project.get("speaker_voice_map") or {}
+        target["voice_id"] = vmap.get(body["speaker_id"]) if body["speaker_id"] else None
+    target["need_review"] = False
+    dubbing_svc._save_meta(project)
+    return {"ok": True, "sentence": target}
+
+
 # ── Utility (no project_id, no sensitive data) ───
 
 @router.get("/edge-voices")

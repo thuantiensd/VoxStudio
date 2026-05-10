@@ -18,7 +18,8 @@ import soundfile as sf
 from app.config import DUBBING_DIR, VOICES_DIR, TTS_DEFAULT_GUIDANCE, TTS_DEFAULT_STEPS, IS_CUDA
 from app.core.gpu_manager import gpu
 from app.core.storage import load_voice
-from app.services import whisper_svc, translate_svc, llm_translate_svc, edge_tts_svc, vocal_separator_svc, gemini_translate_svc, diarize_svc, resemblyzer_diarize_svc, default_voices_svc
+from app.services import whisper_svc, translate_svc, llm_translate_svc, edge_tts_svc, vocal_separator_svc, gemini_translate_svc, diarize_svc, resemblyzer_diarize_svc, default_voices_svc, whisperx_svc
+from app.config import USE_WHISPERX
 from app.services.tts_svc import trim_silence
 
 logger = logging.getLogger(__name__)
@@ -40,49 +41,127 @@ def _detect_tts_engine() -> str:
 EDGE_VOICE_MALE_VI = "vi-VN-NamMinhNeural"
 EDGE_VOICE_FEMALE_VI = "vi-VN-HoaiMyNeural"
 
+# Default Edge TTS voice nam/nữ per target language. Dùng khi multi-speaker
+# mode + slot trống → backend tự pick giọng nam cho speaker nam, nữ cho nữ.
+# Key: target_language (lowercase, theo project meta: "vietnamese", "english"...)
+# Fallback: dùng vi default khi không có map (rất ít khả năng vì các engine
+# dịch chuẩn output 1 trong các target_language phổ biến).
+DEFAULT_EDGE_VOICES_BY_LANG: dict[str, dict[str, str]] = {
+    "vietnamese": {"male": "vi-VN-NamMinhNeural",   "female": "vi-VN-HoaiMyNeural"},
+    "english":    {"male": "en-US-GuyNeural",        "female": "en-US-AriaNeural"},
+    "chinese":    {"male": "zh-CN-YunxiNeural",      "female": "zh-CN-XiaoxiaoNeural"},
+    "japanese":   {"male": "ja-JP-KeitaNeural",      "female": "ja-JP-NanamiNeural"},
+    "korean":     {"male": "ko-KR-InJoonNeural",     "female": "ko-KR-SunHiNeural"},
+    "french":     {"male": "fr-FR-HenriNeural",      "female": "fr-FR-DeniseNeural"},
+    "spanish":    {"male": "es-ES-AlvaroNeural",     "female": "es-ES-ElviraNeural"},
+    "german":     {"male": "de-DE-ConradNeural",     "female": "de-DE-KatjaNeural"},
+    "portuguese": {"male": "pt-BR-AntonioNeural",    "female": "pt-BR-FranciscaNeural"},
+    "russian":    {"male": "ru-RU-DmitryNeural",     "female": "ru-RU-SvetlanaNeural"},
+    "thai":       {"male": "th-TH-NiwatNeural",      "female": "th-TH-PremwadeeNeural"},
+    "indonesian": {"male": "id-ID-ArdiNeural",       "female": "id-ID-GadisNeural"},
+    "italian":    {"male": "it-IT-DiegoNeural",      "female": "it-IT-ElsaNeural"},
+    "arabic":     {"male": "ar-SA-HamedNeural",      "female": "ar-SA-ZariyahNeural"},
+    "hindi":      {"male": "hi-IN-MadhurNeural",     "female": "hi-IN-SwaraNeural"},
+    "turkish":    {"male": "tr-TR-AhmetNeural",      "female": "tr-TR-EmelNeural"},
+    "dutch":      {"male": "nl-NL-MaartenNeural",    "female": "nl-NL-FennaNeural"},
+    "polish":     {"male": "pl-PL-MarekNeural",      "female": "pl-PL-AgnieszkaNeural"},
+}
+
+
+def _default_edge_voice(target_lang: str | None, gender: str | None) -> str | None:
+    """Trả Edge voice default cho ngôn ngữ + giới tính. None nếu không match."""
+    if not gender or not target_lang:
+        return None
+    lang = target_lang.lower().strip()
+    pair = DEFAULT_EDGE_VOICES_BY_LANG.get(lang)
+    if not pair:
+        return None
+    return pair.get(gender.lower())
+
+
+# Speech rate ước lượng (chars/sec) cho mỗi ngôn ngữ — dùng để quyết định
+# segment có "sparse" (text quá ngắn so với slot duration) không. Tốc độ
+# nói trung bình mỗi ngôn ngữ khác nhau:
+#   - VI/EN: ~14-17 chars/sec (alphabet, mỗi từ nhiều ký tự)
+#   - ZH:    ~5-6 chars/sec (mỗi character = 1 syllable, slow)
+#   - JA:    ~7-8 chars/sec (mix kanji/kana)
+SPEECH_CHARS_PER_SEC: dict[str, float] = {
+    "vietnamese": 14.0,
+    "english":    15.0,
+    "chinese":    6.0,
+    "japanese":   8.0,
+    "korean":     8.0,
+    "thai":       9.0,
+    "french":     14.0,
+    "spanish":    16.0,
+    "german":     13.0,
+    "portuguese": 15.0,
+    "russian":    13.0,
+    "italian":    15.0,
+    "arabic":     12.0,
+    "hindi":      12.0,
+    "indonesian": 14.0,
+    "turkish":    13.0,
+    "dutch":      13.0,
+    "polish":     13.0,
+}
+
+def _speech_rate_for(target_lang: str | None) -> float:
+    """Chars/sec ước lượng cho ngôn ngữ đích — fallback 14 cho ngôn ngữ
+    chưa map (default conservative for alphabet languages)."""
+    if not target_lang:
+        return 14.0
+    return SPEECH_CHARS_PER_SEC.get(target_lang.lower().strip(), 14.0)
+
 
 def _pick_omni_voice_id_for_segment(seg: dict, project: dict) -> str | None:
     """Chọn voice_id cho OmniVoice TTS theo speaker (multi-voice support).
 
-    Priority:
+    Priority (NO gender — production spec compliant):
       1. seg.voice_id (override per-segment do user edit)
-      2. project.voice_slots (multi-voice mode):
-         - voice_count > 1 + speaker đã diarize → map speaker → slot theo
-           gender của speaker. SPK1/SPK2/... được đánh số ổn định bởi
-           Resemblyzer; chia theo gender → ưu tiên slot có gender khớp.
-      3. project.voice_id (legacy single-voice setting)
-      4. None → caller fallback (worker xử lý: load voice_prompt=None hoặc
-         pick từ default_voices_svc theo gender của speaker)
+      2. project.speaker_voice_map[speaker_id] — từ analyze-speakers pipeline
+      3. voice_slots cycle theo thứ tự xuất hiện speaker
+      4. project.voice_id (legacy single-voice setting)
+      5. None → caller fallback (worker xử lý mặc định)
     """
     # 1. Per-segment override
     seg_voice = seg.get("voice_id")
     if seg_voice:
         return seg_voice
 
+    speaker_id = seg.get("speaker")
     voice_slots = project.get("voice_slots") or []
     voice_count = int(project.get("voice_count") or 1)
 
-    # 2. Multi-voice mode: map speaker → slot
-    if voice_count > 1 and voice_slots:
-        speaker = seg.get("speaker")
-        gender = (seg.get("speaker_gender") or "").lower()
+    # 2. Speaker voice map (analyze-speakers result)
+    speaker_voice_map = project.get("speaker_voice_map") or {}
+    if speaker_id and speaker_id in speaker_voice_map:
+        v = speaker_voice_map[speaker_id]
+        if v:
+            return v
 
-        # Build assignment map từ speaker → slot index dựa trên gender.
-        # Slot 0 = male, slot 1 = female, slot 2+ = any (theo UI hint).
-        # Algorithm: với mỗi speaker, tìm slot phù hợp theo gender; nếu hết
-        # slot phù hợp thì dùng slot any. Cache assignment để stable trong
-        # toàn bộ pipeline (khỏi gen lại mỗi segment).
-        assignments = project.get("_voice_assignments_cache")
-        if assignments is None:
-            assignments = _build_speaker_voice_assignments(project, voice_slots, voice_count)
-            project["_voice_assignments_cache"] = assignments
+    # 3. Multi-voice mode: cycle qua voice_slots theo thứ tự xuất hiện
+    if voice_count > 1 and voice_slots and speaker_id:
+        cache_key = "_omni_slot_cache_v2"
+        if cache_key not in project:
+            speakers_seen: list[str] = []
+            seen_set: set[str] = set()
+            for s in project.get("segments", []) or []:
+                spk = s.get("speaker")
+                if spk and spk not in seen_set:
+                    speakers_seen.append(spk)
+                    seen_set.add(spk)
+            slot_assignment: dict[str, int] = {}
+            for i, spk in enumerate(speakers_seen):
+                slot_assignment[spk] = i % voice_count
+            project[cache_key] = slot_assignment
+        slot_map = project[cache_key]
+        if speaker_id in slot_map:
+            slot_idx = slot_map[speaker_id]
+            if slot_idx < len(voice_slots) and voice_slots[slot_idx]:
+                return voice_slots[slot_idx]
 
-        if speaker and speaker in assignments:
-            mapped = assignments[speaker]
-            if mapped:  # "" = default, return None để fallback
-                return mapped
-
-    # 3. Legacy single-voice
+    # 4. Legacy single-voice
     return project.get("voice_id") or None
 
 
@@ -148,23 +227,64 @@ def _build_speaker_voice_assignments(project: dict, voice_slots: list, voice_cou
 def _pick_edge_voice_for_segment(seg: dict, project: dict) -> str | None:
     """Choose an Edge TTS voice for this segment.
 
-    Priority:
-      1. Project-wide override `edge_voice` (user-selected in UI)
-      2. Per-segment speaker_gender from diarization → Vietnamese male/female preset
-      3. None (Edge will use its default)
+    Priority (NO gender classifier, per production spec):
+      1. speaker_voice_map[speaker_id] — explicit mapping từ analyze-speakers
+         (Phase 12). User có thể override qua UI.
+      2. voice_count > 1 + voice_slots: cycle qua slots theo thứ tự xuất hiện
+         speaker (đảm bảo mỗi speaker có voice riêng).
+      3. Single-voice override `edge_voice`.
+      4. Default voice cho target_language (no gender — first voice in lang).
+      5. None (Edge tự pick).
     """
-    # User chose an explicit voice for the whole project
+    speaker_id = seg.get("speaker")
+    voice_count = int(project.get("voice_count") or 1)
+    voice_slots = project.get("voice_slots") or []
+    target_lang = project.get("target_language")
+
+    # ── Priority 1: speaker_voice_map (analyze-speakers result) ──
+    speaker_voice_map = project.get("speaker_voice_map") or {}
+    if speaker_id and speaker_id in speaker_voice_map:
+        v = speaker_voice_map[speaker_id]
+        if v:
+            return v
+
+    # ── Priority 2: Multi-speaker mode without explicit map ──
+    # Build stable speaker_id → slot_idx mapping, cycle qua slots
+    # (đảm bảo 2+ speakers không dồn cùng 1 voice).
+    if voice_count > 1 and speaker_id:
+        # Cache mapping qua project key (computed lazily)
+        cache_key = "_edge_slot_cache_v2"
+        if cache_key not in project:
+            speakers_seen: list[str] = []
+            seen_set: set[str] = set()
+            for s in project.get("segments", []) or []:
+                spk = s.get("speaker")
+                if spk and spk not in seen_set:
+                    speakers_seen.append(spk)
+                    seen_set.add(spk)
+            slot_assignment: dict[str, int] = {}
+            for i, spk in enumerate(speakers_seen):
+                slot_assignment[spk] = i % voice_count
+            project[cache_key] = slot_assignment
+        slot_map = project[cache_key]
+        if speaker_id in slot_map:
+            slot_idx = slot_map[speaker_id]
+            if slot_idx < len(voice_slots) and voice_slots[slot_idx]:
+                return voice_slots[slot_idx]
+
+    # ── Priority 3: Single-voice override ──
     if project.get("edge_voice"):
         return project["edge_voice"]
 
-    # Auto per-speaker (currently only Vietnamese presets)
-    gender = seg.get("speaker_gender")
-    if (project.get("target_language") == "vietnamese" and gender):
-        if gender == "female":
-            return EDGE_VOICE_FEMALE_VI
-        if gender == "male":
-            return EDGE_VOICE_MALE_VI
+    # ── Priority 4: Lang-based default (first male voice cho language,
+    # no gender inference — chỉ là first voice in DEFAULT_EDGE_VOICES_BY_LANG) ──
+    if target_lang:
+        lang = target_lang.lower().strip()
+        pair = DEFAULT_EDGE_VOICES_BY_LANG.get(lang)
+        if pair:
+            return pair.get("male") or pair.get("female")
 
+    # ── Priority 5: None — Edge default ──
     return None
 
 
@@ -408,17 +528,75 @@ def _snap_all_to_words(segments: list[dict]) -> list[dict]:
     return [_snap_segment_to_words(s) for s in segments]
 
 
+# Sentence-terminator chars (period, question, exclamation, ellipsis trailing)
+# Multi-language: ASCII + Chinese/Japanese fullwidth + Khmer/Thai endings.
+_SENTENCE_END_CHARS = set(".!?。！？…؟।。")
+# Mid-clause chars: comma/semicolon/colon → câu chưa đủ ý, NÊN merge với next.
+_MID_CLAUSE_CHARS = set(",，、;；:：")
+
+def _ends_complete_sentence(text: str) -> bool:
+    """Đoạn text này đã kết thúc 1 câu hoàn chỉnh chưa?
+    Dấu chấm/than/hỏi → True. Comma/colon/semicolon hoặc không có dấu → False.
+    Quote ngoặc cuối được skip để check char trước nó.
+    """
+    if not text:
+        return False
+    s = text.rstrip()
+    if not s:
+        return False
+    # Bỏ dấu ngoặc đóng cuối: ")"  "]"  "}"  ‘"  "'"  "”" để check char trước
+    while s and s[-1] in '")]}\'’”':
+        s = s[:-1]
+    if not s:
+        return False
+    return s[-1] in _SENTENCE_END_CHARS
+
+
+def _dedup_repeated_text(segs: list[dict]) -> list[dict]:
+    """Drop segments có text trùng lặp với segment liền trước.
+
+    Whisper Chinese drama hay bị "stuck repeat": cùng 1 audio chunk khác
+    nhau nhưng model output cùng text vì context loop. Sau khi đã tắt
+    condition_on_previous_text, đây là safety net — nếu 2+ segs liên tiếp
+    có normalized text giống hệt, chỉ giữ seg đầu (timing chính xác nhất),
+    drop phần còn lại.
+
+    Normalize: bỏ whitespace + lowercase. Không dedup nếu text rỗng (segment
+    nhạc/silence sẽ filter ở bước khác).
+    """
+    if not segs:
+        return segs
+    out: list[dict] = []
+    last_norm: str | None = None
+    dropped = 0
+    for s in segs:
+        norm = "".join((s.get("text") or "").split()).lower()
+        if norm and norm == last_norm:
+            dropped += 1
+            continue
+        out.append(s)
+        last_norm = norm or last_norm
+    if dropped:
+        logger.info("Dedup: dropped %d repeated-text segment(s) (Whisper hallucinate)", dropped)
+    return out
+
+
 def _merge_short_segments(segments: list[dict], min_duration: float = 2.5,
                            max_gap: float = 1.5, max_combined: float = 10.0) -> list[dict]:
     """Merge short segments with their neighbors for better dubbing timing.
 
-    - Segments shorter than min_duration get merged with the next/prev segment
-    - Only merge if the gap < max_gap seconds
-    - Do NOT let combined segment exceed max_combined (otherwise TTS too long → speedup)
+    Merge rules (theo độ ưu tiên):
+      1. SENTENCE COMPLETION: Nếu prev kết thúc bằng comma/no-punct (chưa
+         đủ câu) AND gap nhỏ AND combined không quá dài → MERGE.
+         → Tránh sub kiểu "Chú Lâm nói anh ta là đồ vô dụng," | "chỉ làm
+         con bị bạn bè cười nhạo." (1 câu bị tách 2 dòng)
+      2. SHORT-DURATION FALLBACK: Nếu prev/cur quá ngắn (< min_duration) AND
+         gap nhỏ → MERGE (giúp dubbing có timing đủ thoải mái cho TTS).
+      3. KHÔNG merge nếu prev đã kết thúc câu rõ ràng (period/?/!) và cả
+         hai đều đủ dài → giữ subtitle riêng.
 
-    Tier 1.2: ghi lại các "internal_pauses" trong segment đã merge — list của
-    {position_sec_relative, duration} — để post-TTS insert silence tại đúng
-    vị trí tương đối, giữ rhythm/cảm xúc gốc.
+    Tier 1.2: ghi lại "internal_pauses" trong segment đã merge để post-TTS
+    insert silence tại đúng vị trí tương đối, giữ rhythm/cảm xúc gốc.
     """
     if not segments:
         return segments
@@ -433,12 +611,33 @@ def _merge_short_segments(segments: list[dict], min_duration: float = 2.5,
         gap = seg["start"] - prev["end"]
         combined_dur = seg["end"] - prev["start"]
 
-        # Merge if: (prev short OR cur short) AND gap small AND combined not too long
-        should_merge = (
-            (prev_dur < min_duration or cur_dur < min_duration)
+        # Speaker check: KHÔNG merge nếu khác speaker (multi-voice mode mới
+        # gán; single voice thì cả 2 đều None → check pass)
+        prev_spk = prev.get("speaker")
+        cur_spk = seg.get("speaker")
+        same_speaker = prev_spk == cur_spk or prev_spk is None or cur_spk is None
+
+        prev_text = (prev.get("text") or "").strip()
+        prev_complete = _ends_complete_sentence(prev_text)
+
+        # Rule 1: prev chưa kết thúc câu → merge nếu gap nhỏ + combined OK
+        # (more aggressive — chấp nhận combined dài hơn để giữ câu nguyên vẹn)
+        sentence_continues = (
+            same_speaker
+            and not prev_complete
+            and gap < max_gap
+            and combined_dur <= max_combined + 2.0
+        )
+
+        # Rule 2: short-duration merge (legacy)
+        short_merge = (
+            same_speaker
+            and (prev_dur < min_duration or cur_dur < min_duration)
             and gap < max_gap
             and combined_dur <= max_combined
         )
+
+        should_merge = sentence_continues or short_merge
         if should_merge:
             # Record pause position RELATIVE TO START of merged segment.
             # Vd: prev=0-3s, gap=0.4s, cur=3.4-5s → merged 0-5s với pause
@@ -500,6 +699,126 @@ def _insert_pauses_in_audio(audio_np, sr: int, target_total_dur: float,
         silence = np.zeros(silence_samples, dtype=out.dtype)
         out = np.concatenate([out[:insert_idx], silence, out[insert_idx:]])
     return out
+
+
+def _filter_music_segments(
+    segments: list[dict], audio_path: str,
+    no_speech_threshold: float = 0.55,
+    avg_logprob_threshold: float = -1.0,
+    detect_singing: bool = True,
+) -> list[dict]:
+    """Filter ra music/singing segments — KHÔNG dub nhạc.
+
+    Layers:
+      1. Whisper confidence: no_speech_prob > 0.55 hoặc avg_logprob < -1.0
+         → chắc chắn không phải speech (music/silence/gibberish)
+      2. F0 stability detection: hát có F0 sustained (note giữ ~0.5-2s),
+         speech có F0 varying nhanh (Vietnamese tonal). Std dev của F0 thấp
+         + voicing ratio cao → singing.
+
+    Returns: filtered segments. Music segments được DROP với log warning.
+    """
+    if not segments:
+        return segments
+    out = []
+    dropped = []
+    audio_data = None
+    sr = None
+
+    for seg in segments:
+        text = (seg.get("text") or "").strip()
+        nsp = float(seg.get("no_speech_prob", 0.0) or 0.0)
+        alp = float(seg.get("avg_logprob", 0.0) or 0.0)
+        dur = seg["end"] - seg["start"]
+
+        # Layer 1: Whisper confidence filter
+        if nsp > no_speech_threshold:
+            dropped.append(("no_speech", seg["start"], seg["end"], text, nsp))
+            continue
+        if alp < avg_logprob_threshold and dur > 1.0:
+            # Skip very short low-confidence (vd "ờ", "à") — chỉ filter dài
+            dropped.append(("low_logprob", seg["start"], seg["end"], text, alp))
+            continue
+
+        # Layer 2: Singing detection via F0 stability (only for longer segments)
+        if detect_singing and dur >= 1.5:
+            try:
+                if audio_data is None:
+                    import soundfile as sf
+                    audio_data, sr = sf.read(audio_path, dtype="float32")
+                    if audio_data.ndim > 1:
+                        audio_data = audio_data.mean(axis=1)
+                start_sample = int(seg["start"] * sr)
+                end_sample = min(int(seg["end"] * sr), len(audio_data))
+                chunk = audio_data[start_sample:end_sample]
+                if len(chunk) >= sr * 0.5:
+                    is_singing, reason = _detect_singing(chunk, sr)
+                    if is_singing:
+                        dropped.append(("singing", seg["start"], seg["end"], text, reason))
+                        continue
+            except Exception as e:
+                logger.warning("Singing detect failed for seg: %s", e)
+
+        out.append(seg)
+
+    if dropped:
+        logger.info(
+            "Filtered %d music/non-speech segment(s) (kept %d):",
+            len(dropped), len(out),
+        )
+        for kind, s, e, txt, meta in dropped[:10]:
+            logger.info("  [%s] %.1f-%.1fs (%.2f) %s", kind, s, e, meta, txt[:60])
+        if len(dropped) > 10:
+            logger.info("  ... %d more dropped", len(dropped) - 10)
+    return out
+
+
+def _detect_singing(audio: np.ndarray, sr: int) -> tuple[bool, float]:
+    """Detect singing vs speech qua F0 stability + voicing pattern.
+
+    Speech vs singing characteristics:
+      - SPEECH: F0 varies nhanh (Vietnamese tone shift mỗi syllable ~150-250ms),
+        voicing pattern bursty (vowel/consonant alternation), short voiced runs
+      - SINGING: F0 sustained tại pitch (note giữ 300ms-2s), voicing pattern
+        smooth (vibrato), long voiced runs
+
+    Trả (is_singing: bool, score: float). score càng cao càng giống singing.
+    """
+    try:
+        import librosa
+        f0, voiced_flag, voiced_prob = librosa.pyin(
+            audio.astype(np.float32),
+            fmin=70.0, fmax=600.0,
+            sr=sr, frame_length=int(sr * 0.05),
+        )
+        valid = (~np.isnan(f0)) & (voiced_prob >= 0.5)
+        if np.sum(valid) < 10:
+            return False, 0.0
+        f0_vals = f0[valid]
+
+        # Metric 1: F0 std (Hz). Speech: 30-80Hz var. Singing: 5-25Hz var.
+        f0_std = float(np.std(f0_vals))
+
+        # Metric 2: Sustained pitch — tỉ lệ frames F0 trong ±5% median
+        f0_median = float(np.median(f0_vals))
+        sustained = float(np.mean(np.abs(f0_vals - f0_median) / max(f0_median, 1e-6) < 0.05))
+
+        # Metric 3: Voicing ratio (singing voiced almost continuous, speech ~50%)
+        voicing_ratio = float(np.mean(voiced_prob >= 0.5))
+
+        # Composite score
+        score = 0.0
+        if f0_std < 20:           score += 1.0
+        elif f0_std < 35:         score += 0.5
+        if sustained > 0.55:      score += 1.0
+        elif sustained > 0.40:    score += 0.5
+        if voicing_ratio > 0.85:  score += 1.0
+        elif voicing_ratio > 0.70: score += 0.5
+
+        # 2.0+ = strong singing signal (3 features all positive)
+        return score >= 2.0, score
+    except Exception:
+        return False, 0.0
 
 
 def _trim_sparse_segments(segments: list[dict], max_speech_per_sec: float = 14.0) -> list[dict]:
@@ -708,6 +1027,64 @@ def get_accompaniment_path(project_id: str) -> Path | None:
 
 # ── Transcribe ──────────────────────────────────────
 
+def _detect_genders_for_whisperx_speakers(
+    segments: list[dict], audio_path: str, speakers: list[str],
+) -> dict:
+    """Detect gender per WhisperX/pyannote speaker bằng Resemblyzer pitch.
+
+    Pyannote chỉ assign label (SPEAKER_00, SPEAKER_01...) chứ không detect
+    gender. Dùng Resemblyzer F0 estimator (librosa.pyin + octave correction)
+    trên audio chunks của từng speaker để suy gender.
+
+    Trả {"SPEAKER_00": "male", "SPEAKER_01": "female", ...}
+    """
+    import numpy as np
+    import soundfile as sf
+    from collections import Counter
+
+    audio, sr = sf.read(audio_path)
+    if audio.ndim > 1:
+        audio = audio.mean(axis=1)
+    audio = audio.astype(np.float32)
+
+    # Singleton diarize để gọi _estimate_pitch / _gender_from_pitch
+    rd = resemblyzer_diarize_svc.diarize
+
+    speaker_genders = {}
+    for spk in speakers:
+        per_turn_features = []
+        count = 0
+        for seg in segments:
+            if seg.get("speaker") != spk:
+                continue
+            dur = seg["end"] - seg["start"]
+            if dur < 1.0:
+                continue
+            start_sample = int(seg["start"] * sr)
+            end_sample = min(int(seg["end"] * sr), len(audio))
+            chunk = audio[start_sample:end_sample]
+            if dur > 4.0:
+                chunk = chunk[: int(sr * 4.0)]
+            feats = rd._estimate_voice_features(chunk, sr)
+            if feats and feats.get("f0", 0) > 0:
+                per_turn_features.append(feats)
+            count += 1
+            if count >= 8:
+                break
+        if not per_turn_features:
+            continue
+        per_turn_gender = [rd._gender_from_features(f) for f in per_turn_features]
+        votes = Counter(g for g in per_turn_gender if g != "unknown")
+        final_gender = votes.most_common(1)[0][0] if votes else "unknown"
+        speaker_genders[spk] = final_gender
+        f0s = [f["f0"] for f in per_turn_features]
+        logger.info(
+            "  WhisperX %s: F0_median=%.0fHz → %s (votes=%s)",
+            spk, float(np.median(f0s)), final_gender, dict(votes),
+        )
+    return speaker_genders
+
+
 def transcribe_project(project_id: str) -> dict:
     """Run Demucs (auto) → Whisper on vocals for cleaner transcription."""
     project = _load_meta(project_id)
@@ -759,7 +1136,38 @@ def transcribe_project(project_id: str) -> dict:
     logger.info("Transcribing: %s", audio_to_transcribe)
 
     src_lang = project.get("source_language_input", "auto")
-    result = whisper_svc.transcribe(audio_to_transcribe, language=src_lang if src_lang != "auto" else None)
+    src_lang_norm = src_lang if src_lang != "auto" else None
+
+    # WhisperX opt-in path — bật khi:
+    #   1. project.quality_mode == "high" (per-project setting từ UI), HOẶC
+    #   2. USE_WHISPERX=true env (global override)
+    # AND whisperx đã pip-installed. Nếu fail → fallback whisper_svc (zero risk).
+    quality_mode = (project.get("quality_mode") or "fast").lower()
+    use_whisperx_for_proj = quality_mode == "high" or USE_WHISPERX
+    used_whisperx = False
+    whisperx_speakers: list[str] = []  # nếu pyannote diarize chạy được
+    if use_whisperx_for_proj and whisperx_svc.is_available():
+        try:
+            do_diar = voice_count > 1 and whisperx_svc.is_diarize_available()
+            logger.info("Using WhisperX path (align=True, diarize=%s)", do_diar)
+            wx_result = whisperx_svc.transcribe(
+                audio_to_transcribe,
+                language=src_lang_norm,
+                do_align=True,
+                do_diarize=do_diar,
+                min_speakers=2 if voice_count > 1 else 1,
+                max_speakers=max(voice_count, 6),
+            )
+            result = wx_result
+            whisperx_speakers = wx_result.get("speakers", [])
+            used_whisperx = True
+        except Exception as e:
+            logger.warning("WhisperX failed (%s) — fallback whisper_svc", e)
+    elif use_whisperx_for_proj and not whisperx_svc.is_available():
+        logger.warning("Chế độ chính xác cao yêu cầu `whisperx`. Run: pip install whisperx")
+
+    if not used_whisperx:
+        result = whisper_svc.transcribe(audio_to_transcribe, language=src_lang_norm)
 
     raw_segs = result.get("segments", [])
 
@@ -767,11 +1175,42 @@ def transcribe_project(project_id: str) -> dict:
     # retry on the original mixed audio
     if not raw_segs and audio_to_transcribe != audio_path:
         logger.warning("No segments from vocals.wav — retrying on original mixed audio")
-        result = whisper_svc.transcribe(
-            audio_path,
-            language=src_lang if src_lang != "auto" else None,
-        )
+        if used_whisperx:
+            try:
+                result = whisperx_svc.transcribe(
+                    audio_path, language=src_lang_norm, do_align=True, do_diarize=False,
+                )
+            except Exception:
+                result = whisper_svc.transcribe(audio_path, language=src_lang_norm)
+        else:
+            result = whisper_svc.transcribe(audio_path, language=src_lang_norm)
         raw_segs = result.get("segments", [])
+
+    # ── Dedup repeated-text hallucination (Whisper Chinese drama hay loop) ──
+    # Phải làm TRƯỚC music filter + post-process để tránh nhân lên các bug.
+    raw_segs = _dedup_repeated_text(raw_segs)
+
+    # ── Music/singing filter ──
+    # Lọc ra segment hát hoặc nhạc trước khi post-process. Trên video có
+    # BGM với lời hát (movie OST, drama opening), Whisper sẽ transcribe
+    # cả lời hát → pipeline sẽ dub nhầm. Filter qua 2 layer:
+    #   1. Whisper no_speech_prob + avg_logprob (LM confidence)
+    #   2. F0 stability (singing has sustained pitch, speech variable)
+    # Bật/tắt qua project["filter_music"] (default True).
+    if project.get("filter_music", True):
+        # Filter trên audio nguồn để singing detection có signal đầy đủ.
+        # Dùng vocals nếu có (sạch hơn) else original.
+        filter_audio = audio_to_transcribe
+        before_count = len(raw_segs)
+        raw_segs = _filter_music_segments(
+            raw_segs, filter_audio,
+            no_speech_threshold=0.55,
+            avg_logprob_threshold=-1.0,
+            detect_singing=True,
+        )
+        if len(raw_segs) < before_count:
+            logger.info("Music filter: %d → %d segments (dropped %d)",
+                        before_count, len(raw_segs), before_count - len(raw_segs))
 
     # Post-process pipeline (order matters — each step depends on prev):
     # 1. Snap each segment's start/end to actual word timestamps (remove VAD padding)
@@ -797,43 +1236,98 @@ def transcribe_project(project_id: str) -> dict:
     logger.info("Post-process: %d segments after split-long (was %d snapped)",
                 len(split_segs), len(snapped))
 
-    # 3. Trim sparse-speech segments (text too short for slot duration)
-    trimmed = _trim_sparse_segments(split_segs, max_speech_per_sec=13.0)
+    # 3. Trim sparse-speech segments (text too short for slot duration).
+    # Speech rate khác nhau theo ngôn ngữ NGUỒN (đang transcribe) — vd
+    # tiếng Trung ~6 char/s, Việt/Anh ~14-15 char/s, Nhật ~8 char/s.
+    # Nếu apply rate sai → trim quá tay (Trung) hoặc trim quá ít (VI).
+    detected_src = (result.get("language") or src_lang or "auto").lower()
+    # Whisper trả ISO code (vi, zh, ja...) → map về key của SPEECH_CHARS_PER_SEC
+    iso_to_key = {
+        "vi": "vietnamese", "en": "english", "zh": "chinese", "ja": "japanese",
+        "ko": "korean", "th": "thai", "fr": "french", "es": "spanish",
+        "de": "german", "pt": "portuguese", "ru": "russian", "it": "italian",
+        "ar": "arabic", "hi": "hindi", "id": "indonesian", "tr": "turkish",
+        "nl": "dutch", "pl": "polish",
+    }
+    src_speech_rate = _speech_rate_for(iso_to_key.get(detected_src, detected_src))
+    logger.info("Post-process: speech rate for src=%s → %.1f chars/sec",
+                detected_src, src_speech_rate)
+    trimmed = _trim_sparse_segments(split_segs, max_speech_per_sec=src_speech_rate)
     logger.info("Post-process: %d segments after trim-sparse", len(trimmed))
 
     # 4. Merge adjacent short segments (Tier 1.1: min 3s, gap 1.0s, combined 9s)
     merged = _merge_short_segments(trimmed, min_duration=3.0, max_gap=1.0, max_combined=9.0)
     logger.info("Post-process: %d segments after merge-short (final)", len(merged))
 
-    # ── Diarization: gán speaker + gender cho từng segment ──
-    # CHỈ chạy khi voice_count > 1 — single voice mode dùng cùng giọng cho
-    # mọi segment, không cần tốn thời gian diarize/detect gender.
+    # ── Speaker analysis: NEW production-ready pipeline ──
+    # Phase 4-12 (per spec): pyannote diarize + embedding reID + word-level
+    # assignment + sentence grouping + voice mapping (NO gender classifier).
+    #
+    # Output: project["speaker_analysis"] (JSON cho FE editor) +
+    #         project["speaker_voice_map"] (speaker_id → voice_id).
+    # Segments cũ (Whisper-based) vẫn được populate speaker từ pipeline mới
+    # qua time-overlap mapping → backward compat với TTS code cũ.
     project_for_count = _load_meta(project_id) or {}
     voice_count_meta = int(project_for_count.get("voice_count") or 1)
-    speaker_genders = {}
+    speaker_genders: dict[str, str] = {}  # legacy field, để rỗng (pipeline không dùng nữa)
 
     if voice_count_meta <= 1:
-        logger.info("Single voice mode (voice_count=1) → skip diarization")
+        logger.info("Single voice mode (voice_count=1) → skip speaker analysis")
     else:
-        diarize_backend = os.getenv("DIARIZE_BACKEND", "resemblyzer").lower()
-        use_pyannote = diarize_backend == "pyannote" and os.getenv("HF_TOKEN")
-
         try:
-            diar_audio = str(vocals_path) if vocals_path.exists() else audio_path
-            if use_pyannote:
-                logger.info("Diarization backend: pyannote (HF_TOKEN set)")
-                diar_module = diarize_svc.diarize
-            else:
-                logger.info("Diarization backend: Resemblyzer (default, no token)")
-                diar_module = resemblyzer_diarize_svc.diarize
+            from app.services.speaker_pipeline import (
+                analyze_speakers as run_speaker_pipeline,
+                build_speaker_voice_map,
+            )
+            logger.info("Running speaker_pipeline (Phase 3-11)...")
+            sp_result = run_speaker_pipeline(
+                str(vocals_path) if vocals_path.exists() else audio_path,
+                embedding_audio_path=audio_path,
+                language=src_lang_norm,
+                min_speakers=1,
+                max_speakers=max(6, voice_count_meta),
+            )
+            # Map mỗi Whisper segment → speaker_id qua time overlap với
+            # diarization sentences từ pipeline mới
+            for seg in merged:
+                seg_start = seg["start"]
+                seg_end = seg["end"]
+                best_spk = None
+                best_overlap = 0.0
+                for sent in sp_result.sentences:
+                    ov = max(0.0, min(seg_end, sent.end) - max(seg_start, sent.start))
+                    if ov > best_overlap and sent.speaker_id:
+                        best_overlap = ov
+                        best_spk = sent.speaker_id
+                seg["speaker"] = best_spk
+                seg["speaker_gender"] = None  # NO gender — speaker_id only
 
-            diar_result = diar_module.diarize(diar_audio, min_speakers=1, max_speakers=6)
-            merged = diar_module.assign_speaker_to_segments(merged, diar_result["turns"])
-            speaker_genders = diar_result.get("speaker_genders", {})
-            logger.info("Diarization: %d speakers %s",
-                        len(diar_result["speakers"]), speaker_genders)
+            # Build voice_map từ voice_slots (cycle đảm bảo mỗi speaker
+            # có voice riêng) + persist user overrides nếu đã có
+            voice_slots = project_for_count.get("voice_slots") or []
+            user_overrides = project_for_count.get("speaker_voice_map") or {}
+            voice_map = build_speaker_voice_map(
+                speakers=sp_result.speakers,
+                voice_slots=voice_slots,
+                user_overrides=user_overrides,
+            )
+
+            # Reload meta + persist analysis (in-memory project might be stale)
+            project_meta = _load_meta(project_id) or {}
+            project_meta["speaker_analysis"] = sp_result.to_json()
+            project_meta["speaker_voice_map"] = voice_map
+            _save_meta(project_meta)
+
+            from collections import Counter as _Counter
+            spk_dist = _Counter(s.get("speaker") for s in merged)
+            logger.info(
+                "Speaker pipeline: %d speakers %s | voice_map=%s | seg distribution: %s",
+                len(sp_result.speakers), sp_result.speakers, voice_map, dict(spk_dist),
+            )
         except Exception as e:
-            logger.warning("Diarization skipped (%s) — segments will have speaker=None", e)
+            logger.warning("speaker_pipeline failed (%s) — segments without speaker info", e)
+            import traceback
+            logger.debug("speaker_pipeline traceback:\n%s", traceback.format_exc())
 
     segments = []
     for i, seg in enumerate(merged):
@@ -916,6 +1410,8 @@ def translate_project(
         results = gemini_translate_svc.translate_segments(
             project["segments"], target_lang, source_lang,
             topic_hint=topic_hint, glossary=glossary,
+            speaker_genders=project.get("speaker_genders") or {},
+            film_genre=project.get("film_genre"),
         )
         for seg, result in zip(project["segments"], results):
             if result.get("translated_text"):
@@ -935,6 +1431,8 @@ def translate_project(
         results = llm_translate_svc.translate_segments(
             project["segments"], target_lang, source_lang,
             topic_hint=topic_hint, glossary=glossary,
+            speaker_genders=project.get("speaker_genders") or {},
+            film_genre=project.get("film_genre"),
         )
         for seg, result in zip(project["segments"], results):
             if result.get("translated_text"):
@@ -983,8 +1481,11 @@ def translate_project(
         logger.info("Step 2: Qwen polish for emotion + pacing…")
         try:
             durations = [seg["end"] - seg["start"] for seg in project["segments"]]
+            speaker_ids = [seg.get("speaker") for seg in project["segments"]]
             polished = llm_translate_svc.polish_for_speech(
-                translated, target_lang, durations=durations
+                translated, target_lang, durations=durations,
+                speaker_ids=speaker_ids if any(speaker_ids) else None,
+                speaker_genders=project.get("speaker_genders") or {},
             )
             for seg, result in zip(project["segments"], polished):
                 if result.get("speech_text"):
@@ -1302,6 +1803,22 @@ def generate_segment(project_id: str, seg_id: str) -> dict:
             logger.info("[dub] inserted %d internal pause(s) into segment %s",
                         len(internal_pauses), seg.get("id", "?"))
 
+        # ── Studio chain per-segment (áp cho CẢ Edge và Vox Premium) ──
+        # Áp dụng EQ theo gender + de-esser + RMS loudness norm. Bật/tắt
+        # qua project["studio_mix"] (default ON).
+        if project.get("studio_mix", True):
+            try:
+                from app.services.audio_mix_svc import (
+                    apply_voice_chain, normalize_loudness_rms,
+                )
+                gender = (seg.get("speaker_gender") or "").lower()
+                audio_np = apply_voice_chain(audio_np, sr, gender=gender)
+                # RMS loudness norm — gentler -23dBFS, cap ±5dB (less harsh)
+                audio_np = normalize_loudness_rms(audio_np, target_dbfs=-23.0, max_gain_db=5.0)
+            except Exception as e:
+                logger.warning("Segment %s: studio chain failed (%s) — raw output",
+                               seg_id, e)
+
         # Apply volume
         if seg.get("volume", 1.0) != 1.0:
             audio_np = audio_np * seg["volume"]
@@ -1439,6 +1956,38 @@ def _mp3_to_wav(mp3_path: Path, wav_path: Path, sr: int = 24000):
     mp3_path.unlink(missing_ok=True)
 
 
+def _trim_trailing_silence(audio: np.ndarray, sr: int, threshold_db: float = -40.0,
+                            min_keep_sec: float = 0.05) -> np.ndarray:
+    """Cắt khoảng im lặng cuối audio (RMS < threshold). Trả audio đã trim.
+
+    Dùng cho batch TTS bị overflow slot — trim đuôi im lặng trước khi
+    hard-crop, giúp giảm thiểu mất nội dung thực.
+    """
+    if audio.size == 0:
+        return audio
+    if audio.ndim > 1:
+        mono = audio.mean(axis=1)
+    else:
+        mono = audio
+    threshold_amp = 10 ** (threshold_db / 20.0)
+    win = max(1, int(0.02 * sr))  # 20ms windows
+    n_full_wins = len(mono) // win
+    if n_full_wins == 0:
+        return audio
+    rms = np.sqrt(np.mean(mono[:n_full_wins * win].reshape(n_full_wins, win) ** 2, axis=1))
+    # Lùi từ cuối về đầu, dừng ở window đầu tiên có RMS > threshold
+    last_voiced = -1
+    for i in range(n_full_wins - 1, -1, -1):
+        if rms[i] > threshold_amp:
+            last_voiced = i
+            break
+    if last_voiced < 0:
+        return audio  # toàn im lặng → giữ nguyên (caller xử lý)
+    end = (last_voiced + 1) * win
+    end = min(end + int(min_keep_sec * sr), len(audio))  # giữ thêm 50ms cho âm cuối
+    return audio[:end]
+
+
 def _atempo_stretch(in_path: Path, out_path: Path, tempo: float):
     """Time-stretch audio with ffmpeg atempo (handles 0.5-2.0 range by chaining)."""
     filters = []
@@ -1460,14 +2009,18 @@ def _atempo_stretch(in_path: Path, out_path: Path, tempo: float):
     )
 
 
-# ── TTS speed matching (Tier 1.4 strict + Tier 1.1 rate-aware) ──
-# Tighten để dub khớp gốc: speedup max 1.10x (Disney/Netflix standard),
-# trên 1.10x sẽ nghe gấp gáp (chipmunk effect).
+# ── TTS speed matching ──
+# Speedup tối đa 1.25x (Edge TTS giữ chất lượng tốt đến ~1.30x), atempo
+# tối đa 1.25x. Nếu vẫn không đủ (cao trào, batch ngắn vs dài), trim
+# trailing silence + cap cứng overflow để KHÔNG overlap batch sau.
 SPEED_TOLERANCE = 0.05      # 5% — chỉ skip atempo nếu lệch < 5%
-MAX_SPEED_FACTOR = 1.10     # speedup tối đa (strict)
+MAX_SPEED_FACTOR = 1.25     # speedup tối đa (atempo)
 MIN_SPEED_FACTOR = 0.92     # slowdown tối đa (avoid muddy voice)
-MAX_EDGE_SPEED = 1.10       # Edge TTS rate max — match speedup limit
+MAX_EDGE_SPEED = 1.25       # Edge TTS rate max
 MIN_EDGE_SPEED = 0.92       # Edge TTS rate min
+# Sau khi đã max speed, cho phép overflow X% rồi mới hard-trim. 15% grace
+# để cuối câu không bị cụt giật khi ratio nhỏ (1.10–1.20x).
+OVERFLOW_GRACE = 1.15
 # Tốc độ nói tiếng Việt trung bình (chars/sec, không tính space/punct).
 # Dùng làm fallback khi không tính được rate gốc (vd Whisper không có
 # original_text, hoặc segment có text rỗng).
@@ -1528,14 +2081,146 @@ def _compute_target_speed(seg: dict, target_dur: float, dub_text: str,
     return (MAX_SPEED_FACTOR, "overflow_clamped")
 
 
+def _process_one_batch_audio(
+    batch_idx: int, batch: list[dict], project: dict, batches: list,
+    target_lang: str, seg_dir: Path, sr: int, video_duration: float,
+) -> dict:
+    """Generate + post-process audio cho 1 batch (pure function — không có
+    shared state). Trả {batch_idx, batch_start, audio, segments, ok, error?}.
+
+    Pipeline per batch:
+      1. Combine text
+      2. Edge TTS @ 1x
+      3. Speed-adjust (re-gen at native speed if ratio off)
+      4. atempo fine-tune (cap MAX_SPEED_FACTOR)
+      5. Hard-trim overflow (silence-aware)
+      6. Voice EQ chain theo gender (pedalboard)
+      7. RMS loudness normalize (consistent volume across batches)
+      8. Fade-in/out edges (tránh click ở junction)
+    """
+    try:
+        # Step 1: combine text
+        combined_parts = []
+        for s in batch:
+            text = (s.get("speech_text") or s["translated_text"] or "").strip()
+            combined_parts.append(text)
+        combined_text = "... ".join(combined_parts)
+
+        batch_start = batch[0]["start"]
+        batch_end = batch[-1]["end"]
+        target_duration = batch_end - batch_start
+
+        edge_voice = _pick_edge_voice_for_segment(batch[0], project)
+        gender = (batch[0].get("speaker_gender") or "").lower()
+
+        batch_mp3 = seg_dir / f"_batch_{batch_idx}.mp3"
+        batch_wav = seg_dir / f"_batch_{batch_idx}.wav"
+
+        # Step 2: Edge TTS @ 1x
+        _edge_generate_sync(combined_text, str(batch_mp3),
+                            language=target_lang, voice=edge_voice, speed=1.0)
+        _mp3_to_wav(batch_mp3, batch_wav)
+        batch_audio, _ = sf.read(str(batch_wav))
+        actual_duration = len(batch_audio) / sr
+        speed_ratio = actual_duration / target_duration if target_duration > 0 else 1.0
+
+        logger.info("Batch %d: target=%.1fs, actual=%.1fs, ratio=%.2f, gender=%s",
+                    batch_idx + 1, target_duration, actual_duration, speed_ratio, gender or "?")
+
+        # Step 3: Re-gen with adjusted speed if needed
+        if abs(speed_ratio - 1.0) > SPEED_TOLERANCE:
+            edge_speed = max(MIN_EDGE_SPEED, min(MAX_EDGE_SPEED, speed_ratio))
+            batch_mp3_v2 = seg_dir / f"_batch_{batch_idx}_v2.mp3"
+            _edge_generate_sync(combined_text, str(batch_mp3_v2),
+                                language=target_lang, voice=edge_voice, speed=edge_speed)
+            _mp3_to_wav(batch_mp3_v2, batch_wav)
+            batch_audio, _ = sf.read(str(batch_wav))
+            actual_duration = len(batch_audio) / sr
+            speed_ratio = actual_duration / target_duration if target_duration > 0 else 1.0
+
+        # Step 4: atempo fine-tune (cap)
+        if actual_duration > 0 and abs(speed_ratio - 1.0) > 0.03:
+            atempo_factor = min(speed_ratio, MAX_SPEED_FACTOR)
+            if abs(atempo_factor - 1.0) > 0.03:
+                stretched_wav = seg_dir / f"_batch_{batch_idx}_final.wav"
+                _atempo_stretch(batch_wav, stretched_wav, atempo_factor)
+                batch_audio, _ = sf.read(str(stretched_wav))
+                stretched_wav.unlink(missing_ok=True)
+                actual_duration = len(batch_audio) / sr
+                speed_ratio = actual_duration / target_duration if target_duration > 0 else 1.0
+
+        # Step 5: Overflow trim (silence-aware)
+        if batch_idx + 1 < len(batches):
+            next_batch_start = batches[batch_idx + 1][0]["start"]
+        else:
+            next_batch_start = video_duration
+        extension = max(0.0, next_batch_start - batch_end - 0.1)
+        max_allowed = max(target_duration * OVERFLOW_GRACE, target_duration + extension)
+        if actual_duration > max_allowed and actual_duration > 0:
+            trimmed = _trim_trailing_silence(batch_audio, sr, threshold_db=-40.0)
+            trim_dur = len(trimmed) / sr
+            if trim_dur <= max_allowed:
+                batch_audio = trimmed
+                actual_duration = trim_dur
+            else:
+                target_samples = int(max_allowed * sr)
+                fade_samples = min(int(0.05 * sr), target_samples // 4)
+                batch_audio = batch_audio[:target_samples].copy()
+                if fade_samples > 0:
+                    fade = np.linspace(1.0, 0.0, fade_samples, dtype=np.float32)
+                    batch_audio[-fade_samples:] *= fade
+                actual_duration = len(batch_audio) / sr
+
+        batch_wav.unlink(missing_ok=True)
+
+        # Step 6-8: Studio chain (gender EQ + loudness + fade edges)
+        # Bật/tắt qua project["studio_mix"] (default True). Tắt → place raw
+        # audio để giữ tone gốc của Edge TTS (không nhuộm phòng thu).
+        studio_on = bool(project.get("studio_mix", True))
+        if studio_on:
+            try:
+                from app.services.audio_mix_svc import (
+                    apply_voice_chain, normalize_loudness_rms, fade_edges,
+                )
+                batch_audio = apply_voice_chain(batch_audio, sr, gender=gender)
+                # RMS loudness norm — target -23dBFS (gentler than -20 để
+                # tránh over-amplify noise floor → âm thanh chói).
+                # Cap gain ±5dB (was ±8) để không boost segment quá quiet.
+                batch_audio = normalize_loudness_rms(batch_audio, target_dbfs=-23.0, max_gain_db=5.0)
+                # Fade edges 30ms để place vào silent track không click
+                batch_audio = fade_edges(batch_audio, sr, fade_ms=30.0)
+            except Exception as e:
+                logger.warning("Batch %d: studio chain failed (%s) — placing raw",
+                               batch_idx + 1, e)
+
+        return {
+            "batch_idx": batch_idx,
+            "batch_start": batch_start,
+            "audio": batch_audio,
+            "segments": batch,
+            "target_duration": target_duration,
+            "ok": True,
+        }
+    except Exception as e:
+        return {
+            "batch_idx": batch_idx,
+            "segments": batch,
+            "ok": False,
+            "error": str(e),
+        }
+
+
 def _generate_all_batched(project_id: str, project: dict):
-    """Batch TTS → continuous dubbed track.
+    """Batch TTS → continuous dubbed track (parallel TTS + studio mix per batch).
 
     1. Group segments into batches
-    2. Generate combined TTS per batch with smart speed matching
-    3. Place each batch at the correct time position in a full-length track
-    4. Save as dubbed_track.wav — one continuous file, no choppiness
+    2. PARALLEL: generate + process audio per batch (Edge TTS network-bound,
+       ffmpeg atempo CPU-bound — concurrent 4 workers giảm 60-70% time)
+    3. SEQUENTIAL: place processed audio at correct timestamps in full track
+    4. Save as dubbed_track.wav
     """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
     segments = project["segments"]
     batches = _group_segments_into_batches(segments)
     total = sum(len(b) for b in batches)
@@ -1553,106 +2238,118 @@ def _generate_all_batched(project_id: str, project: dict):
     track_samples = int(video_duration * sr) + sr  # +1s buffer
     full_track = np.zeros(track_samples, dtype=np.float64)
 
+    # ── Phase A: Skip already-done batches (load existing audio) ──
+    pending_indices = []
     for batch_idx, batch in enumerate(batches):
-        # Skip if all done
         if all(s["status"] == "done" for s in batch):
             for s in batch:
                 done_count += 1
                 yield {"current": done_count, "total": total,
                        "segment_id": s["id"], "status": "skipped"}
-            # Still load existing batch audio into track if available
             _load_existing_into_track(full_track, batch, seg_dir, sr)
+        else:
+            pending_indices.append(batch_idx)
+
+    # ── Phase B: Parallel TTS + studio mix per batch ──
+    # Edge TTS chủ yếu network-bound → 4 workers concurrent giảm ~60-70% time.
+    # Mỗi batch độc lập (không share state với các batch khác trong phase này).
+    MAX_TTS_WORKERS = 4
+    n_pending = len(pending_indices)
+    if n_pending > 0:
+        logger.info("Generating %d batches in parallel (max %d workers)...",
+                    n_pending, MAX_TTS_WORKERS)
+
+    results: dict[int, dict] = {}
+    if pending_indices:
+        with ThreadPoolExecutor(max_workers=min(MAX_TTS_WORKERS, n_pending)) as ex:
+            future_to_idx = {
+                ex.submit(
+                    _process_one_batch_audio,
+                    bi, batches[bi], project, batches,
+                    target_lang, seg_dir, sr, video_duration,
+                ): bi
+                for bi in pending_indices
+            }
+            # Yield progress as each batch completes
+            for fut in as_completed(future_to_idx):
+                bi = future_to_idx[fut]
+                try:
+                    res = fut.result()
+                except Exception as e:
+                    logger.error("Batch %d worker crashed: %s", bi + 1, e)
+                    res = {"batch_idx": bi, "ok": False, "error": str(e),
+                           "segments": batches[bi]}
+                results[bi] = res
+                # Yield per-segment progress for SSE
+                if res.get("ok"):
+                    for s in res["segments"]:
+                        s["status"] = "done"
+                        done_count += 1
+                        yield {"current": done_count, "total": total,
+                               "segment_id": s["id"], "status": "done"}
+                else:
+                    err = res.get("error", "unknown")
+                    for s in res["segments"]:
+                        if s.get("status") != "done":
+                            s["status"] = "error"
+                            done_count += 1
+                            yield {"current": done_count, "total": total,
+                                   "segment_id": s["id"], "status": "error",
+                                   "error": err}
+                _save_meta(project)
+
+    # ── Phase C: Sequential placement in full track ──
+    # Phải sequential vì có overlap detection + np.pad có thể realloc array.
+    # Sort theo batch_idx để placement đúng thứ tự thời gian.
+    for bi in pending_indices:
+        res = results.get(bi)
+        if not res or not res.get("ok"):
             continue
+        batch_audio = res["audio"]
+        if batch_audio is None or len(batch_audio) == 0:
+            continue
+        start_sample = int(res["batch_start"] * sr)
+        end_sample = start_sample + len(batch_audio)
+        if end_sample > len(full_track):
+            full_track = np.pad(full_track, (0, end_sample - len(full_track)))
+        # Mix additive (consistent with old behavior)
+        full_track[start_sample:start_sample + len(batch_audio)] += batch_audio
+        logger.info("Batch %d placed: %d segs, dur=%.1fs",
+                    bi + 1, len(res["segments"]), res.get("target_duration", 0))
 
+    # ── Phase D: Master bus chain trước khi save dubbed_track ──
+    # Glue compression + true-peak limiter. LUFS final normalize sẽ apply
+    # ở step export_video (cùng với BGM mix) — không double normalize.
+    studio_on = bool(project.get("studio_mix", True))
+    if studio_on:
         try:
-            # ── Step 1: Combine text ──
-            combined_parts = []
-            for s in batch:
-                text = (s.get("speech_text") or s["translated_text"] or "").strip()
-                combined_parts.append(text)
-            combined_text = "... ".join(combined_parts)
-
-            batch_start = batch[0]["start"]
-            batch_end = batch[-1]["end"]
-            target_duration = batch_end - batch_start
-
-            # Per-batch voice: pick based on the batch's speaker/gender
-            edge_voice = _pick_edge_voice_for_segment(batch[0], project)
-
-            batch_mp3 = seg_dir / f"_batch_{batch_idx}.mp3"
-            batch_wav = seg_dir / f"_batch_{batch_idx}.wav"
-
-            # ── Step 2: Generate at 1x speed ──
-            _edge_generate_sync(combined_text, str(batch_mp3),
-                                language=target_lang, voice=edge_voice, speed=1.0)
-            _mp3_to_wav(batch_mp3, batch_wav)
-
-            batch_audio, _ = sf.read(str(batch_wav))
-            actual_duration = len(batch_audio) / sr
-            speed_ratio = actual_duration / target_duration if target_duration > 0 else 1.0
-
-            logger.info("Batch %d: target=%.1fs, actual=%.1fs, ratio=%.2f",
-                        batch_idx + 1, target_duration, actual_duration, speed_ratio)
-
-            # ── Step 3: Re-generate with native speed if needed ──
-            if abs(speed_ratio - 1.0) > SPEED_TOLERANCE:
-                edge_speed = max(MIN_EDGE_SPEED, min(MAX_EDGE_SPEED, speed_ratio))
-                logger.info("Batch %d: re-gen at %.2fx native speed", batch_idx + 1, edge_speed)
-                batch_mp3_v2 = seg_dir / f"_batch_{batch_idx}_v2.mp3"
-                _edge_generate_sync(combined_text, str(batch_mp3_v2),
-                                    language=target_lang, voice=edge_voice,
-                                    speed=edge_speed)
-                _mp3_to_wav(batch_mp3_v2, batch_wav)
-                batch_audio, _ = sf.read(str(batch_wav))
-                actual_duration = len(batch_audio) / sr
-                speed_ratio = actual_duration / target_duration if target_duration > 0 else 1.0
-
-            # ── Step 4: Fine-tune with atempo ──
-            if actual_duration > 0 and abs(speed_ratio - 1.0) > 0.03:
-                stretched_wav = seg_dir / f"_batch_{batch_idx}_final.wav"
-                _atempo_stretch(batch_wav, stretched_wav, speed_ratio)
-                batch_audio, _ = sf.read(str(stretched_wav))
-                stretched_wav.unlink(missing_ok=True)
-
-            batch_wav.unlink(missing_ok=True)
-
-            # ── Step 5: Place batch audio at correct position in full track ──
-            start_sample = int(batch_start * sr)
-            end_sample = start_sample + len(batch_audio)
-            # Ensure we don't overflow
-            if end_sample > len(full_track):
-                full_track = np.pad(full_track, (0, end_sample - len(full_track)))
-            full_track[start_sample:start_sample + len(batch_audio)] += batch_audio
-
-            # Also save individual segment files (for preview in Voice Settings)
-            for s in batch:
-                s["status"] = "done"
-                done_count += 1
-                yield {"current": done_count, "total": total,
-                       "segment_id": s["id"], "status": "done"}
-
-            _save_meta(project)
-            logger.info("Batch %d done: %d segments, %.1fs",
-                        batch_idx + 1, len(batch), target_duration)
-
+            from pedalboard import Pedalboard, Compressor, Limiter
+            master_chain = Pedalboard([
+                # Glue rất nhẹ — chỉ touch peaks, không squash voice
+                Compressor(threshold_db=-12, ratio=1.5, attack_ms=30, release_ms=400),
+                # True-peak limiter: ceiling -1 dBTP (broadcast safe)
+                Limiter(threshold_db=-1.0, release_ms=150),
+            ])
+            full_track_f32 = full_track.astype(np.float32)
+            full_track_f32 = master_chain(full_track_f32, sr)
+            full_track = full_track_f32
+            logger.info("Master bus chain applied (glue comp + limiter)")
         except Exception as e:
-            logger.error("Batch %d failed: %s", batch_idx + 1, e)
-            for s in batch:
-                if s["status"] != "done":
-                    s["status"] = "error"
-                    done_count += 1
-                    yield {"current": done_count, "total": total,
-                           "segment_id": s["id"], "status": "error", "error": str(e)}
-            _save_meta(project)
+            logger.warning("Master chain failed (%s) — peak normalize fallback", e)
+            peak = np.max(np.abs(full_track))
+            if peak > 0.95:
+                full_track = full_track * (0.95 / peak)
+    else:
+        # Studio mix tắt → chỉ peak normalize tránh clipping
+        peak = np.max(np.abs(full_track))
+        if peak > 0.95:
+            full_track = full_track * (0.95 / peak)
+        logger.info("Studio mix DISABLED — raw output")
 
-    # ── Step 6: Save full dubbed track ──
     track_path = _project_dir(project_id) / "dubbed_track.wav"
-    # Normalize to prevent clipping
-    peak = np.max(np.abs(full_track))
-    if peak > 0.95:
-        full_track = full_track * (0.95 / peak)
     sf.write(str(track_path), full_track.astype(np.float32), sr)
-    logger.info("Dubbed track saved: %s (%.1fs)", track_path, len(full_track) / sr)
+    logger.info("Dubbed track saved: %s (%.1fs) — parallel x%d",
+                track_path, len(full_track) / sr, MAX_TTS_WORKERS)
 
 
 def _load_existing_into_track(full_track: np.ndarray, batch: list[dict],
@@ -1809,12 +2506,24 @@ def export_video(project_id: str, keep_original_audio: bool = False,
                 full_audio[:copy_len] = track_audio[:copy_len]
                 logger.info("Export using dubbed_track.wav (%.1fs)", copy_len / sr)
             else:
-                # Fallback: build from individual segment files (per-segment TTS mode)
+                # Fallback: build from individual segment files (per-segment TTS mode).
+                # Áp fade edges 30ms cho mỗi segment (tránh click ở junction
+                # khi place vào silent track) — chỉ khi studio_mix bật.
+                studio_on = bool(project.get("studio_mix", True))
+                fade_edges_fn = None
+                if studio_on:
+                    try:
+                        from app.services.audio_mix_svc import fade_edges as _fe
+                        fade_edges_fn = _fe
+                    except Exception:
+                        pass
                 for seg in project["segments"]:
                     seg_audio_path = _segments_dir(project_id) / f"{seg['id']}.wav"
                     if not seg_audio_path.exists():
                         continue
                     seg_audio, _ = sf.read(str(seg_audio_path), dtype="float32")
+                    if fade_edges_fn is not None:
+                        seg_audio = fade_edges_fn(seg_audio, sr, fade_ms=30.0)
                     start_sample = int(seg["start"] * sr)
                     end_sample = start_sample + len(seg_audio)
                     end_sample = min(end_sample, total_samples)
@@ -1823,6 +2532,19 @@ def export_video(project_id: str, keep_original_audio: bool = False,
                         full_audio[start_sample:end_sample] += seg_audio[:seg_len]
                 logger.info("Export built full_audio from %d individual segment files",
                             len(project["segments"]))
+                # Master bus chain cho per-segment path (Vox Premium) — Edge
+                # path đã apply trong _generate_all_batched. Skip nếu user tắt.
+                if studio_on:
+                    try:
+                        from pedalboard import Pedalboard, Compressor, Limiter
+                        master_chain = Pedalboard([
+                            Compressor(threshold_db=-14, ratio=2.0, attack_ms=20, release_ms=300),
+                            Limiter(threshold_db=-1.0, release_ms=100),
+                        ])
+                        full_audio = master_chain(full_audio.astype(np.float32), sr)
+                        logger.info("Master bus chain applied (per-segment path)")
+                    except Exception as e:
+                        logger.warning("Master chain failed in per-segment path: %s", e)
 
             # ── Mix accompaniment (nhạc nền + SFX, đã loại giọng) ──
             if keep_accomp:
@@ -1912,23 +2634,25 @@ def export_video(project_id: str, keep_original_audio: bool = False,
                 if crop_mode == "letterbox":
                     # Giữ full video, thêm viền đen để đạt aspect đích
                     # Output W = max(iw, ih*tw/th), H = max(ih, iw*th/tw)
+                    # KHÔNG escape commas trong expression — ffmpeg-python tự
+                    # quote/escape khi compile thành -filter_complex.
                     stream = stream.filter(
                         "scale",
-                        f"if(gt(a\\,{tw}/{th})\\,iw\\,ih*{tw}/{th})",
-                        f"if(gt(a\\,{tw}/{th})\\,iw*{th}/{tw}\\,ih)",
+                        f"if(gt(a,{tw}/{th}),iw,ih*{tw}/{th})",
+                        f"if(gt(a,{tw}/{th}),iw*{th}/{tw},ih)",
                         force_original_aspect_ratio="decrease",
                     ).filter(
                         "pad",
-                        f"if(gt(a\\,{tw}/{th})\\,iw\\,ih*{tw}/{th})",
-                        f"if(gt(a\\,{tw}/{th})\\,iw*{th}/{tw}\\,ih)",
+                        f"if(gt(a,{tw}/{th}),iw,ih*{tw}/{th})",
+                        f"if(gt(a,{tw}/{th}),iw*{th}/{tw},ih)",
                         "(ow-iw)/2", "(oh-ih)/2", "black",
                     )
                 else:
                     # smart (TODO ML detect chủ thể) + center fallback = center crop
                     stream = stream.filter(
                         "crop",
-                        f"min(iw\\,ih*{tw}/{th})", f"min(ih\\,iw*{th}/{tw})",
-                        f"(iw-min(iw\\,ih*{tw}/{th}))/2", f"(ih-min(ih\\,iw*{th}/{tw}))/2",
+                        f"min(iw,ih*{tw}/{th})", f"min(ih,iw*{th}/{tw})",
+                        f"(iw-min(iw,ih*{tw}/{th}))/2", f"(ih-min(ih,iw*{th}/{tw}))/2",
                     )
             if do_subtitle and ass_path:
                 stream = stream.filter("ass", str(ass_path))
@@ -1954,7 +2678,7 @@ def export_video(project_id: str, keep_original_audio: bool = False,
                 .output(video_stream, audio_stream, str(export_path),
                         vcodec=vcodec, acodec="aac", strict="experimental")
                 .overwrite_output()
-                .run(quiet=True)
+                .run(capture_stdout=True, capture_stderr=True)
             )
         elif has_trim:
             # Trim only, no other processing
@@ -1963,15 +2687,27 @@ def export_video(project_id: str, keep_original_audio: bool = False,
                 .output(video_in.video, video_in.audio, str(export_path),
                         vcodec="copy", acodec="copy")
                 .overwrite_output()
-                .run(quiet=True)
+                .run(capture_stdout=True, capture_stderr=True)
             )
         else:
             raise ValueError("No dubbing, subtitle, crop, or trim enabled")
 
     except ffmpeg.Error as e:
+        # ffmpeg-python với capture_stderr=True trả stderr trong e.stderr (bytes).
+        # Không log = không thể debug (như vụ export.mp4 0-byte).
+        stderr_text = ""
+        try:
+            stderr_text = (e.stderr or b"").decode("utf-8", errors="replace")
+        except Exception:
+            stderr_text = repr(e.stderr)
+        logger.error("ffmpeg export failed for project %s:\nSTDERR:\n%s", project_id, stderr_text)
         project["status"] = "error"
+        project["error"] = (stderr_text or str(e))[-2000:]
         _save_meta(project)
-        raise ValueError(f"Export failed: {e}")
+        # Tail stderr ngắn cho user (thường dòng cuối là error message thực)
+        tail = stderr_text.strip().splitlines()[-3:] if stderr_text else []
+        msg = "\n".join(tail) if tail else str(e)
+        raise ValueError(f"Export failed: {msg}")
 
     project["status"] = "done"
     _save_meta(project)
@@ -2011,6 +2747,125 @@ def generate_srt(project_id: str, use_translated: bool = True) -> str:
     srt_path = _project_dir(project_id) / "subtitles.srt"
     srt_path.write_text(content, encoding="utf-8")
     return content
+
+
+def _split_text_for_subtitle(text: str, max_chars: int = 84) -> list[str]:
+    """Chia 1 đoạn text dài thành nhiều subtitle cues ≤ max_chars.
+
+    Ưu tiên chia tại sentence-end (.!?…) trước. Nếu vẫn còn dài → chia tại
+    comma/semicolon. Cuối cùng mới chia tại space gần giữa nhất.
+
+    Lý do: segments được merge cho TTS naturalness (vd 213 chars/10s) nhưng
+    subtitle hiển thị max 2 dòng × 42 chars = 84 chars là dễ đọc nhất.
+    """
+    text = text.strip()
+    if len(text) <= max_chars:
+        return [text]
+
+    import re
+    # Split tại sentence-end punctuation, giữ punctuation đi với phần trước
+    sent_pattern = re.compile(r'([.!?…。！？]+["\')\]]?)\s+')
+    parts = sent_pattern.split(text)
+    # parts: [seg1, sep1, seg2, sep2, ...] OR [whole_text] nếu không có match
+    sentences: list[str] = []
+    if len(parts) > 1:
+        i = 0
+        while i < len(parts):
+            sent = parts[i]
+            sep = parts[i + 1] if i + 1 < len(parts) else ""
+            full = (sent + sep).strip()
+            if full:
+                sentences.append(full)
+            i += 2
+    else:
+        sentences = [text]
+
+    # Gom các sentence ngắn lại đến gần max_chars
+    cues: list[str] = []
+    cur = ""
+    for sent in sentences:
+        if not cur:
+            cur = sent
+            continue
+        # Thêm sent vào cur nếu vẫn ≤ max_chars
+        candidate = cur + " " + sent
+        if len(candidate) <= max_chars:
+            cur = candidate
+        else:
+            cues.append(cur)
+            cur = sent
+    if cur:
+        cues.append(cur)
+
+    # Pass 2: nếu còn cue > max_chars → chia tại comma/space
+    final: list[str] = []
+    for cue in cues:
+        if len(cue) <= max_chars:
+            final.append(cue)
+            continue
+        # Chia tại comma/semicolon
+        sub_parts = re.split(r'(,|，|;|；)\s+', cue)
+        if len(sub_parts) > 1:
+            buf = ""
+            i = 0
+            while i < len(sub_parts):
+                piece = sub_parts[i]
+                sep = sub_parts[i + 1] if i + 1 < len(sub_parts) else ""
+                seg_w_sep = (piece + sep).strip()
+                cand = (buf + " " + seg_w_sep).strip() if buf else seg_w_sep
+                if len(cand) <= max_chars:
+                    buf = cand
+                else:
+                    if buf:
+                        final.append(buf)
+                    buf = seg_w_sep
+                i += 2
+            if buf:
+                final.append(buf)
+        else:
+            # Last resort: chia tại space gần giữa nhất
+            mid = len(cue) // 2
+            # Tìm space gần mid nhất
+            left = cue.rfind(" ", 0, mid)
+            right = cue.find(" ", mid)
+            split_at = left if (mid - left) <= (right - mid) and left > 0 else (right if right > 0 else mid)
+            final.append(cue[:split_at].strip())
+            rest = cue[split_at:].strip()
+            if rest:
+                # Tiếp tục split phần rest nếu vẫn dài
+                final.extend(_split_text_for_subtitle(rest, max_chars))
+
+    return [c for c in final if c.strip()]
+
+
+def _split_segment_for_subtitle(seg: dict, max_chars: int = 84) -> list[dict]:
+    """Split 1 segment thành nhiều subtitle cues, phân bổ timing theo char count."""
+    text = (seg.get("translated_text") or seg.get("original_text") or "").strip()
+    if not text:
+        return [seg]
+    cues_text = _split_text_for_subtitle(text, max_chars)
+    if len(cues_text) <= 1:
+        return [seg]
+
+    total_chars = sum(len(c) for c in cues_text)
+    if total_chars == 0:
+        return [seg]
+
+    seg_start = seg["start"]
+    seg_dur = seg["end"] - seg["start"]
+    out = []
+    acc_chars = 0
+    for i, ctxt in enumerate(cues_text):
+        cue_start = seg_start + (acc_chars / total_chars) * seg_dur
+        acc_chars += len(ctxt)
+        cue_end = seg_start + (acc_chars / total_chars) * seg_dur
+        cue = dict(seg)
+        cue["start"] = cue_start
+        cue["end"] = cue_end
+        cue["translated_text"] = ctxt
+        cue["original_text"] = ctxt  # subtitle dùng text đã chia
+        out.append(cue)
+    return out
 
 
 def generate_ass(project_id: str, use_translated: bool = True) -> str:
@@ -2131,7 +2986,18 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             out = pattern.sub(lambda m: f"{{\\c{hl_color}}}{m.group(0)}{{\\r}}", out)
         return out
 
+    # Pre-split long merged segments thành cues subtitle ≤ 84 chars
+    # (~2 dòng × 42 chars). Segments merged dài cho TTS naturalness, nhưng
+    # subtitle hiển thị cần ngắn để dễ đọc.
+    sub_cues: list[dict] = []
     for seg in project["segments"]:
+        # Skip nếu segment không có text
+        s_text = (seg.get("translated_text") if use_translated else "") or seg.get("original_text") or ""
+        if not s_text.strip():
+            continue
+        sub_cues.extend(_split_segment_for_subtitle(seg, max_chars=84))
+
+    for seg in sub_cues:
         text = seg["translated_text"] if use_translated and seg["translated_text"].strip() else seg["original_text"]
         if not text.strip():
             continue
@@ -2195,6 +3061,21 @@ def update_project_settings(project_id: str, settings: dict) -> dict:
         # voice_count: int 1-5. voice_slots: list[str] (voice_id hoặc "" = default).
         # Backend map speaker (theo gender từ diarization) → slot khi generate.
         "voice_count", "voice_slots",
+        # Chất lượng pipeline: "fast" (default) | "high"
+        # high → bật WhisperX + pyannote (nếu có HF_TOKEN), word-level align
+        # chính xác hơn ~20ms (vs ~200ms), nam/nữ chính xác hơn. Chậm ~2x.
+        "quality_mode",
+        # Studio mixing on/off — apply pedalboard chain (gender EQ +
+        # de-esser + loudness norm + master glue/limiter) per batch.
+        # Default ON cho voice quality phòng thu. Tắt cho output raw.
+        "studio_mix",
+        # Music/singing filter — lọc segment hát/nhạc trước khi dub.
+        # Default ON cho video có nhạc nền + lời hát.
+        "filter_music",
+        # Film genre — inject context-specific prompts vào LLM dịch
+        # Values: drama, romance, action, comedy, historical, crime, family,
+        # horror, anime, documentary, kpop_drama, cdrama, wuxia, auto
+        "film_genre",
     }
     nullable = {"edge_voice", "voice_id", "default_emotion", "topic_hint", "glossary"}
     for k, v in settings.items():

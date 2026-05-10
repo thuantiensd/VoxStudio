@@ -42,7 +42,11 @@ class DiarizationService:
 
         import torch
         logger.info("Loading %s ...", DIARIZE_MODEL)
-        self._pipeline = Pipeline.from_pretrained(DIARIZE_MODEL, use_auth_token=HF_TOKEN)
+        # pyannote 4.x: `use_auth_token` → `token`. Compat cả 2 version.
+        try:
+            self._pipeline = Pipeline.from_pretrained(DIARIZE_MODEL, token=HF_TOKEN)
+        except TypeError:
+            self._pipeline = Pipeline.from_pretrained(DIARIZE_MODEL, use_auth_token=HF_TOKEN)
         device = "cuda" if torch.cuda.is_available() else "cpu"
         self._pipeline.to(torch.device(device))
         logger.info("Diarization pipeline ready on %s", device)
