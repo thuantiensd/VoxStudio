@@ -110,6 +110,9 @@ class SpeakerPipelineResult:
     overlaps: list[OverlapRegion]
     language: str = "auto"
     stats: dict = field(default_factory=dict)
+    # Phase 4b — F0-based gender per speaker_id ("male"|"female"|"unknown").
+    # Heuristic, voice mapping fallback "any" slot khi "unknown".
+    speaker_genders: dict[str, str] = field(default_factory=dict)
 
     def to_json(self) -> dict:
         return {
@@ -118,6 +121,7 @@ class SpeakerPipelineResult:
             "overlaps": [asdict(o) for o in self.overlaps],
             "language": self.language,
             "stats": dict(self.stats),
+            "speaker_genders": dict(self.speaker_genders),
         }
 
 

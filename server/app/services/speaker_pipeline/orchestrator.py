@@ -27,6 +27,7 @@ from .overlap import detect_overlaps
 from .word_assignment import assign_speakers_to_words
 from .sentence_grouping import group_words_into_sentences
 from .confidence import apply_confidence
+from .gender import detect_speaker_genders
 
 logger = logging.getLogger(__name__)
 
@@ -193,6 +194,17 @@ def analyze_speakers(
     speakers = seen
     stats["unique_speakers"] = len(speakers)
 
+    # ── Phase 4b: Gender detection per speaker (F0-based, heuristic) ──
+    t = time.time()
+    speaker_genders: dict[str, str] = {}
+    try:
+        speaker_genders = detect_speaker_genders(audio_path, turns, speakers)
+    except Exception as e:
+        logger.warning("Gender detection failed (%s) — all speakers='unknown'", e)
+        speaker_genders = {spk: "unknown" for spk in speakers}
+    stats["gender_seconds"] = round(time.time() - t, 2)
+    stats["genders"] = dict(speaker_genders)
+
     # ── Phase 5: Overlap detection ──
     t = time.time()
     overlaps = detect_overlaps(audio_path, turns)
@@ -239,4 +251,5 @@ def analyze_speakers(
         overlaps=overlaps,
         language=detected_lang,
         stats=stats,
+        speaker_genders={spk: speaker_genders.get(spk, "unknown") for spk in final_speakers},
     )

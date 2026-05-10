@@ -1287,6 +1287,9 @@ def transcribe_project(project_id: str) -> dict:
                 min_speakers=1,
                 max_speakers=max(6, voice_count_meta),
             )
+            # Pipeline mới có speaker_genders (F0 heuristic) — populate vào
+            # speaker_genders dict để Gemini prompt + voice_map dùng.
+            speaker_genders = dict(getattr(sp_result, "speaker_genders", {}) or {})
             # Map mỗi Whisper segment → speaker_id qua time overlap với
             # diarization sentences từ pipeline mới
             for seg in merged:
@@ -1300,16 +1303,17 @@ def transcribe_project(project_id: str) -> dict:
                         best_overlap = ov
                         best_spk = sent.speaker_id
                 seg["speaker"] = best_spk
-                seg["speaker_gender"] = None  # NO gender — speaker_id only
+                seg["speaker_gender"] = speaker_genders.get(best_spk) if best_spk else None
 
-            # Build voice_map từ voice_slots (cycle đảm bảo mỗi speaker
-            # có voice riêng) + persist user overrides nếu đã có
+            # Build voice_map theo gender (slot 0=nam, slot 1=nữ) — nếu user
+            # đã chỉnh override trong meta, giữ nguyên.
             voice_slots = project_for_count.get("voice_slots") or []
             user_overrides = project_for_count.get("speaker_voice_map") or {}
             voice_map = build_speaker_voice_map(
                 speakers=sp_result.speakers,
                 voice_slots=voice_slots,
                 user_overrides=user_overrides,
+                speaker_genders=speaker_genders,
             )
 
             # Reload meta + persist analysis (in-memory project might be stale)

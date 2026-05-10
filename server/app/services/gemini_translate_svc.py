@@ -43,12 +43,25 @@ def _extra_block(topic_hint: str | None,
     return "\n\n" + "\n\n".join(parts) + "\n"
 
 
+def _genre_block_for_gemini(film_genre: str | None) -> str:
+    """Inject genre-specific guidance vào Gemini prompt."""
+    if not film_genre:
+        return ""
+    from app.services.llm_translate_svc import _genre_prompt_block
+    block = _genre_prompt_block(film_genre)
+    if not block:
+        return ""
+    return f"\n\n6. **Film Genre Context**:\n{block}\n"
+
+
 def translate_segments(
     segments: list[dict],
     target_language: str,
     source_language: str = "auto",
     topic_hint: str | None = None,
     glossary: list[tuple[str, str]] | None = None,
+    speaker_genders: dict | None = None,
+    film_genre: str | None = None,
 ) -> list[dict]:
     """Translate film dialogue segments with full context awareness.
 
@@ -90,6 +103,8 @@ def translate_segments(
         prompt = _build_prompt(
             batch, target_language, source_language, context_before,
             topic_hint=topic_hint, glossary=glossary,
+            speaker_genders=speaker_genders,
+            film_genre=film_genre,
         )
 
         try:
@@ -118,6 +133,8 @@ def _build_prompt(
     context_before: list[dict],
     topic_hint: str | None = None,
     glossary: list[tuple[str, str]] | None = None,
+    speaker_genders: dict | None = None,
+    film_genre: str | None = None,
 ) -> str:
     """Build a detailed prompt for context-aware film translation."""
 
@@ -129,12 +146,24 @@ def _build_prompt(
     tgt_name = lang_names.get(target_lang, target_lang)
     src_name = lang_names.get(source_lang, source_lang) if source_lang != "auto" else "auto-detect"
 
-    # Build segment list
+    # Build segment list — kèm [SPKx:gender] khi có diarization để chọn pronoun đúng
+    # + [max N chars] budget để LLM tự rút gọn câu cho khớp slot duration
+    # (Việt ~13 chars/giây speech rate, để headroom 10% tránh overflow TTS)
+    has_speakers = bool(speaker_genders) and any(seg.get("speaker") for seg in segments)
     seg_lines = []
     for seg in segments:
         text = seg["original_text"].strip()
-        if text:
-            seg_lines.append(f'{seg["index"] + 1}. [{seg["start"]:.1f}s-{seg["end"]:.1f}s] {text}')
+        if not text:
+            continue
+        dur = max(0.3, seg["end"] - seg["start"])
+        # Tiếng Việt ~13 chars/s thoải mái; ép 11.5 chars/s để dub có headroom
+        max_chars = max(8, int(dur * 11.5))
+        prefix = f'[{seg["start"]:.1f}s-{seg["end"]:.1f}s, max {max_chars} chars]'
+        if has_speakers and seg.get("speaker"):
+            spk = seg["speaker"]
+            g = (speaker_genders or {}).get(spk, "unknown")
+            prefix = f'{prefix} [{spk}:{g}]'
+        seg_lines.append(f'{seg["index"] + 1}. {prefix} {text}')
 
     # Build context section
     context_section = ""
@@ -158,6 +187,13 @@ CRITICAL RULES for {tgt_name} translation:
 
 2. **Character Consistency**: The SAME character should use the SAME pronouns throughout.
    Identify speakers by context (timestamps, dialogue flow, who responds to whom).
+   When [SPKx:gender] prefix is present, use it as ground truth for pronoun choice:
+   - SPKx:male → use anh/ông/chú/cậu/tao (NEVER cô/chị)
+   - SPKx:female → use chị/em/cô/bà/tao (NEVER anh/ông)
+   - SPKx:unknown → infer from context
+   In heated/argument scenes, use stronger pronouns (mày/tao) matching the speaker's
+   gender — do NOT default to soft "cô/anh" for fights.
+   Do NOT include [SPKx:gender] in the output.
 
 3. **Natural Vietnamese**: Write how Vietnamese people actually speak in films/dramas.
    - Use natural contractions and colloquial speech
@@ -169,7 +205,18 @@ CRITICAL RULES for {tgt_name} translation:
 
 5. **Film Context**: These are consecutive dialogue lines from a film scene.
    Use the flow of conversation to understand relationships and context.
-{_extra_block(topic_hint, glossary)}{context_section}
+
+6. **TIMING BUDGET (CRITICAL for dubbing)**: Each line has a `[max N chars]` budget
+   reflecting how long the original audio slot is. Vietnamese dub MUST fit in this
+   slot otherwise the audio will overflow into the next character's line, causing
+   "đọc dồn vào nhau" / out-of-sync.
+   - **PRIORITY**: meaning > nuance > literal completeness. Cut filler words,
+     rephrase for brevity, use shorter synonyms when needed.
+   - Example: "Tôi nghĩ rằng có lẽ chúng ta nên đi ngay bây giờ" (~50 chars)
+     can be tightened to "Mình đi ngay đi" (~16 chars) for short slot.
+   - HARD RULE: do NOT exceed `max N chars` for any line. If original is dense
+     (Chinese/Japanese), translate to the most concise idiomatic Vietnamese form.
+{_extra_block(topic_hint, glossary)}{_genre_block_for_gemini(film_genre)}{context_section}
 
 DIALOGUE TO TRANSLATE:
 {chr(10).join(seg_lines)}

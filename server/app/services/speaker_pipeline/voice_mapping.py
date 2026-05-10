@@ -26,47 +26,93 @@ def build_speaker_voice_map(
     voice_slots: list[str],
     user_overrides: Optional[dict[str, str]] = None,
     default_voice: Optional[str] = None,
+    speaker_genders: Optional[dict[str, str]] = None,
 ) -> dict[str, str]:
     """Map mỗi stable speaker_id → voice_id.
 
-    Args:
-      speakers: list speaker IDs theo thứ tự xuất hiện
-                ["SPEAKER_00", "SPEAKER_01", ...]
-      voice_slots: voices user pick từ UI (theo index)
-                   ["edge_vi_namminh", "edge_vi_hoaimy", ...]
-      user_overrides: per-speaker user override {speaker_id: voice_id}
-                      → có priority cao nhất
-      default_voice: voice fallback cuối cùng
+    UI convention (slotGenderHint trong page.tsx):
+      - Slot 0 → giọng NAM
+      - Slot 1 → giọng NỮ
+      - Slot 2,3,4 → bất kỳ
 
-    Returns: {speaker_id: voice_id}
+    Logic ưu tiên (per spec — bán-auto: user pick voice slots upfront, pipeline
+    auto-route speakers theo gender):
 
-    Logic:
-      For each speaker (in order):
-        if user_overrides có speaker_id → use override
-        elif voice_slots[i] có giá trị → use slot i
-        elif default_voice → use default
-        else → ""  # backend tự pick default theo target_lang
+      1. user_overrides[speaker_id] (priority cao nhất — UI tương lai)
+      2. Nếu có speaker_genders + voice_slots:
+         - Speaker male → slot 0 (nếu non-empty), nếu không → slot "any" còn trống
+         - Speaker female → slot 1 (nếu non-empty), nếu không → slot "any"
+         - Mỗi slot chỉ assign cho 1 speaker (tránh dồn cùng giọng).
+      3. Fallback (no gender info or speaker exhausted slots):
+         - Cycle qua slots theo thứ tự xuất hiện.
+      4. default_voice nếu có.
+      5. "" → backend tự pick.
     """
     overrides = user_overrides or {}
+    genders = speaker_genders or {}
+    n_slots = len(voice_slots)
+
     result: dict[str, str] = {}
-    for i, spk in enumerate(speakers):
+    used_slots: set[int] = set()
+
+    # Pass 1: explicit user overrides
+    for spk in speakers:
         if spk in overrides and overrides[spk]:
             result[spk] = overrides[spk]
-            continue
-        if i < len(voice_slots) and voice_slots[i]:
-            result[spk] = voice_slots[i]
-            continue
-        # Cycle through slots if more speakers than slots
-        if voice_slots:
-            non_empty = [v for v in voice_slots if v]
-            if non_empty:
-                result[spk] = non_empty[i % len(non_empty)]
+
+    # Pass 2: gender-aware match (slot 0=nam, slot 1=nữ)
+    if genders:
+        slot_genders = []
+        for i in range(n_slots):
+            if i == 0:
+                slot_genders.append("male")
+            elif i == 1:
+                slot_genders.append("female")
+            else:
+                slot_genders.append("any")
+
+        for spk in speakers:
+            if spk in result:
                 continue
+            g = genders.get(spk, "unknown")
+            if g not in ("male", "female"):
+                continue
+            # Tìm slot match gender, chưa dùng, slot value non-empty
+            for i, sg in enumerate(slot_genders):
+                if i in used_slots or sg != g:
+                    continue
+                if i < n_slots and voice_slots[i]:
+                    result[spk] = voice_slots[i]
+                    used_slots.add(i)
+                    break
+
+    # Pass 3: speaker còn sót → slot "any" hoặc cycle
+    for i, spk in enumerate(speakers):
+        if spk in result:
+            continue
+        # Tìm slot "any" (index ≥ 2) chưa dùng + non-empty
+        assigned = False
+        for j in range(2, n_slots):
+            if j in used_slots:
+                continue
+            if voice_slots[j]:
+                result[spk] = voice_slots[j]
+                used_slots.add(j)
+                assigned = True
+                break
+        if assigned:
+            continue
+        # Cycle qua tất cả slot non-empty (ngay cả slot đã used — chấp nhận trùng)
+        non_empty = [v for v in voice_slots if v]
+        if non_empty:
+            result[spk] = non_empty[i % len(non_empty)]
+            continue
         if default_voice:
             result[spk] = default_voice
         else:
-            result[spk] = ""  # let downstream pick default
-    logger.info("Voice mapping: %s", result)
+            result[spk] = ""
+
+    logger.info("Voice mapping (genders=%s): %s", genders, result)
     return result
 
 
