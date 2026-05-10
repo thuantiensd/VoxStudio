@@ -226,34 +226,50 @@ def _sanitize_api_key(api_key: str, provider: str) -> str:
 def _openai(texts: list[str], target: str, source: str, api_key: str,
             model: str | None = None,
             topic_hint: str | None = None,
-            glossary_block: str | None = None) -> list[str]:
+            glossary_block: str | None = None,
+            segments_meta: list[dict] | None = None,
+            speaker_genders: dict | None = None,
+            film_genre: str | None = None) -> list[str]:
+    """OpenAI translate với unified prompt CÙNG chất lượng Gemini.
+
+    Trước đây OpenAI dùng prompt 1-dòng minimal → user chat trực tiếp
+    cho output tốt nhưng pipeline thì kém. Fix: dùng cùng prompt builder
+    với genre + pronoun matrix + budget + anchor entities.
+    """
     api_key = _sanitize_api_key(api_key, "OpenAI")
     model = model or DEFAULT_MODELS["openai"]
-    tgt_name = _lang_display(target)
-    src_name = _lang_display(source) if source and source.lower() != "auto" else "auto-detected source"
-    sys_extras = []
-    if topic_hint: sys_extras.append(topic_hint)
-    if glossary_block: sys_extras.append(glossary_block)
-    extra_block = ("\n\n" + "\n\n".join(sys_extras)) if sys_extras else ""
-    # OpenAI: dùng JSON mode response_format → đảm bảo output schema đúng,
-    # tránh parse fail. Output schema: {"translations": [{"index": N, "text": "..."}]}
-    system = (
-        f"You are a precise {tgt_name} film/drama translator. Input là JSON array "
-        f"các line {src_name}. Dịch sang {tgt_name} tự nhiên + idiomatic. "
-        f"Output JSON: {{\"translations\": [{{\"index\": int, \"text\": str}}, ...]}}. "
-        f"Mỗi index match input. KHÔNG markdown, KHÔNG preamble.{extra_block}"
+
+    # Convert texts → segment dicts cho unified prompt builder
+    if not segments_meta:
+        # Fallback nếu caller không truyền meta — generate từ texts
+        segments_meta = [
+            {"index": i, "start": float(i * 3), "end": float((i + 1) * 3),
+             "original_text": t}
+            for i, t in enumerate(texts)
+        ]
+
+    from app.services.llm.prompts import (
+        build_translation_prompt,
+        parse_translation_response,
     )
-    user_input = json.dumps(
-        [{"index": i + 1, "text": t} for i, t in enumerate(texts)],
-        ensure_ascii=False,
+    prompt = build_translation_prompt(
+        segments=segments_meta,
+        target_lang=target,
+        source_lang=source,
+        topic_hint=topic_hint,
+        glossary_block=glossary_block,
+        speaker_genders=speaker_genders,
+        film_genre=film_genre,
+        engine="openai",
     )
+
     payload = {
         "model": model,
         "temperature": 0.2,
         "response_format": {"type": "json_object"},
         "messages": [
-            {"role": "system", "content": system},
-            {"role": "user", "content": user_input},
+            {"role": "system", "content": prompt["system"]},
+            {"role": "user", "content": prompt["user"]},
         ],
     }
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
@@ -264,21 +280,11 @@ def _openai(texts: list[str], target: str, source: str, api_key: str,
     except (KeyError, IndexError):
         raise ValueError("OpenAI trả về dữ liệu không đúng định dạng. Vui lòng thử lại.")
 
-    # Parse JSON object → list theo index
-    out = [""] * len(texts)
-    try:
-        parsed = json.loads(raw)
-        items = parsed.get("translations") or parsed.get("data") or []
-        if isinstance(items, list):
-            for it in items:
-                idx = int(it.get("index", 0)) - 1
-                text = (it.get("text") or it.get("translated") or "").strip()
-                if 0 <= idx < len(texts) and text:
-                    out[idx] = text
-    except (json.JSONDecodeError, ValueError, TypeError):
-        # Fallback: numbered parse
-        out = _parse_numbered(raw, len(texts))
+    # Parse với unified parser (handle markdown fence, partial JSON, ...)
+    parsed = parse_translation_response(raw, len(texts))
+    out = [item["translated_text"] for item in parsed]
     if not any(out):
+        # Last-resort fallback
         out = _parse_numbered(raw, len(texts))
     return out
 
@@ -288,8 +294,63 @@ def _openai(texts: list[str], target: str, source: str, api_key: str,
 def _claude(texts: list[str], target: str, source: str, api_key: str,
             model: str | None = None,
             topic_hint: str | None = None,
-            glossary_block: str | None = None) -> list[str]:
+            glossary_block: str | None = None,
+            segments_meta: list[dict] | None = None,
+            speaker_genders: dict | None = None,
+            film_genre: str | None = None) -> list[str]:
+    """Claude translate với unified prompt + JSON output (Claude follow OK)."""
     api_key = _sanitize_api_key(api_key, "Claude")
+    model = model or DEFAULT_MODELS["claude"]
+    if not segments_meta:
+        segments_meta = [
+            {"index": i, "start": float(i * 3), "end": float((i + 1) * 3),
+             "original_text": t}
+            for i, t in enumerate(texts)
+        ]
+    from app.services.llm.prompts import (
+        build_translation_prompt,
+        parse_translation_response,
+    )
+    prompt = build_translation_prompt(
+        segments=segments_meta,
+        target_lang=target,
+        source_lang=source,
+        topic_hint=topic_hint,
+        glossary_block=glossary_block,
+        speaker_genders=speaker_genders,
+        film_genre=film_genre,
+        engine="claude",
+    )
+    payload = {
+        "model": model,
+        "max_tokens": 4096,
+        "temperature": 0.2,
+        "system": prompt["system"],
+        "messages": [{"role": "user", "content": prompt["user"]}],
+    }
+    headers = {
+        "x-api-key": api_key,
+        "anthropic-version": "2023-06-01",
+        "Content-Type": "application/json",
+    }
+    r = _post_with_retry("claude", "https://api.anthropic.com/v1/messages",
+                          json_body=payload, headers=headers)
+    try:
+        raw = r.json()["content"][0]["text"]
+    except (KeyError, IndexError):
+        raise ValueError("Claude trả về dữ liệu không đúng định dạng. Vui lòng thử lại.")
+    parsed = parse_translation_response(raw, len(texts))
+    out = [item["translated_text"] for item in parsed]
+    if not any(out):
+        out = _parse_numbered(raw, len(texts))
+    return out
+
+
+def _claude_old_unused(texts: list[str], target: str, source: str, api_key: str,
+            model: str | None = None,
+            topic_hint: str | None = None,
+            glossary_block: str | None = None) -> list[str]:
+    """DEPRECATED — kept for reference."""
     model = model or DEFAULT_MODELS["claude"]
     tgt_name = _lang_display(target)
     src_name = _lang_display(source) if source and source.lower() != "auto" else "auto-detected source"
@@ -369,28 +430,34 @@ def translate_texts(
     model: str | None = None,
     topic_hint: str | None = None,
     glossary: list[tuple[str, str]] | None = None,
+    segments_meta: list[dict] | None = None,
+    speaker_genders: dict | None = None,
+    film_genre: str | None = None,
 ) -> list[str]:
     """Translate list of strings with chosen engine.
 
-    Raises ValueError with user-facing Vietnamese messages on config errors.
-    Empty strings in input are passed through (skip API call) for efficiency.
+    NEW params (S+timestamp): segments_meta, speaker_genders, film_genre →
+    forward vào LLM prompt để mọi engine có cùng quality (genre awareness,
+    pronoun matrix, budget chars). Trước đây chỉ Gemini có rich prompt,
+    OpenAI/Claude dùng minimal → chất lượng kém.
 
     topic_hint, glossary: cải thiện chất lượng dịch.
       · LLM engines (gemini/openai/claude): inject vào prompt
-      · Non-LLM (google_free/google_cloud/deepl): post-process replacement
-        cho glossary (topic_hint không áp dụng được).
+      · Non-LLM (google_free/google_cloud/deepl): post-process glossary
     """
     if not texts:
         return []
 
-    # Filter empty inputs — skip API call for blanks
     non_empty_idx = [i for i, t in enumerate(texts) if t and t.strip()]
     if not non_empty_idx:
         return [""] * len(texts)
 
     sub = [texts[i] for i in non_empty_idx]
+    # Lấy meta tương ứng với non-empty
+    sub_meta = None
+    if segments_meta:
+        sub_meta = [segments_meta[i] for i in non_empty_idx if i < len(segments_meta)]
 
-    # Render glossary block 1 lần (dùng cho LLM prompt)
     from app.services import glossary_svc
     glossary = glossary or []
     glossary_block = glossary_svc.format_for_prompt(glossary) if glossary else ""
@@ -405,7 +472,16 @@ def translate_texts(
         if not api_key:
             raise ValueError(f"Thiếu API key cho {engine}. Vào Cài đặt → AI & API keys để thêm.")
         try:
-            if engine in ("gemini", "openai", "claude"):
+            if engine in ("openai", "claude"):
+                # Mới: pass full meta để builder dùng unified rich prompt
+                translated = fn(sub, target, source, api_key, model=model,
+                                topic_hint=topic_block or None,
+                                glossary_block=glossary_block or None,
+                                segments_meta=sub_meta,
+                                speaker_genders=speaker_genders,
+                                film_genre=film_genre)
+            elif engine == "gemini":
+                # Gemini path cũ giữ tương thích — đã có rich prompt riêng
                 translated = fn(sub, target, source, api_key, model=model,
                                 topic_hint=topic_block or None,
                                 glossary_block=glossary_block or None)

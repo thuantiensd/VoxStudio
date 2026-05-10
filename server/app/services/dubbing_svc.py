@@ -1525,6 +1525,12 @@ def translate_project(
                 fallback_chain.append(fallback_eng)
             # OpenAI/Cloud không có key trong server → skip silently
 
+    # Build segments_meta đầy đủ + speaker_genders cho mọi LLM engine
+    # để OpenAI/Claude có rich prompt giống Gemini (genre + pronoun + budget).
+    segments_meta = list(project.get("segments") or [])
+    speaker_genders_meta = project.get("speaker_genders") or {}
+    film_genre_meta = project.get("film_genre")
+
     translated: list[str] = []
     last_error: Exception | None = None
     used_engine = eng
@@ -1534,6 +1540,9 @@ def translate_project(
                 texts=texts, target=target_lang, source=source_lang,
                 engine=try_eng, api_key=api_key if try_eng == eng else None,
                 topic_hint=topic_hint, glossary=glossary,
+                segments_meta=segments_meta,
+                speaker_genders=speaker_genders_meta,
+                film_genre=film_genre_meta,
             )
             # Check thực sự có output (không phải all empty)
             non_empty = sum(1 for t in translated if t and t.strip())
