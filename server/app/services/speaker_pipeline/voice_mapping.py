@@ -27,6 +27,8 @@ def build_speaker_voice_map(
     user_overrides: Optional[dict[str, str]] = None,
     default_voice: Optional[str] = None,
     speaker_genders: Optional[dict[str, str]] = None,
+    gender_confidences: Optional[dict[str, float]] = None,
+    confidence_threshold: float = 0.7,
 ) -> dict[str, str]:
     """Map mỗi stable speaker_id → voice_id.
 
@@ -50,6 +52,7 @@ def build_speaker_voice_map(
     """
     overrides = user_overrides or {}
     genders = speaker_genders or {}
+    confs = gender_confidences or {}
     n_slots = len(voice_slots)
 
     result: dict[str, str] = {}
@@ -60,7 +63,9 @@ def build_speaker_voice_map(
         if spk in overrides and overrides[spk]:
             result[spk] = overrides[spk]
 
-    # Pass 2: gender-aware match (slot 0=nam, slot 1=nữ)
+    # Pass 2: gender-aware match (slot 0=nam, slot 1=nữ) — CHỈ khi confidence
+    # ≥ threshold. Confidence thấp → skip pass này, để Pass 3 cycle slot
+    # (an toàn hơn guess sai).
     if genders:
         slot_genders = []
         for i in range(n_slots):
@@ -77,6 +82,14 @@ def build_speaker_voice_map(
             g = genders.get(spk, "unknown")
             if g not in ("male", "female"):
                 continue
+            # Confidence threshold gate — confidence thấp → KHÔNG strict match
+            spk_conf = confs.get(spk, 1.0)  # default 1.0 nếu thiếu (backward compat)
+            if spk_conf < confidence_threshold:
+                logger.info(
+                    "Speaker %s gender=%s conf=%.2f < %.2f → skip strict match (will cycle)",
+                    spk, g, spk_conf, confidence_threshold,
+                )
+                continue
             # Tìm slot match gender, chưa dùng, slot value non-empty
             for i, sg in enumerate(slot_genders):
                 if i in used_slots or sg != g:
@@ -86,13 +99,14 @@ def build_speaker_voice_map(
                     used_slots.add(i)
                     break
 
-    # Pass 3: speaker còn sót → slot "any" hoặc cycle
+    # Pass 3: speaker còn sót → ưu tiên slot CHƯA DÙNG, sau đó cycle.
     for i, spk in enumerate(speakers):
         if spk in result:
             continue
-        # Tìm slot "any" (index ≥ 2) chưa dùng + non-empty
+        # 3a. Tìm slot chưa dùng (BẤT KỲ index, không chỉ "any") + non-empty
+        # → tránh dồn 2 speaker vào cùng 1 voice khi vẫn còn slot trống.
         assigned = False
-        for j in range(2, n_slots):
+        for j in range(n_slots):
             if j in used_slots:
                 continue
             if voice_slots[j]:
@@ -102,7 +116,7 @@ def build_speaker_voice_map(
                 break
         if assigned:
             continue
-        # Cycle qua tất cả slot non-empty (ngay cả slot đã used — chấp nhận trùng)
+        # 3b. Hết slot trống → cycle qua tất cả slot non-empty (chấp nhận trùng)
         non_empty = [v for v in voice_slots if v]
         if non_empty:
             result[spk] = non_empty[i % len(non_empty)]

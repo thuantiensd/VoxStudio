@@ -1335,15 +1335,17 @@ def transcribe_project(project_id: str) -> dict:
                 seg["speaker"] = best_spk
                 seg["speaker_gender"] = speaker_genders.get(best_spk) if best_spk else None
 
-            # Build voice_map theo gender (slot 0=nam, slot 1=nữ) — nếu user
-            # đã chỉnh override trong meta, giữ nguyên.
+            # Build voice_map theo gender (slot 0=nam, slot 1=nữ) — chỉ khi
+            # gender confidence ≥ 0.7. Confidence thấp → cycle slot (an toàn).
             voice_slots = project_for_count.get("voice_slots") or []
             user_overrides = project_for_count.get("speaker_voice_map") or {}
+            gender_confidences = (sp_result.stats or {}).get("gender_confidences") or {}
             voice_map = build_speaker_voice_map(
                 speakers=sp_result.speakers,
                 voice_slots=voice_slots,
                 user_overrides=user_overrides,
                 speaker_genders=speaker_genders,
+                gender_confidences=gender_confidences,
             )
 
             # Reload meta + persist analysis (in-memory project might be stale)
@@ -2131,23 +2133,47 @@ def _count_meaningful_chars(text: str) -> int:
     return len(cleaned)
 
 
+def _emotion_speed_cap(emotion: str | None) -> float:
+    """Speed cap thông minh theo emotion. Production: phim cảnh khác cảnh,
+    không thể dùng 1 cap cứng nhắc.
+
+    - angry/argument/cao trào: chấp nhận nhanh hơn (dồn nhịp tự nhiên)
+    - whisper/sad/cảm xúc: cap thấp hơn (giữ giọng truyền cảm)
+    - happy/surprised/fearful: trung bình
+    - neutral / default: cap chuẩn
+    """
+    if not emotion:
+        return MAX_SPEED_FACTOR
+    e = emotion.lower().strip()
+    if e in ("angry", "argument", "shouting"):
+        return 1.32  # Cãi nhau/giận → nhanh OK
+    if e in ("whisper", "sad", "tender", "intimate"):
+        return 1.15  # Truyền cảm → giữ chậm
+    if e in ("happy", "surprised", "fearful", "excited"):
+        return 1.28  # Cảm xúc tăng — nhẹ hơn neutral
+    return MAX_SPEED_FACTOR  # neutral / unknown → 1.25
+
+
 def _compute_target_speed(seg: dict, target_dur: float, dub_text: str,
                           tts_natural_dur: float) -> tuple[float, str]:
     """Tính tỉ số speedup tối ưu cho TTS dub.
 
-    Trả về (speed_factor, reason) — speed_factor nằm trong [MIN, MAX].
+    Trả về (speed_factor, reason) — speed_factor nằm trong [MIN, emotion_cap].
 
     Logic:
       1. Tính rate gốc (orig_chars / orig_dur). Nếu thiếu → DEFAULT_VN_RATE.
-      2. Estimate dub_dur_at_orig_rate = dub_chars / orig_rate.
-      3. Compare với target_dur (slot time):
-         - Nếu fit thoải mái (≤ 1.0x slot): trả 1.0 — TTS chạy natural rate.
-         - Nếu vượt nhẹ (≤ 1.10x slot): trả ratio để match slot, nghe ok.
-         - Nếu vượt mạnh: clamp về MAX_SPEED_FACTOR + cảnh báo (sẽ overflow).
-      4. Tránh slowdown < MIN_SPEED_FACTOR (TTS slow xuống nghe muddy).
+      2. Estimate dub_dur_at_orig_rate.
+      3. Compare với target_dur (slot time).
+      4. **Adaptive cap theo emotion** (production fix S4.D6):
+         - angry → 1.32x (cao trào nhanh OK)
+         - whisper/sad → 1.15x (truyền cảm)
+         - default → 1.25x
+      5. Tránh slowdown < MIN (TTS slow xuống nghe muddy).
     """
     orig_text = seg.get("original_text") or seg.get("text") or ""
     orig_dur = seg.get("end", 0) - seg.get("start", 0)
+    emotion = seg.get("emotion") or "neutral"
+    speed_cap = _emotion_speed_cap(emotion)
 
     orig_chars = _count_meaningful_chars(orig_text)
     if orig_chars > 0 and orig_dur > 0.5:
@@ -2155,8 +2181,7 @@ def _compute_target_speed(seg: dict, target_dur: float, dub_text: str,
     else:
         orig_rate = DEFAULT_VN_RATE
 
-    # Use TTS natural duration as baseline if available — more accurate than
-    # estimating from char count (TTS engines have different paces).
+    # Use TTS natural duration as baseline if available
     if tts_natural_dur > 0 and target_dur > 0:
         ratio = tts_natural_dur / target_dur
     else:
@@ -2164,14 +2189,14 @@ def _compute_target_speed(seg: dict, target_dur: float, dub_text: str,
         est_dur = dub_chars / orig_rate if orig_rate > 0 else target_dur
         ratio = est_dur / target_dur if target_dur > 0 else 1.0
 
-    # Clamp + decide
+    # Clamp + decide với adaptive cap
     if ratio <= 1.0 + SPEED_TOLERANCE:
-        # Fit naturally or slight slowdown — keep at 1.0 for cleanest voice
         return (max(MIN_SPEED_FACTOR, min(1.0, ratio)), "natural")
-    if ratio <= MAX_SPEED_FACTOR:
+    if ratio <= speed_cap:
         return (ratio, "speedup_within_limit")
-    # Overflow — clamp + warn
-    return (MAX_SPEED_FACTOR, "overflow_clamped")
+    # Overflow — clamp + warn (cap đã adaptive theo emotion)
+    reason = f"overflow_clamped_{emotion}" if emotion != "neutral" else "overflow_clamped"
+    return (speed_cap, reason)
 
 
 def _process_one_batch_audio(
