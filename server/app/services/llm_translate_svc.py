@@ -30,6 +30,156 @@ VALID_EMOTIONS = {"neutral", "happy", "sad", "angry", "fearful", "surprised", "d
 BATCH_SIZE = 10
 
 
+# ── Film genre prompts ──────────────────────────────────────
+# Mỗi genre có guidance riêng cho LLM để dịch sát ngữ cảnh phim. User
+# pick genre trong UI → inject prompt block tương ứng.
+FILM_GENRE_PROMPTS: dict[str, str] = {
+    "auto": "",  # no specific guidance — LLM tự suy
+    "drama": (
+        "FILM GENRE: Drama / melodrama (chính kịch).\n"
+        "- Dialogue tự nhiên, đời thường, cảm xúc thật.\n"
+        "- Đại từ đa dạng theo quan hệ: cặp đôi 'anh/em', gia đình "
+        "'con/bố/mẹ/anh/chị/em', bạn bè 'tớ/cậu' hoặc 'tao/mày'.\n"
+        "- Tránh từ ngữ archaic, tránh literal Chinese-style honorifics."
+    ),
+    "romance": (
+        "FILM GENRE: Romance / phim tình cảm.\n"
+        "- Tập trung diễn đạt CẢM XÚC giữa cặp đôi nhân vật.\n"
+        "- Cặp yêu nhau LUÔN dùng 'anh' (nam) / 'em' (nữ) — không 'tôi/bạn'.\n"
+        "- Lời tỏ tình, ghen tuông, thề nguyền dùng từ ngữ ngọt ngào, tự nhiên.\n"
+        "- Cãi nhau giữa cặp đôi vẫn giữ 'anh/em' (không chuyển 'mày/tao')."
+    ),
+    "action": (
+        "FILM GENRE: Action / phim hành động.\n"
+        "- Câu ngắn, gọn, mệnh lệnh nhiều ('chạy đi!', 'tránh ra!').\n"
+        "- Đối thủ dùng 'mày/tao' khi xung đột.\n"
+        "- Đồng đội dùng 'anh em', 'huynh đệ', 'đồng chí' tùy bối cảnh.\n"
+        "- Súng đạn / vũ khí giữ tên quốc tế ('AK', 'sniper') không Việt hoá."
+    ),
+    "comedy": (
+        "FILM GENRE: Comedy / phim hài.\n"
+        "- Đời thường, vui vẻ, slang Việt hoá thoải mái.\n"
+        "- Bạn bè dùng 'tao/mày' hoặc 'tớ/cậu'.\n"
+        "- Joke phải ADAPT văn hoá Việt — không dịch literal joke nước ngoài.\n"
+        "- Có thể thêm từ lóng đời thường ('xời', 'trời ơi', 'thôi rồi')."
+    ),
+    "historical": (
+        "FILM GENRE: Historical / cổ trang / phim cung đình.\n"
+        "- Dùng tiếng Việt cổ phong, KHÔNG slang hiện đại.\n"
+        "- Hoàng đế: 'trẫm' (tự xưng) / 'bệ hạ' (gọi). Cận thần: 'thần'.\n"
+        "- Cặp đôi cổ trang: 'thiếp/chàng', 'phu quân/nương tử'.\n"
+        "- Tôi tớ tự xưng 'nô tì/nô bộc'.\n"
+        "- Quan lại: 'tiểu nhân/đại nhân', 'hạ thần'.\n"
+        "- Tránh các từ hiện đại như 'OK', 'cool', 'sếp'."
+    ),
+    "crime": (
+        "FILM GENRE: Crime / thriller / phim hình sự.\n"
+        "- Lời thoại thẳng thừng, có thể thô.\n"
+        "- Tội phạm / nạn nhân dùng 'mày/tao' tự do.\n"
+        "- Cảnh sát formal: 'tôi' / 'anh-chị' với dân, 'mày' với tội phạm.\n"
+        "- Profanity được phép khi phù hợp ('mẹ kiếp', 'chết tiệt')."
+    ),
+    "family": (
+        "FILM GENRE: Family / phim gia đình.\n"
+        "- Quan hệ gia đình PHẢI chính xác: con/bố/mẹ/ông/bà/cô/chú/dì/cậu/bác.\n"
+        "- Anh chị em ruột: 'anh/chị/em' theo thứ tự.\n"
+        "- Họ hàng: tự xưng 'cháu', gọi theo vai vế ('cô Lan', 'chú Ba').\n"
+        "- Tránh dùng 'tôi/bạn' giữa người thân — luôn dùng vai vế."
+    ),
+    "horror": (
+        "FILM GENRE: Horror / phim kinh dị.\n"
+        "- Câu ngắn, không khí căng thẳng, thì thầm.\n"
+        "- Sợ hãi: dùng nhiều dấu '...' để diễn tả ngắt quãng.\n"
+        "- Kẻ phản diện / quỷ: 'ngươi', 'mày'.\n"
+        "- Nạn nhân tự xưng nhỏ 'tôi', 'mình'."
+    ),
+    "anime": (
+        "FILM GENRE: Anime / animation.\n"
+        "- Năng lượng, tươi trẻ, biểu cảm.\n"
+        "- Trẻ em / học sinh: 'tớ/cậu', 'mình/cậu'.\n"
+        "- Bạn thân: 'tao/mày' OK.\n"
+        "- Senpai/sensei giữ romaji nếu phổ biến.\n"
+        "- Tên nhân vật giữ romaji ('Naruto', 'Sakura'), không Việt hoá."
+    ),
+    "documentary": (
+        "FILM GENRE: Documentary / phim tài liệu.\n"
+        "- Trung tính, factual, không cảm xúc.\n"
+        "- Người dẫn dùng 'tôi' formal, gọi 'các bạn'.\n"
+        "- Tránh slang và đại từ thân mật."
+    ),
+    "kpop_drama": (
+        "FILM GENRE: K-drama / phim Hàn Quốc.\n"
+        "- Romance: cặp đôi 'anh/em' (older male / younger female).\n"
+        "- Tên nhân vật giữ romanization Hàn ('Lee Min-ho', 'Kim Soo-hyun').\n"
+        "- Honorifics: 'oppa' → 'anh', 'noona' → 'chị', 'ahjussi' → 'chú'.\n"
+        "- Boss formal: 'sajangnim' → 'giám đốc'."
+    ),
+    "cdrama": (
+        "FILM GENRE: C-drama / phim Hoa ngữ hiện đại.\n"
+        "- Romance modern: 'anh/em' couple.\n"
+        "- Boss / CEO: 'tổng giám đốc' / 'sếp'.\n"
+        "- Tên nhân vật phiên âm tiếng Việt ('Tô Huyên', 'Lý Minh').\n"
+        "- 哥/姐 (anh trai/chị gái lớn) → 'anh/chị'."
+    ),
+    "wuxia": (
+        "FILM GENRE: Wuxia / kiếm hiệp / cổ trang Trung Quốc.\n"
+        "- Cao thủ võ lâm: tự xưng 'tại hạ', gọi 'các hạ'.\n"
+        "- Sư phụ/đệ tử: 'sư phụ/đồ nhi', 'sư huynh/sư đệ/sư muội'.\n"
+        "- Cặp đôi cổ trang: 'thiếp/chàng', 'tướng công/phu nhân'.\n"
+        "- Vũ khí giữ tên Hán-Việt ('thanh kiếm', 'cây cung', 'ngân châm').\n"
+        "- Môn phái giữ tên gốc ('Thiếu Lâm', 'Võ Đang')."
+    ),
+}
+
+
+def _genre_prompt_block(film_genre: str | None) -> str:
+    """Lấy prompt block cho genre. Ưu tiên block từ genre_detector mới
+    (chi tiết, có pronoun matrix family). Fallback FILM_GENRE_PROMPTS cũ
+    (Wuxia + few keys legacy)."""
+    if not film_genre:
+        return ""
+    g = film_genre.lower().strip()
+    # Try new module first (historical_zh, modern_drama, romcom, action, news, ...)
+    try:
+        from app.services.llm import get_genre_prompt_block
+        block = get_genre_prompt_block(g)
+        if block and len(block) > 50:
+            return block
+    except Exception:
+        pass
+    # Fallback: legacy keys (wuxia, drama, ...)
+    return FILM_GENRE_PROMPTS.get(g, "")
+
+
+def _genre_block(film_genre: str | None) -> str:
+    """Format genre block for prompt — leading newlines + label."""
+    block = _genre_prompt_block(film_genre)
+    if not block:
+        return ""
+    return f"\n\n{block}"
+
+
+def _build_budget_block(segments: list[dict]) -> str:
+    """Build per-segment char budget hint cho Qwen prompt.
+
+    Output format: list "N. text [max M chars]" để Qwen biết line nào
+    cần ngắn (slot tight) line nào dài (slot rộng).
+    """
+    lines = []
+    for i, seg in enumerate(segments):
+        dur = max(0.3, seg.get("end", 0) - seg.get("start", 0))
+        max_chars = max(8, int(dur * 11.5))
+        text = seg.get("original_text") or seg.get("text") or ""
+        spk = seg.get("speaker")
+        speaker_genders = seg.get("_speaker_genders_ref") or {}
+        prefix = f"[max {max_chars} chars]"
+        if spk:
+            g = speaker_genders.get(spk, "unknown")
+            prefix = f"[{spk}:{g}, max {max_chars} chars]"
+        lines.append(f"{i+1}. {prefix} {text}")
+    return "\n".join(lines)
+
+
 def _build_polish_prompt(
     translated_lines: list[str],
     target_lang: str,
@@ -153,6 +303,24 @@ def _strip_duration_hints(text: str) -> str:
     return out.strip()
 
 
+def _clean_pronoun_placeholders(text: str) -> str:
+    """Remove "anh/em", "chị/em", etc. placeholders that LLM occasionally
+    leaks. Pick the FIRST option (usually the speaker pronoun) since that's
+    what the LLM was trying to suggest. Conservative — only target patterns
+    bắt đầu bằng từ đại từ + "/" + đại từ khác.
+    """
+    if not text:
+        return text
+    # Patterns: "Anh/Em", "anh/em", "Chị/em", "ông/bà", "tao/mày", etc.
+    # → keep the first word, drop "/word" part
+    pronouns = r"(?:anh|em|chị|cô|cậu|tôi|bạn|ông|bà|chú|bác|tao|mày|mình|ta)"
+    pattern = re.compile(
+        rf"\b({pronouns})\s*/\s*{pronouns}\b",
+        re.IGNORECASE,
+    )
+    return pattern.sub(lambda m: m.group(1), text)
+
+
 def _parse_response(response: str, count: int) -> list[dict]:
     """Parse numbered lines with emotion tags from LLM response."""
     lines = response.strip().split("\n")
@@ -177,6 +345,7 @@ def _parse_response(response: str, count: int) -> list[dict]:
                     emotion = "neutral"
                     text = f"[{emotion_raw}] {text}"
                 text = _strip_duration_hints(text)
+                text = _clean_pronoun_placeholders(text)
                 results[idx] = {"speech_text": text, "emotion": emotion}
         else:
             # Fallback: no emotion tag
@@ -184,6 +353,7 @@ def _parse_response(response: str, count: int) -> list[dict]:
             if m2:
                 idx = int(m2.group(1)) - 1
                 text = _strip_duration_hints(m2.group(2).strip())
+                text = _clean_pronoun_placeholders(text)
                 if 0 <= idx < count:
                     results[idx] = {"speech_text": text, "emotion": "neutral"}
 
@@ -196,18 +366,37 @@ def _build_translate_prompt(
     source_lang: str = None,
     topic_hint: str | None = None,
     glossary: list[tuple[str, str]] | None = None,
+    speaker_genders: dict | None = None,
+    film_genre: str | None = None,
 ) -> list[dict]:
     """Build prompt for Qwen to do FULL translation with emotion tags.
 
     Similar to gemini_translate_svc but optimized for smaller local LLM.
+
+    Nếu segments có 'speaker' + project có 'speaker_genders' thì truyền vào
+    prompt dạng [SPKx:gender] để LLM chọn đại từ phù hợp giới tính từng nhân
+    vật, tránh trường hợp dịch lại "cô" cho cả nam.
     """
     tgt_name = LANG_NAMES.get(target_lang, target_lang)
     src_name = LANG_NAMES.get(source_lang, source_lang) if source_lang else "auto-detect"
 
-    numbered = "\n".join(
-        f"{i+1}. {seg.get('original_text', seg.get('text', ''))}"
-        for i, seg in enumerate(segments)
-    )
+    # Numbered input — kèm prefix [SPKx:gender] + [max N chars] BUDGET cho
+    # Qwen biết line nào cần ngắn (slot tight) line nào rộng. Tiếng Việt
+    # ~11.5 chars/sec speech rate, headroom 10% tránh overflow TTS.
+    has_speakers = bool(speaker_genders) and any(seg.get("speaker") for seg in segments)
+    lines = []
+    for i, seg in enumerate(segments):
+        text = seg.get("original_text", seg.get("text", ""))
+        dur = max(0.3, seg.get("end", 0) - seg.get("start", 0))
+        max_chars = max(8, int(dur * 11.5))
+        prefix_parts = [f"max {max_chars} chars"]
+        if has_speakers and seg.get("speaker"):
+            spk = seg["speaker"]
+            g = (speaker_genders or {}).get(spk, "unknown")
+            prefix_parts.insert(0, f"{spk}:{g}")
+        prefix = "[" + ", ".join(prefix_parts) + "]"
+        lines.append(f"{i+1}. {prefix} {text}")
+    numbered = "\n".join(lines)
 
     # Render topic hint + glossary từ glossary_svc — share format với engines khác
     from app.services import glossary_svc
@@ -220,21 +409,81 @@ def _build_translate_prompt(
         if s: extras.append(s)
     extra_block = ("\n\n" + "\n\n".join(extras)) if extras else ""
 
-    system = f"""You are a professional film dialogue translator.
-Translate from {src_name} to {tgt_name}.
+    # Speaker rule — branch theo target language. Mỗi ngôn ngữ có hệ
+    # đại từ + honorific khác nhau, hard-code Vietnamese rule cho lang
+    # khác sẽ confuse LLM.
+    speaker_rule = ""
+    is_vietnamese = (target_lang or "").lower() in ("vietnamese", "vi", "vi-vn")
+    if has_speakers:
+        common_prefix = (
+            "\n- The [SPKx:gender] prefix tells you which character speaks. Use consistent\n"
+            "  pronouns per speaker across the scene. Do NOT include the prefix in output."
+        )
+        if is_vietnamese:
+            vi_specific = (
+                "\n- For female speakers use chị/em/cô. For male speakers use anh/ông/chú/cậu.\n"
+                "  For unknown genders, use neutral forms based on context.\n"
+                "- In heated/argument scenes, use stronger pronouns (mày/tao, ông/bà) when fitting\n"
+                "  the gender and tone — don't default to soft 'cô/anh' for arguments."
+            )
+            speaker_rule = common_prefix + vi_specific
+        else:
+            generic = (
+                f"\n- Use {tgt_name} pronouns/honorifics that match each speaker's gender from\n"
+                f"  the prefix. Match the tone (calm vs argument) using register appropriate\n"
+                f"  for {tgt_name}."
+            )
+            speaker_rule = common_prefix + generic
 
-Output format — one line per input:
+    # Pronoun rule — must be UNAMBIGUOUS to avoid LLM copying placeholder.
+    # User feedback: "anh/em" example trong prompt bị LLM output literal
+    # ("Anh/Em thật sự có cuộc họp à?"). Fix: yêu cầu CHỌN MỘT pronoun
+    # cụ thể, không dùng dấu /.
+    pronoun_rule = (
+        "- Use ONE specific Vietnamese pronoun per character (NEVER write 'anh/em' "
+        "or 'chị/em' with a slash — pick one based on speaker gender + context). "
+        "Common choices: anh, em, tôi, bạn, ông, bà, chị, cô, chú, cậu, mày, tao."
+        if is_vietnamese
+        else f"- Use natural pronouns/honorifics standard for {tgt_name}"
+    )
+
+    system = f"""Bạn là dịch giả phim chuyên nghiệp. Dịch từ {src_name} sang {tgt_name}.
+
+═══════════════════════════════════════════════════════════════
+QUY TRÌNH BẮT BUỘC:
+
+BƯỚC 1 — ĐỌC SCENE TRƯỚC: identify register (cổ trang/hiện đại/romcom/action),
+quan hệ giữa speaker (vợ chồng / mẹ-con / bạn bè / cấp trên-dưới), tone.
+
+BƯỚC 2 — PRONOUN: cùng SPKx phải có CÙNG cách xưng xuyên scene.
+{pronoun_rule}{speaker_rule}
+
+BƯỚC 3 — TIMING BUDGET (BẮT BUỘC):
+Mỗi line có [max N chars] = ký tự TỐI ĐA cho dub khớp nhịp. Tiếng Việt
+thường dài hơn Trung 30% — phải RÚT GỌN: cắt filler, dùng từ ngắn.
+HARD: KHÔNG vượt max N chars.
+
+BƯỚC 4 — ANCHOR ENTITIES PHẢI GIỮ:
+- Vật dụng: 钻石→kim cương, 婚戒→nhẫn cưới, 戒指→nhẫn, 手机→điện thoại
+- Quan hệ: 妈妈→mẹ, 爸爸→ba/bố, 姐姐→chị, 老板→sếp
+- Ăn uống: 咖啡→cà phê, 牛奶→sữa, 果汁→nước trái cây
+- Tên riêng (Wenxi, 阿絮, 张总): GIỮ NGUYÊN — KHÔNG dịch sang Việt
+
+BƯỚC 5 — NGÔN NGỮ: tự nhiên, mượt như phim VTV. Chêm "...", "," cho ngắt
+nhịp. Match emotion.
+
+═══════════════════════════════════════════════════════════════
+OUTPUT FORMAT (BẮT BUỘC, mỗi input 1 line):
+
 N. [emotion] translated text
 
-Emotions: [neutral] [happy] [sad] [angry] [whisper] [surprised] [fearful]
+Emotions hợp lệ: [neutral] [happy] [sad] [angry] [whisper] [surprised] [fearful]
 
-Rules:
-- Translate naturally for spoken dialogue (not literal subtitles)
-- Use appropriate pronouns for {tgt_name} (e.g. Vietnamese: anh/em, chị/em based on context)
-- Add '...' for pauses, ',' for breath pauses
-- Keep the meaning accurate
-- Output MUST have exactly the same number of lines as input
-- Output ONLY in {tgt_name}{extra_block}"""
+QUY TẮC OUTPUT:
+- Số lines output PHẢI = số lines input
+- Output CHỈ tiếng {tgt_name} — KHÔNG markdown/preamble/meta-commentary
+- KHÔNG có placeholder, KHÔNG dấu "/" trong pronoun (chọn 1 từ duy nhất)
+- KHÔNG include [SPKx:gender] hay [max N chars] trong output{extra_block}{_genre_block(film_genre)}"""
 
     user = f"Translate this dialogue:\n\n{numbered}"
 
@@ -264,6 +513,8 @@ def translate_segments(
     source_language: str = None,
     topic_hint: str | None = None,
     glossary: list[tuple[str, str]] | None = None,
+    speaker_genders: dict | None = None,
+    film_genre: str | None = None,
 ) -> list[dict]:
     """Full translation using Qwen LLM — translates + adds emotion tags.
 
@@ -290,6 +541,8 @@ def translate_segments(
         messages = _build_translate_prompt(
             batch, target_language, source_language,
             topic_hint=topic_hint, glossary=glossary,
+            speaker_genders=speaker_genders,
+            film_genre=film_genre,
         )
 
         try:
