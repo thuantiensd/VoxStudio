@@ -4473,10 +4473,10 @@ function DubbingTab({ setActiveTab }: { setActiveTab: (t: Tab) => void }) {
             </div>
           </div>
           <div className="space-y-3 p-4">
-            {/* Số giọng (multi-speaker) — chỉ hiệu lực với Premium */}
+            {/* Chế độ — 1 giọng = thuyết minh, 2+ = lồng tiếng */}
             <div>
               <span className="mb-1.5 block text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
-                Số giọng (multi-speaker)
+                Chế độ
               </span>
               <div className="flex gap-1.5">
                 {[1, 2, 3, 4, 5].map((n) => (
@@ -4495,7 +4495,9 @@ function DubbingTab({ setActiveTab }: { setActiveTab: (t: Tab) => void }) {
                 ))}
               </div>
               <p className="mt-1.5 text-[10px] text-muted-foreground">
-                {voiceCount === 1 ? "Một giọng cho mọi người nói" : `${voiceCount} giọng — backend map theo speaker (gender)`}
+                {voiceCount === 1
+                  ? "🎙️ Thuyết minh — 1 giọng đọc tất cả. AI vẫn phân tích nam/nữ để dịch chuẩn pronoun."
+                  : `🎬 Lồng tiếng — ${voiceCount} giọng theo nhân vật, AI tự map nam/nữ → giọng tương ứng.`}
               </p>
             </div>
 

@@ -1430,20 +1430,25 @@ def transcribe_project(project_id: str) -> dict:
     merged = _merge_short_segments(trimmed, min_duration=4.0, max_gap=1.8, max_combined=14.0)
     logger.info("Post-process: %d segments after merge-short (final)", len(merged))
 
-    # ── Speaker analysis: NEW production-ready pipeline ──
-    # Phase 4-12 (per spec): pyannote diarize + embedding reID + word-level
-    # assignment + sentence grouping + voice mapping (NO gender classifier).
+    # ── Speaker analysis: LUÔN CHẠY (kể cả voice_count=1 = thuyết minh) ──
+    # UX design:
+    #   • voice_count=1 = THUYẾT MINH: 1 giọng đọc tất cả, NHƯNG translation
+    #     vẫn cần biết ai nam/nữ để dùng pronoun đúng (anh/em, mẹ/con, ...)
+    #   • voice_count≥2 = LỒNG TIẾNG: mỗi nhân vật giọng riêng theo gender
     #
-    # Output: project["speaker_analysis"] (JSON cho FE editor) +
-    #         project["speaker_voice_map"] (speaker_id → voice_id).
-    # Segments cũ (Whisper-based) vẫn được populate speaker từ pipeline mới
-    # qua time-overlap mapping → backward compat với TTS code cũ.
+    # Cost: +30s GPU diarize + gender (acceptable cho pronoun chuẩn).
+    # Translation luôn được pass speaker_genders → pronoun ground truth.
+    # TTS voice picker:
+    #   - voice_count=1: dùng voice_slots[0] cho mọi segment (1 giọng)
+    #   - voice_count≥2: pick voice theo speaker (nhiều giọng)
     project_for_count = _load_meta(project_id) or {}
     voice_count_meta = int(project_for_count.get("voice_count") or 1)
-    speaker_genders: dict[str, str] = {}  # legacy field, để rỗng (pipeline không dùng nữa)
+    speaker_genders: dict[str, str] = {}
 
-    if voice_count_meta <= 1:
-        logger.info("Single voice mode (voice_count=1) → skip speaker analysis")
+    # Skip speaker pipeline CHỈ khi user explicit muốn (env var DEBUG)
+    skip_speaker = os.environ.get("VOX_SKIP_SPEAKER_PIPELINE", "").lower() == "true"
+    if skip_speaker:
+        logger.info("VOX_SKIP_SPEAKER_PIPELINE=true → skip speaker analysis")
     else:
         try:
             from app.services.speaker_pipeline import (
