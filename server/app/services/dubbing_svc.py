@@ -3478,12 +3478,15 @@ def auto_chunk_project_segments(project_id: str) -> dict:
 
 
 def _run_step_with_progress(func, args, kwargs, start_pct, end_pct, label,
-                             estimated_sec=30):
+                             estimated_sec=30, hard_timeout_sec=None):
     """Chạy `func(*args, **kwargs)` trong 1 thread, vừa chạy vừa yield tick
-    tiến trình (theo thời gian thực nội suy giữa start_pct và end_pct).
+    tiến trình. Có HARD TIMEOUT để tránh treo vô hạn.
 
-    Trả về generator. Item cuối có `_result` chứa kết quả func, hoặc
-    `_error` chứa exception (caller tự raise).
+    Args:
+      hard_timeout_sec: nếu thread chạy quá X giây → raise TimeoutError.
+                       Default 10x estimated_sec (vd estimate 30s → cap 300s).
+
+    Returns: generator. Item cuối có `_result` hoặc `step=error`.
     """
     import threading, time
     box = {}
@@ -3495,20 +3498,30 @@ def _run_step_with_progress(func, args, kwargs, start_pct, end_pct, label,
     thread = threading.Thread(target=run, daemon=True)
     thread.start()
     t0 = time.time()
+    timeout_s = hard_timeout_sec if hard_timeout_sec else max(120, estimated_sec * 10)
+
     while thread.is_alive():
         elapsed = time.time() - t0
-        # Nội suy CHẬM DẦN (ease-out) để khi estimate hết mà vẫn chưa xong,
-        # thanh không bị cắm ở 95% mà tiếp tục bò rất chậm về gần cuối.
+
+        # Hard timeout — fail fast thay vì treo
+        if elapsed > timeout_s:
+            box["error"] = TimeoutError(
+                f"Phase '{label}' treo >{timeout_s}s — auto kill. "
+                f"Có thể do API LLM hang, network issue, hoặc bug code.",
+            )
+            logger.error("Phase TIMEOUT: %s after %.0fs", label, elapsed)
+            yield {"step": "error", "label": str(box["error"]), "progress": -1}
+            return
+
         if estimated_sec > 0 and elapsed < estimated_sec:
             frac = elapsed / estimated_sec
         else:
-            # Vượt estimate: creep chậm từ 0.95 → 0.99
             overshoot = elapsed - estimated_sec
             frac = 0.95 + 0.04 * (1 - 1 / (1 + overshoot / 10))
         frac = min(0.99, frac)
         cur = start_pct + (end_pct - start_pct) * frac
         yield {"step": "progress", "label": label, "progress": round(cur, 1)}
-        time.sleep(0.25)  # tick 4 lần/giây cho thanh bò mượt
+        time.sleep(0.25)
     thread.join()
     if "error" in box:
         yield {"step": "error", "label": str(box["error"]), "progress": -1}

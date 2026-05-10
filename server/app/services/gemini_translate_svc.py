@@ -348,6 +348,36 @@ def _translate_uncached(
     return results
 
 
+def _call_gemini_with_timeout(model, prompt: str, timeout_s: int = 90):
+    """Wrap Gemini SDK call với hard timeout. SDK mặc định không timeout
+    → call có thể hang vô hạn nếu Gemini server slow / network issue
+    → pipeline treo im lặng. Wrapper này force fail sau N giây.
+    """
+    import threading
+    import queue as _queue
+
+    result_q: _queue.Queue = _queue.Queue()
+
+    def _worker():
+        try:
+            r = model.generate_content(prompt)
+            result_q.put(("ok", r))
+        except Exception as e:
+            result_q.put(("err", e))
+
+    t = threading.Thread(target=_worker, daemon=True)
+    t.start()
+    try:
+        kind, value = result_q.get(timeout=timeout_s)
+    except _queue.Empty:
+        # Hard timeout — thread vẫn alive nhưng abandon (daemon=True →
+        # process exit sẽ kill). Caller phải retry hoặc fail.
+        raise TimeoutError(f"Gemini API call timeout sau {timeout_s}s")
+    if kind == "err":
+        raise value
+    return value
+
+
 def _translate_batch_with_retry(
     *, model, prompt_base: str, batch: list[dict], max_retry: int,
 ) -> tuple[list[dict], int]:
@@ -363,12 +393,26 @@ def _translate_batch_with_retry(
     for attempt in range(max_retry):
         prompt = prompt_base + addendum
         try:
-            response = model.generate_content(prompt)
+            # Hard timeout 90s — Gemini SDK mặc định KHÔNG có timeout,
+            # call hang vô hạn nếu network/server slow → pipeline treo.
+            response = _call_gemini_with_timeout(model, prompt, timeout_s=90)
             new_parsed = _parse_response(response.text, len(batch))
-        except Exception as e:
-            logger.error("Gemini API call failed attempt %d: %s", attempt + 1, e)
+        except TimeoutError as e:
+            logger.error("Gemini timeout 90s attempt %d/%d: %s",
+                          attempt + 1, max_retry, e)
             if attempt == max_retry - 1:
-                break
+                # Fail fast — caller (dubbing_svc) sẽ fallback engine khác
+                raise ValueError(
+                    f"Gemini API treo >90s sau {max_retry} retry. "
+                    f"Đổi sang engine khác hoặc thử lại sau.",
+                ) from e
+            continue
+        except Exception as e:
+            logger.error("Gemini API call failed attempt %d/%d: %s",
+                          attempt + 1, max_retry, e)
+            if attempt == max_retry - 1:
+                # Fail rõ ràng thay vì silent
+                raise ValueError(f"Gemini lỗi sau {max_retry} retry: {e}") from e
             continue
 
         # Merge new results — chỉ override những seg lần trước fail/empty
