@@ -1250,7 +1250,9 @@ def transcribe_project(project_id: str) -> dict:
     snapped = silero_snapped
 
     # 2. Split segments > 10s (Tier 1.1 — siết từ 12s → 10s để TTS natural hơn)
-    split_segs = _split_all_long_segments(snapped, max_duration=10.0)
+    # Tăng max từ 10s → 12s để giữ câu dài liền mạch (TTS slot dài đỡ overflow,
+    # subtitle đọc tự nhiên hơn). 12s vẫn đủ ngắn để TTS render mượt.
+    split_segs = _split_all_long_segments(snapped, max_duration=12.0)
     logger.info("Post-process: %d segments after split-long (was %d snapped)",
                 len(split_segs), len(snapped))
 
@@ -1274,7 +1276,11 @@ def transcribe_project(project_id: str) -> dict:
     logger.info("Post-process: %d segments after trim-sparse", len(trimmed))
 
     # 4. Merge adjacent short segments (Tier 1.1: min 3s, gap 1.0s, combined 9s)
-    merged = _merge_short_segments(trimmed, min_duration=3.0, max_gap=1.0, max_combined=9.0)
+    # Aggressive merge: giữ câu liền mạch, đỡ vụn.
+    # min_duration 3.0 → 4.0 (segment <4s được merge với neighbor)
+    # max_gap    1.0 → 1.5 (cho phép gap dài hơn nếu sentence chưa end)
+    # max_combined 9.0 → 12.0 (case sentence_continues còn cho +2s = 14s tối đa)
+    merged = _merge_short_segments(trimmed, min_duration=4.0, max_gap=1.5, max_combined=12.0)
     logger.info("Post-process: %d segments after merge-short (final)", len(merged))
 
     # ── Speaker analysis: NEW production-ready pipeline ──
