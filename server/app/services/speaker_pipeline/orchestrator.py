@@ -27,42 +27,112 @@ from .overlap import detect_overlaps
 from .word_assignment import assign_speakers_to_words
 from .sentence_grouping import group_words_into_sentences
 from .confidence import apply_confidence
-from .gender import detect_speaker_genders
+from .gender import detect_speaker_genders, detect_speaker_genders_with_confidence
 
 logger = logging.getLogger(__name__)
 
 
-def _run_diarization(audio_path: str, min_speakers: int, max_speakers: int) -> list[DiarizationTurn]:
-    """Phase 3 — Pyannote diarization.
-
-    Always tries pyannote first (per spec). Resemblyzer là legacy fallback
-    cho dev không có HF_TOKEN.
-    """
+def _try_pyannote(audio_path: str, min_speakers: int, max_speakers: int) -> list[DiarizationTurn] | None:
+    """Pyannote primary. Trả None nếu fail (token, license, network, model)."""
     token = os.getenv("HF_TOKEN") or os.getenv("HUGGINGFACE_TOKEN")
-    if token:
-        try:
-            from app.services.diarize_svc import diarize as pyannote_diarize
-            result = pyannote_diarize.diarize(
-                audio_path, min_speakers=min_speakers, max_speakers=max_speakers,
-            )
-            turns = [
-                DiarizationTurn(start=s, end=e, speaker=spk)
-                for s, e, spk in result.get("turns", [])
-            ]
-            logger.info("Pyannote diarization: %d turns", len(turns))
-            return turns
-        except Exception as e:
-            logger.warning("Pyannote diarization failed (%s) — fallback Resemblyzer", e)
+    if not token:
+        return None
+    try:
+        from app.services.diarize_svc import diarize as pyannote_diarize
+        result = pyannote_diarize.diarize(
+            audio_path, min_speakers=min_speakers, max_speakers=max_speakers,
+        )
+        turns = [
+            DiarizationTurn(start=s, end=e, speaker=spk)
+            for s, e, spk in result.get("turns", [])
+        ]
+        logger.info("Pyannote: %d turns, speakers=%s", len(turns),
+                    sorted({t.speaker for t in turns}))
+        return turns
+    except Exception as e:
+        logger.warning("Pyannote diarization failed: %s", e)
+        return None
 
-    # Fallback: Resemblyzer (no HF token, lower quality but works)
-    from app.services.resemblyzer_diarize_svc import diarize as resem_diarize
-    result = resem_diarize.diarize(
-        audio_path, min_speakers=min_speakers, max_speakers=max_speakers,
-    )
-    return [
-        DiarizationTurn(start=s, end=e, speaker=spk)
-        for s, e, spk in result.get("turns", [])
-    ]
+
+def _try_resemblyzer(audio_path: str, min_speakers: int, max_speakers: int) -> list[DiarizationTurn] | None:
+    """Resemblyzer secondary. Trả None nếu fail."""
+    try:
+        from app.services.resemblyzer_diarize_svc import diarize as resem_diarize
+        result = resem_diarize.diarize(
+            audio_path, min_speakers=min_speakers, max_speakers=max_speakers,
+        )
+        turns = [
+            DiarizationTurn(start=s, end=e, speaker=spk)
+            for s, e, spk in result.get("turns", [])
+        ]
+        logger.info("Resemblyzer: %d turns, speakers=%s", len(turns),
+                    sorted({t.speaker for t in turns}))
+        return turns
+    except Exception as e:
+        logger.warning("Resemblyzer diarization failed: %s", e)
+        return None
+
+
+def _vote_diarization(
+    pyannote_turns: list[DiarizationTurn] | None,
+    resemblyzer_turns: list[DiarizationTurn] | None,
+) -> tuple[list[DiarizationTurn], float]:
+    """Vote giữa 2 method. Trả (chosen_turns, confidence 0-1).
+
+    Logic:
+      - Cả 2 đều có + đồng ý số speaker (±1) → high confidence (0.9), pick pyannote
+      - Cả 2 đều có nhưng khác số speaker → medium (0.5), pick pyannote (chính)
+      - Chỉ pyannote → 0.7
+      - Chỉ resemblyzer → 0.4 (kém hơn nhưng có dữ liệu)
+      - Cả 2 fail → 0.0, return []
+    """
+    if pyannote_turns and resemblyzer_turns:
+        n_py = len({t.speaker for t in pyannote_turns})
+        n_re = len({t.speaker for t in resemblyzer_turns})
+        if abs(n_py - n_re) <= 1:
+            confidence = 0.9
+            logger.info(
+                "Diarize vote: pyannote=%d speakers, resemblyzer=%d → AGREE (conf=%.2f)",
+                n_py, n_re, confidence,
+            )
+        else:
+            confidence = 0.5
+            logger.warning(
+                "Diarize vote: pyannote=%d speakers ≠ resemblyzer=%d → DISAGREE (conf=%.2f), pick pyannote",
+                n_py, n_re, confidence,
+            )
+        return pyannote_turns, confidence
+    if pyannote_turns:
+        logger.info("Diarize vote: only pyannote available (conf=0.7)")
+        return pyannote_turns, 0.7
+    if resemblyzer_turns:
+        logger.warning("Diarize vote: pyannote down, only resemblyzer (conf=0.4)")
+        return resemblyzer_turns, 0.4
+    logger.error("Diarize vote: BOTH methods failed → no speaker info")
+    return [], 0.0
+
+
+def _run_diarization(
+    audio_path: str, min_speakers: int, max_speakers: int,
+) -> tuple[list[DiarizationTurn], float]:
+    """Phase 3 — Ensemble diarization (pyannote + resemblyzer).
+
+    Chạy 2 method song song khi có thể, vote kết quả + confidence. Trả
+    (turns, diarize_confidence). Confidence được dùng tính sentence
+    confidence ở Phase 10.
+
+    Returns: (turns, confidence) — confidence 0-1.
+    """
+    import concurrent.futures
+
+    # Run cả 2 song song để total time = max(2 method) thay vì sum
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+        f_py = executor.submit(_try_pyannote, audio_path, min_speakers, max_speakers)
+        f_re = executor.submit(_try_resemblyzer, audio_path, min_speakers, max_speakers)
+        py_turns = f_py.result(timeout=120)
+        re_turns = f_re.result(timeout=120)
+
+    return _vote_diarization(py_turns, re_turns)
 
 
 def _run_transcribe_and_align(
@@ -160,7 +230,8 @@ def analyze_speakers(
 
     # ── Phase 3: Diarization ──
     t = time.time()
-    turns = _run_diarization(audio_path, min_speakers, max_speakers)
+    turns, diarize_confidence = _run_diarization(audio_path, min_speakers, max_speakers)
+    stats["diarize_confidence"] = round(diarize_confidence, 2)
     stats["diarization_seconds"] = round(time.time() - t, 2)
     stats["raw_turns"] = len(turns)
 
@@ -194,16 +265,30 @@ def analyze_speakers(
     speakers = seen
     stats["unique_speakers"] = len(speakers)
 
-    # ── Phase 4b: Gender detection per speaker (F0-based, heuristic) ──
+    # ── Phase 4b: Gender detection per speaker (4-feature classifier) ──
+    # F0 + F0_std + spectral_centroid + formant_F1 → robust hơn F0-only.
+    # Confidence < 0.7 → forced "unknown" để voice mapping cycle slot
+    # thay vì guess sai (tránh case 2 nữ cùng pitch nhầm thành nam-nữ).
     t = time.time()
     speaker_genders: dict[str, str] = {}
+    speaker_genders_full: dict[str, dict] = {}
     try:
-        speaker_genders = detect_speaker_genders(audio_path, turns, speakers)
+        speaker_genders_full = detect_speaker_genders_with_confidence(
+            audio_path, turns, speakers,
+        )
+        speaker_genders = {spk: info["gender"]
+                          for spk, info in speaker_genders_full.items()}
     except Exception as e:
         logger.warning("Gender detection failed (%s) — all speakers='unknown'", e)
         speaker_genders = {spk: "unknown" for spk in speakers}
+        speaker_genders_full = {spk: {"gender": "unknown", "confidence": 0.0}
+                                 for spk in speakers}
     stats["gender_seconds"] = round(time.time() - t, 2)
     stats["genders"] = dict(speaker_genders)
+    stats["gender_confidences"] = {
+        spk: info.get("confidence", 0.0)
+        for spk, info in speaker_genders_full.items()
+    }
 
     # ── Phase 5: Overlap detection ──
     t = time.time()
