@@ -37,6 +37,11 @@ WHISPER_MODEL = os.getenv("WHISPER_MODEL", "openai/whisper-large-v3-turbo")
 FASTER_WHISPER_MODEL = os.getenv("FASTER_WHISPER_MODEL", "large-v3-turbo")
 USE_FASTER_WHISPER = os.getenv("USE_FASTER_WHISPER", "true").lower() == "true"
 
+# WhisperX (opt-in) — adds word-level alignment + pyannote diarization on top
+# of faster-whisper. ~2x slower trên CPU nhưng subtitle/timing chính xác hơn
+# rõ rệt. Cần `pip install whisperx` + (optional) HF_TOKEN cho diarize.
+USE_WHISPERX = os.getenv("USE_WHISPERX", "false").lower() == "true"
+
 # Generation defaults (lower steps = faster on MPS/CPU)
 DEV_MODE = not IS_CUDA
 TTS_DEFAULT_STEPS = 8 if DEV_MODE else 32
