@@ -111,15 +111,20 @@ def extract_embeddings(
         return []
     inference = _load_inference()
 
-    # pyannote 4.x API: inference.crop(file_path, Segment) hoặc
-    # inference({"audio": str_path}) hoặc inference(str_path).
-    # → Dùng inference.crop(audio_path, Segment) — work cả 3.x và 4.x.
+    # pyannote 4.x bug: pass dict {waveform, sample_rate} hoặc str path
+    # đều fail với "'str' object has no attribute 'type'" do internal
+    # check. Workaround: dùng pyannote.audio.Audio để pre-load audio
+    # đúng format pyannote expect.
     try:
+        from pyannote.audio import Audio
         from pyannote.core import Segment
     except ImportError as e:
-        raise RuntimeError("pyannote.core not installed") from e
+        raise RuntimeError("pyannote.audio not installed") from e
 
-    # Đọc audio 1 lần cho quality score
+    # Audio helper: handle sample rate + mono conversion theo chuẩn pyannote
+    pa_audio = Audio(sample_rate=16000, mono="downmix")
+
+    # Cũng đọc audio raw cho quality score
     import soundfile as sf
     audio_full, sr_full = sf.read(audio_path, dtype="float32")
     if audio_full.ndim > 1:
@@ -132,20 +137,39 @@ def extract_embeddings(
             continue
 
         try:
-            # API mới: crop với Segment
             segment = Segment(float(turn.start), float(turn.end))
+
+            # Strategy 1: Audio.crop trả torch tensor đúng shape pyannote expect
             try:
-                vector = inference.crop(audio_path, segment)
-            except (AttributeError, TypeError):
-                # Fallback: pass dict format chuẩn (pyannote 3.x)
+                waveform, sr = pa_audio.crop(audio_path, segment)
+                # waveform shape: (channels, samples) torch tensor
+                vector = inference({
+                    "waveform": waveform,
+                    "sample_rate": int(sr),
+                })
+            except Exception as inner_e:
+                # Strategy 2: pre-extract chunk + torch tensor manual
                 start_sample = max(0, int(turn.start * sr_full))
                 end_sample = min(len(audio_full), int(turn.end * sr_full))
                 chunk = audio_full[start_sample:end_sample]
                 if chunk.size < sr_full * 0.3:
-                    continue
+                    raise inner_e
+
+                # Resample sang 16kHz nếu cần (pyannote/embedding train 16k)
+                if sr_full != 16000:
+                    import librosa
+                    chunk = librosa.resample(chunk, orig_sr=sr_full, target_sr=16000)
+                    target_sr = 16000
+                else:
+                    target_sr = int(sr_full)
+
                 import torch
                 wav_t = torch.from_numpy(chunk).unsqueeze(0).to(torch.float32)
-                vector = inference({"waveform": wav_t, "sample_rate": int(sr_full)})
+                # Đảm bảo shape (1, N) — 1 channel
+                vector = inference({
+                    "waveform": wav_t,
+                    "sample_rate": target_sr,
+                })
 
             vector = np.asarray(vector, dtype=np.float32).flatten()
             norm = np.linalg.norm(vector)
@@ -153,7 +177,7 @@ def extract_embeddings(
                 continue
             vector = vector / norm
 
-            # Quality score: vẫn dùng chunk extract từ full audio
+            # Quality score từ chunk gốc
             start_sample = max(0, int(turn.start * sr_full))
             end_sample = min(len(audio_full), int(turn.end * sr_full))
             chunk = audio_full[start_sample:end_sample]
