@@ -154,11 +154,53 @@ def translate_segments(
     """Translate film dialogue segments with full context awareness.
 
     Quality control:
+      - Cache lookup TRƯỚC LLM call (giảm cost + tốc độ re-run).
       - Validate output (char budget, missing index, prompt leak, placeholder).
       - Retry tối đa MAX_RETRY lần với prompt addendum chỉ rõ line lỗi.
       - Sau retry vẫn fail → giữ partial result, log warning, không silent corrupt.
       - Per-segment fallback: nếu 1-2 seg trong batch fail, retry CHỈ những seg đó.
     """
+    # ── Cache layer: lookup TRƯỚC khi gọi LLM ──
+    # Cache key gồm text + lang + engine + register + speaker_gender →
+    # cùng video re-run, hoặc dialogue lặp giữa các phim, sẽ hit cache.
+    try:
+        from app.services.llm import cached_translate_segments
+        register = film_genre or "generic"
+
+        def _llm_call(uncached: list[dict]) -> list[dict]:
+            return _translate_uncached(
+                uncached, target_language, source_language,
+                topic_hint, glossary, speaker_genders, film_genre,
+            )
+
+        return cached_translate_segments(
+            segments=segments,
+            target_lang=target_language,
+            source_lang=source_language,
+            engine="gemini",
+            register=register,
+            fallback_translate_fn=_llm_call,
+            speaker_genders=speaker_genders,
+        )
+    except ImportError:
+        # Fallback: cache module chưa load → call LLM trực tiếp
+        return _translate_uncached(
+            segments, target_language, source_language,
+            topic_hint, glossary, speaker_genders, film_genre,
+        )
+
+
+def _translate_uncached(
+    segments: list[dict],
+    target_language: str,
+    source_language: str = "auto",
+    topic_hint: str | None = None,
+    glossary: list[tuple[str, str]] | None = None,
+    speaker_genders: dict | None = None,
+    film_genre: str | None = None,
+) -> list[dict]:
+    """Internal — actual LLM call, không qua cache. Caller (translate_segments)
+    đã cache lookup."""
     if not GEMINI_API_KEY:
         raise ValueError("Gemini API key not configured. Set GEMINI_API_KEY in Settings.")
 

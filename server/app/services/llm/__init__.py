@@ -12,9 +12,17 @@ from .genre_detector import (
     get_genre_prompt_block,
     get_genre_display_name,
 )
+from .cache import (
+    get_translation_cache,
+    cached_translate_segments,
+    TranslationCache,
+)
 
 __all__ = [
     "detect_genre",
     "get_genre_prompt_block",
     "get_genre_display_name",
+    "get_translation_cache",
+    "cached_translate_segments",
+    "TranslationCache",
 ]
