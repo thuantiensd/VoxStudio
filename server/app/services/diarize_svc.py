@@ -112,9 +112,27 @@ class DiarizationService:
                 max_speakers=max_speakers,
             )
 
-            # Collect raw turns sorted by start time
+            # Collect raw turns — pyannote 4.x đổi API:
+            # • 3.x: diar.itertracks(yield_label=True)
+            # • 4.x: diar.speaker_diarization.itertracks() hoặc diar.diarization
             raw = []
-            for turn, _, label in diar.itertracks(yield_label=True):
+            # Try get Annotation object from various 4.x output shapes
+            annotation = None
+            for attr in ("speaker_diarization", "diarization", "annotation"):
+                if hasattr(diar, attr):
+                    annotation = getattr(diar, attr)
+                    break
+            # Fallback: diar tự là Annotation (3.x)
+            if annotation is None and hasattr(diar, "itertracks"):
+                annotation = diar
+
+            if annotation is None:
+                raise RuntimeError(
+                    f"Pyannote output không có Annotation. Type={type(diar).__name__}, "
+                    f"attrs={[a for a in dir(diar) if not a.startswith('_')][:10]}"
+                )
+
+            for turn, _, label in annotation.itertracks(yield_label=True):
                 raw.append((turn.start, turn.end, label))
 
             # Normalize labels to SPK1, SPK2, ... in discovery order
