@@ -3648,6 +3648,23 @@ def auto_dub(project_id: str, engine: str = "google", api_key: str | None = None
         gpu.unload_tts()
         gpu._log_vram("end of pipeline (after TTS unload)")
 
+        # Step 6: Compute + persist quality score → FE hiển thị badge
+        try:
+            from app.services.quality_score import compute_quality_score
+            final_meta = _load_meta(project_id) or {}
+            quality = compute_quality_score(final_meta)
+            final_meta["quality_score"] = quality
+            _save_meta(final_meta)
+            logger.info(
+                "Quality score: %.1f/100 (%s) — breakdown=%s | issues=%d",
+                quality["overall"], quality["level"],
+                quality["breakdown"], len(quality["issues"]),
+            )
+            for issue in quality["issues"][:5]:
+                logger.info("  ⚠ %s", issue)
+        except Exception as e:
+            logger.warning("Quality score compute failed: %s", e)
+
         yield {"step": "done", "label": "Hoàn tất!", "progress": 100}
 
     except _Canceled:
