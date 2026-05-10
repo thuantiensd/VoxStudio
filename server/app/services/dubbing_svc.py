@@ -3298,6 +3298,27 @@ class _Canceled(Exception):
     pass
 
 
+def _mark_project_error(project_id: str, error_msg: str) -> None:
+    """Set project.status = 'error' + project.error = msg. FE poll thấy
+    status='error' → hiện thị "Thất bại" thay vì "đang chạy" giả lập.
+
+    Idempotent: nếu meta đã missing hoặc status đã là done thì skip.
+    """
+    try:
+        meta = _load_meta(project_id)
+        if not meta:
+            return
+        if meta.get("status") == "done":
+            return
+        meta["status"] = "error"
+        meta["error"] = (error_msg or "Pipeline thất bại")[:2000]
+        _save_meta(meta)
+        logger.info("[auto_dub] marked project=%s status=error: %s",
+                    project_id, error_msg[:100])
+    except Exception as e:
+        logger.warning("Cannot mark project error: %s", e)
+
+
 def auto_dub(project_id: str, engine: str = "google", api_key: str | None = None):
     """Full pipeline: Demucs → Faster-Whisper → Translate → TTS → Export.
 
@@ -3320,7 +3341,9 @@ def auto_dub(project_id: str, engine: str = "google", api_key: str | None = None
     do_subtitle = project.get("enable_subtitle", False)
 
     if not do_dubbing and not do_subtitle:
-        yield {"step": "error", "label": "Bật Lồng tiếng hoặc Phụ đề trước khi chạy.", "progress": -1}
+        msg = "Bật Lồng tiếng hoặc Phụ đề trước khi chạy."
+        _mark_project_error(project_id, msg)
+        yield {"step": "error", "label": msg, "progress": -1}
         return
 
     # Reset cờ huỷ cho lần chạy mới
@@ -3370,6 +3393,7 @@ def auto_dub(project_id: str, engine: str = "google", api_key: str | None = None
         ):
             _check_cancel()
             if tick.get("step") == "error":
+                _mark_project_error(project_id, tick.get("label") or "Pipeline thất bại")
                 yield tick
                 return
             if "_result" not in tick:
@@ -3386,6 +3410,7 @@ def auto_dub(project_id: str, engine: str = "google", api_key: str | None = None
             label="Đang dịch thuật...", estimated_sec=20,
         ):
             if tick.get("step") == "error":
+                _mark_project_error(project_id, tick.get("label") or "Pipeline thất bại")
                 yield tick
                 return
             if "_result" not in tick:
@@ -3516,6 +3541,7 @@ def auto_dub(project_id: str, engine: str = "google", api_key: str | None = None
         ):
             _check_cancel()
             if tick.get("step") == "error":
+                _mark_project_error(project_id, tick.get("label") or "Pipeline thất bại")
                 yield tick
                 return
             if "_result" not in tick:
@@ -3530,9 +3556,18 @@ def auto_dub(project_id: str, engine: str = "google", api_key: str | None = None
 
     except _Canceled:
         logger.info("Auto-dub canceled by user: %s", project_id)
+        # Cancellation: status → "canceled" (không phải "error")
+        try:
+            meta = _load_meta(project_id)
+            if meta and meta.get("status") not in ("done", "error"):
+                meta["status"] = "canceled"
+                _save_meta(meta)
+        except Exception:
+            pass
         yield {"step": "canceled", "label": "Đã huỷ", "progress": -1}
     except Exception as e:
-        logger.error("Auto-dub failed at pipeline: %s", e)
+        logger.error("Auto-dub failed at pipeline: %s", e, exc_info=True)
+        _mark_project_error(project_id, f"Lỗi pipeline: {e}")
         yield {"step": "error", "label": f"Lỗi: {e}", "progress": -1}
     finally:
         _reset_cancel(project_id)
