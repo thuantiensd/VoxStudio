@@ -38,15 +38,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [refresh]);
 
   // Wipe all per-user cached state from localStorage/sessionStorage. Giữ
-  // lại các pref UI chung (theme, language). Mọi key bắt đầu "voxstudio:dub:"
-  // (voice slots, source/target lang chosen) sẽ bị xoá để tránh leak settings
-  // của user trước sang user mới.
+  // lại pref UI CHUNG (theme, locale) — không phụ thuộc account. Mọi cache
+  // còn lại (history STT/TTS, voice slots, project settings, …) đều xoá để
+  // không leak data/state giữa các tài khoản trên cùng browser.
+  const KEEP_KEYS = new Set([
+    "voxstudio:theme",     // dark/light
+    "voxstudio:locale",    // ngôn ngữ UI
+    "voxstudio:web:token", // sẽ set lại bằng setToken sau
+  ]);
+
   const wipeUserCache = () => {
     if (typeof window === "undefined") return;
     try {
       const keys = Object.keys(localStorage);
       for (const k of keys) {
-        if (k.startsWith("voxstudio:dub:") || k.startsWith("voxstudio:tts:")) {
+        if (k.startsWith("voxstudio:") && !KEEP_KEYS.has(k)) {
           localStorage.removeItem(k);
         }
       }
