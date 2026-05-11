@@ -134,12 +134,15 @@ def print_pass2_table(segments: list[dict], translated: list[dict] | list[str]):
     print(f"{'#':<4}{'speaker':<14}{'original':<40}{'→':<3}{'translated'}")
     print("─" * 70)
     for i, seg in enumerate(segments):
-        spk = seg.get("speaker", "?")[:12]
+        spk = (seg.get("speaker") or "?")[:12]
         orig = seg["original_text"][:38]
-        if isinstance(translated[i], dict):
-            tr = translated[i].get("translated_text", "")[:60]
-        else:
+        if i < len(translated) and isinstance(translated[i], dict):
+            tr = translated[i].get("translated_text", "") or "(empty)"
+            tr = tr[:60]
+        elif i < len(translated):
             tr = str(translated[i])[:60]
+        else:
+            tr = "(missing)"
         print(f"{seg['index']+1:<4}{spk:<14}{orig:<40} → {tr}")
     print()
 
@@ -169,6 +172,13 @@ def main():
     if args.limit and args.limit > 0:
         segments = segments[: args.limit]
         print(f"   ↳ limited to first {len(segments)}")
+
+    # Inspector: report segment structure
+    speakers = {s.get("speaker") for s in segments if s.get("speaker")}
+    print(f"   ↳ {len(speakers)} unique speaker(s): {sorted(speakers) if speakers else '(none — no diarization)'}")
+    if not speakers:
+        print("   ⚠️  Project chưa có diarization → Pass-1 sẽ SKIP (cần ≥2 speakers)")
+        print("   ⚠️  Translation sẽ chạy KHÔNG có speaker anchor → xưng hô có thể sai")
 
     print(f"🌍 {source_lang} → {target_lang} via {args.engine}")
 

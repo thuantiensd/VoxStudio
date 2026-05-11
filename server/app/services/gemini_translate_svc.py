@@ -347,13 +347,10 @@ def _call_gemini_with_timeout(model, prompt: str, timeout_s: int = 90):
 
     def _worker():
         try:
-            # response_mime_type: JSON → Gemini trả JSON thuần (không markdown
-            # fence), ổn định hơn cho parse. temperature thấp để output deterministic.
+            # Không set response_mime_type — Gemini 2.5-flash hang nếu set JSON.
+            # Parser đã handle markdown fence wrapper sẵn.
             import google.generativeai as genai_mod
-            cfg = genai_mod.types.GenerationConfig(
-                temperature=0.2,
-                response_mime_type="application/json",
-            )
+            cfg = genai_mod.types.GenerationConfig(temperature=0.2)
             r = model.generate_content(prompt, generation_config=cfg)
             result_q.put(("ok", r))
         except Exception as e:
@@ -387,9 +384,9 @@ def _translate_batch_with_retry(
     for attempt in range(max_retry):
         prompt = prompt_base + addendum
         try:
-            # Hard timeout 90s — Gemini SDK mặc định KHÔNG có timeout,
+            # Hard timeout 180s — Gemini SDK mặc định KHÔNG có timeout,
             # call hang vô hạn nếu network/server slow → pipeline treo.
-            response = _call_gemini_with_timeout(model, prompt, timeout_s=90)
+            response = _call_gemini_with_timeout(model, prompt, timeout_s=180)
             # Use unified parser → trả thêm speaker_genders (LLM self-verify)
             from app.services.llm.prompts import parse_translation_response
             from app.services import cloud_translate_svc as _cts
@@ -397,12 +394,12 @@ def _translate_batch_with_retry(
             if llm_genders:
                 _cts._store_llm_genders("gemini", llm_genders)
         except TimeoutError as e:
-            logger.error("Gemini timeout 90s attempt %d/%d: %s",
+            logger.error("Gemini timeout 180s attempt %d/%d: %s",
                           attempt + 1, max_retry, e)
             if attempt == max_retry - 1:
                 # Fail fast — caller (dubbing_svc) sẽ fallback engine khác
                 raise ValueError(
-                    f"Gemini API treo >90s sau {max_retry} retry. "
+                    f"Gemini API treo >180s sau {max_retry} retry. "
                     f"Đổi sang engine khác hoặc thử lại sau.",
                 ) from e
             continue
