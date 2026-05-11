@@ -1664,7 +1664,12 @@ def translate_project(
     # ── Pass-(-1): Visual Context Analysis (optional, BYOK) ──
     # Sample 8 keyframe → VLM call → JSON (genre/register/characters/relationships)
     # → feed Pass-0 audio analyze làm ground truth → giảm đoán mò pronoun/gender.
-    # Skip nếu disable, hoặc thiếu key, hoặc đã có visual_context cached.
+    # Fallback engine: nếu user bật visual nhưng không pick engine/key riêng
+    # → reuse text translate engine + key (đơn giản UX).
+    if enable_visual_context and not visual_engine and eng in ("gemini", "openai", "claude"):
+        visual_engine = eng
+        if not visual_api_key:
+            visual_api_key = api_key
     if enable_visual_context and visual_engine and visual_api_key:
         if not project.get("visual_context"):
             video_path = _project_dir(project_id) / "original.mp4"

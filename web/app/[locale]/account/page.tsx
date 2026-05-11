@@ -3911,24 +3911,13 @@ function DubbingTab({ setActiveTab }: { setActiveTab: (t: Tab) => void }) {
     return localStorage.getItem("voxstudio:dub:glossary") || "";
   });
 
-  // ── Visual Context (Pass-(-1)) — toggle nâng cao + BYOK ──
+  // ── Visual Context (Pass-(-1)) — toggle nâng cao ──
+  // Reuse engine + key đã chọn ở "Engine dịch" phía trên (đơn giản UX,
+  // không bắt user nhập key 2 lần). Backend fallback tự handle.
   const [enableVisualContext, setEnableVisualContext] = useState<boolean>(() => {
     if (typeof window === "undefined") return false;
     return localStorage.getItem("voxstudio:dub:enableVisualContext") === "true";
   });
-  const [visualEngine, setVisualEngine] = useState<string>(() => {
-    if (typeof window === "undefined") return "gemini";
-    return localStorage.getItem("voxstudio:dub:visualEngine") || "gemini";
-  });
-  const [visualModel, setVisualModel] = useState<string>(() => {
-    if (typeof window === "undefined") return "";
-    return localStorage.getItem("voxstudio:dub:visualModel") || "";
-  });
-  const [visualApiKey, setVisualApiKey] = useState<string>(() => {
-    if (typeof window === "undefined") return "";
-    return localStorage.getItem("voxstudio:dub:visualApiKey") || "";
-  });
-  const [visualModels, setVisualModels] = useState<Record<string, Array<{ id: string; label: string; default?: boolean }>>>({});
 
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [voiceLibOpen, setVoiceLibOpen] = useState(false);
@@ -4145,25 +4134,8 @@ function DubbingTab({ setActiveTab }: { setActiveTab: (t: Tab) => void }) {
     localStorage.setItem("voxstudio:dub:glossary", glossary);
   }, [glossary]);
 
-  // Visual context persist
+  // Visual context persist (chỉ toggle — engine + key dùng chung với text)
   useEffect(() => { if (typeof window !== "undefined") localStorage.setItem("voxstudio:dub:enableVisualContext", String(enableVisualContext)); }, [enableVisualContext]);
-  useEffect(() => { if (typeof window !== "undefined") localStorage.setItem("voxstudio:dub:visualEngine", visualEngine); }, [visualEngine]);
-  useEffect(() => { if (typeof window !== "undefined") localStorage.setItem("voxstudio:dub:visualModel", visualModel); }, [visualModel]);
-  useEffect(() => { if (typeof window !== "undefined") localStorage.setItem("voxstudio:dub:visualApiKey", visualApiKey); }, [visualApiKey]);
-
-  // Load VLM models khi user bật visual lần đầu
-  useEffect(() => {
-    if (!enableVisualContext || Object.keys(visualModels).length > 0) return;
-    void (async () => {
-      try {
-        const { getVisionModels } = await import("@/lib/api");
-        const r = await getVisionModels();
-        setVisualModels(r?.models || {});
-      } catch (err) {
-        console.warn("[visual-context] failed to load models:", err);
-      }
-    })();
-  }, [enableVisualContext, visualModels]);
 
   // Persist subtitle style
   useEffect(() => { if (typeof window !== "undefined") localStorage.setItem("voxstudio:dub:subTemplate", subTemplate); }, [subTemplate]);
@@ -4310,8 +4282,10 @@ function DubbingTab({ setActiveTab }: { setActiveTab: (t: Tab) => void }) {
       filter_music: filterMusic,
       film_genre: filmGenre,
       enable_visual_context: enableVisualContext,
-      visual_engine: enableVisualContext ? (visualEngine || null) : null,
-      visual_model: enableVisualContext ? (visualModel || null) : null,
+      // visual_engine + visual_model bỏ trống → backend fallback dùng
+      // translate engine + key đã set ở trên.
+      visual_engine: null,
+      visual_model: null,
     };
   }
 
@@ -4388,12 +4362,12 @@ function DubbingTab({ setActiveTab }: { setActiveTab: (t: Tab) => void }) {
           await startDubbingAutoDub(proj.id, {
             engine: engineMap[translateEngine] || "google",
             translate_api_key: translateNeedsKey ? translateApiKey.trim() : null,
+            // Visual context: chỉ truyền toggle. Engine + key reuse từ text
+            // translate (backend fallback tự handle).
             enable_visual_context: enableVisualContext,
-            visual_engine: enableVisualContext ? visualEngine : null,
-            visual_model: enableVisualContext && visualModel ? visualModel : null,
-            visual_api_key: enableVisualContext && visualApiKey.trim()
-              ? visualApiKey.trim()
-              : null,
+            visual_engine: null,
+            visual_model: null,
+            visual_api_key: null,
           });
           void reloadProjects();
         } catch (autoErr) {
@@ -4785,12 +4759,8 @@ function DubbingTab({ setActiveTab }: { setActiveTab: (t: Tab) => void }) {
           translateApiKey={translateApiKey} setTranslateApiKey={setTranslateApiKey}
           topicHint={topicHint} setTopicHint={setTopicHint}
           glossary={glossary} setGlossary={setGlossary}
-          // visual context (Pass-(-1))
+          // visual context (Pass-(-1)) — chỉ toggle, reuse text engine + key
           enableVisualContext={enableVisualContext} setEnableVisualContext={setEnableVisualContext}
-          visualEngine={visualEngine} setVisualEngine={setVisualEngine}
-          visualModel={visualModel} setVisualModel={setVisualModel}
-          visualApiKey={visualApiKey} setVisualApiKey={setVisualApiKey}
-          visualModels={visualModels}
           // subtitle style
           subTemplate={subTemplate} applySubTemplate={applySubTemplate}
           subFont={subFont} setSubFont={setSubFont}
@@ -4988,10 +4958,6 @@ type DubAdvancedModalProps = {
   glossary: string; setGlossary: (v: string) => void;
   // visual context (Pass-(-1))
   enableVisualContext: boolean; setEnableVisualContext: (v: boolean) => void;
-  visualEngine: string; setVisualEngine: (v: string) => void;
-  visualModel: string; setVisualModel: (v: string) => void;
-  visualApiKey: string; setVisualApiKey: (v: string) => void;
-  visualModels: Record<string, Array<{ id: string; label: string; default?: boolean }>>;
   // subtitle
   subTemplate: string; applySubTemplate: (id: string) => void;
   subFont: string; setSubFont: (v: string) => void;
@@ -5952,7 +5918,7 @@ function DubAdvancedModal(p: DubAdvancedModalProps) {
                     </p>
                   </div>
 
-                  {/* Visual Context (Pass-(-1)) — nâng cao, BYOK */}
+                  {/* Visual Context (Pass-(-1)) — chỉ 1 toggle, reuse engine+key ở trên */}
                   <div className="rounded-lg border border-dashed border-border/60 bg-muted/20 p-3">
                     <label className="flex cursor-pointer items-start gap-3 select-none">
                       <input
@@ -5967,68 +5933,16 @@ function DubAdvancedModal(p: DubAdvancedModalProps) {
                         </div>
                         <div className="mt-0.5 text-[11px] leading-snug text-muted-foreground">
                           AI xem 8 keyframe video → detect bối cảnh + nhân vật → giảm sai xưng hô.
-                          Tốn phí API thêm (BYOK).
+                          Dùng <b>cùng engine + key</b> đã chọn ở &quot;Engine dịch&quot; phía trên.
+                          Tốn phí API thêm cho lần gọi VLM.
                         </div>
+                        {p.enableVisualContext && p.translateEngine === "google_free" && (
+                          <div className="mt-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-1.5 text-[10.5px] text-amber-100/90">
+                            ⚠️ &quot;Google miễn phí&quot; KHÔNG hỗ trợ visual. Hãy chọn Gemini / OpenAI / Claude để dùng visual.
+                          </div>
+                        )}
                       </div>
                     </label>
-
-                    {p.enableVisualContext && (
-                      <div className="mt-3 space-y-3 pl-7">
-                        <div>
-                          <span className="mb-1.5 block text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
-                            Engine VLM
-                          </span>
-                          <select
-                            value={p.visualEngine}
-                            onChange={(e) => { p.setVisualEngine(e.target.value); p.setVisualModel(""); }}
-                            className="w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm outline-none focus:border-primary/50"
-                          >
-                            <option value="gemini">Gemini</option>
-                            <option value="openai">OpenAI</option>
-                            <option value="claude">Claude</option>
-                          </select>
-                        </div>
-
-                        <div>
-                          <span className="mb-1.5 block text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
-                            Model
-                          </span>
-                          <select
-                            value={p.visualModel || (p.visualModels[p.visualEngine]?.find((m) => m.default)?.id || "")}
-                            onChange={(e) => p.setVisualModel(e.target.value)}
-                            disabled={!p.visualModels[p.visualEngine]}
-                            className="w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm outline-none focus:border-primary/50 disabled:opacity-50"
-                          >
-                            {!p.visualModels[p.visualEngine] && (
-                              <option value="">Đang tải...</option>
-                            )}
-                            {(p.visualModels[p.visualEngine] || []).map((m) => (
-                              <option key={m.id} value={m.id}>{m.label}</option>
-                            ))}
-                          </select>
-                        </div>
-
-                        <div>
-                          <span className="mb-1.5 block text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
-                            API Key ({p.visualEngine})
-                          </span>
-                          <input
-                            type="password"
-                            value={p.visualApiKey}
-                            onChange={(e) => p.setVisualApiKey(e.target.value)}
-                            placeholder={
-                              p.visualEngine === "gemini" ? "Google AI Studio key (AIza...)" :
-                              p.visualEngine === "openai" ? "OpenAI key (sk-...)" :
-                              "Anthropic key (sk-ant-...)"
-                            }
-                            className="w-full rounded-lg border border-border/60 bg-background px-3 py-2 font-mono text-xs outline-none focus:border-primary/50"
-                          />
-                          <p className="mt-1 text-[10px] text-muted-foreground">
-                            Key chỉ dùng cho lần chạy này, KHÔNG lưu server.
-                          </p>
-                        </div>
-                      </div>
-                    )}
                   </div>
                 </div>
               );
