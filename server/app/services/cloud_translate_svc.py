@@ -51,6 +51,43 @@ class FatalAuthError(ValueError):
     pass
 
 
+# Thread-local cache cho LLM self-verify gender (Option A).
+# LLM trả speaker_genders cuối JSON output → engines store ở đây → caller
+# (dubbing_svc) đọc qua get_last_llm_genders() để override pipeline detect.
+import threading as _threading
+_llm_genders_lock = _threading.Lock()
+_last_llm_genders: dict = {}
+
+
+def _store_llm_genders(engine: str, genders: dict) -> None:
+    """Engine functions gọi sau khi parse output → store gender LLM tự suy."""
+    with _llm_genders_lock:
+        _last_llm_genders[engine] = dict(genders or {})
+
+
+def get_last_llm_genders(engine: str | None = None) -> dict:
+    """Caller (dubbing_svc) đọc LLM-inferred gender sau translate.
+
+    Args:
+      engine: tên engine cụ thể, hoặc None → merge tất cả engines.
+    Returns: {speaker_id: {"gender": str, "evidence": str}}
+    """
+    with _llm_genders_lock:
+        if engine:
+            return dict(_last_llm_genders.get(engine, {}))
+        # Merge tất cả engines — engine cuối win nếu trùng speaker
+        merged = {}
+        for v in _last_llm_genders.values():
+            merged.update(v)
+        return merged
+
+
+def clear_llm_genders() -> None:
+    """Reset cache — gọi đầu mỗi project translate."""
+    with _llm_genders_lock:
+        _last_llm_genders.clear()
+
+
 def _friendly_error(engine: str, status: int, body: str) -> str:
     """Chuyển HTTP error từ provider thành message user-friendly (không leak raw)."""
     name = PROVIDER_DISPLAY.get(engine, engine)
@@ -295,12 +332,14 @@ def _openai(texts: list[str], target: str, source: str, api_key: str,
     except (KeyError, IndexError):
         raise ValueError("OpenAI trả về dữ liệu không đúng định dạng. Vui lòng thử lại.")
 
-    # Parse với unified parser (handle markdown fence, partial JSON, ...)
-    parsed = parse_translation_response(raw, len(texts))
+    # Parse với unified parser (handle markdown fence, partial JSON, speaker_genders)
+    parsed, llm_genders = parse_translation_response(raw, len(texts))
     out = [item["translated_text"] for item in parsed]
     if not any(out):
-        # Last-resort fallback
+        # Last-resort fallback (no speaker_genders)
         out = _parse_numbered(raw, len(texts))
+    # Store LLM-inferred genders trong module-level cache cho caller đọc
+    _store_llm_genders("openai", llm_genders)
     return out
 
 
@@ -354,10 +393,11 @@ def _claude(texts: list[str], target: str, source: str, api_key: str,
         raw = r.json()["content"][0]["text"]
     except (KeyError, IndexError):
         raise ValueError("Claude trả về dữ liệu không đúng định dạng. Vui lòng thử lại.")
-    parsed = parse_translation_response(raw, len(texts))
+    parsed, llm_genders = parse_translation_response(raw, len(texts))
     out = [item["translated_text"] for item in parsed]
     if not any(out):
         out = _parse_numbered(raw, len(texts))
+    _store_llm_genders("claude", llm_genders)
     return out
 
 

@@ -396,7 +396,12 @@ def _translate_batch_with_retry(
             # Hard timeout 90s — Gemini SDK mặc định KHÔNG có timeout,
             # call hang vô hạn nếu network/server slow → pipeline treo.
             response = _call_gemini_with_timeout(model, prompt, timeout_s=90)
-            new_parsed = _parse_response(response.text, len(batch))
+            # Use unified parser → trả thêm speaker_genders (LLM self-verify)
+            from app.services.llm.prompts import parse_translation_response
+            from app.services import cloud_translate_svc as _cts
+            new_parsed, llm_genders = parse_translation_response(response.text, len(batch))
+            if llm_genders:
+                _cts._store_llm_genders("gemini", llm_genders)
         except TimeoutError as e:
             logger.error("Gemini timeout 90s attempt %d/%d: %s",
                           attempt + 1, max_retry, e)

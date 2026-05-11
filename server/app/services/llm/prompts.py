@@ -50,6 +50,74 @@ def _lang_display_name(lang: str) -> str:
     return names.get((lang or "").lower(), lang or "auto")
 
 
+def _name_translation_rule(source_lang: Optional[str]) -> str:
+    """Return name translation rule cho từng source language.
+
+    Convention:
+      - zh (Trung) → Hán-Việt (Văn Tịch, Thương Dịch)
+      - ko (Hàn)   → Hán-Việt (Lý Mẫn Hạo, Kim Tae-hee → Kim Thái Hi)
+      - ja (Nhật)  → Romaji giữ nguyên (Tanaka, Sakura)
+      - en/fr/de/.. → giữ nguyên (Tom, Marie, John)
+    """
+    src = (source_lang or "").lower().strip()
+    # Map cả ISO short + tên đầy đủ
+    if src in ("zh", "chinese", "zh-cn", "zh-tw", "mandarin"):
+        return """
+🔤 TÊN RIÊNG (source = Tiếng Trung):
+   → PHIÊN ÂM HÁN-VIỆT theo phong cách phim Việt Nam.
+   → TUYỆT ĐỐI KHÔNG để pinyin (Wenxi, Shang Yi) ra output cuối.
+
+   Ví dụ:
+   - 文汐 / Wenxi → Văn Tịch
+   - 商奕 / Shang Yi → Thương Dịch
+   - 阿絮 → A Tự
+   - 慕容 → Mộ Dung
+   - 林惜 → Lâm Tích
+   - 张总 → Tổng Trương (sếp họ Trương)
+   - 王大爷 → ông Vương
+   - 子安 → Tử An
+
+   Họ thông dụng → Hán-Việt:
+   张→Trương, 王→Vương, 李→Lý, 刘→Lưu, 陈→Trần, 林→Lâm,
+   赵→Triệu, 孙→Tôn, 周→Chu, 黄→Hoàng, 朱→Chu, 文→Văn,
+   苏→Tô, 慕容→Mộ Dung, 欧阳→Âu Dương, 司马→Tư Mã
+
+   Tước vị / chức danh:
+   - Cổ trang: 陛下→Bệ hạ, 殿下→Điện hạ, 郡主→Quận chúa,
+     公子→Công tử, 小姐→Tiểu thư, 王爷→Vương gia, 微臣→thần
+   - Hiện đại: 老板→Sếp/ông chủ, 总裁→Tổng giám đốc,
+     经理→Quản lý, 主任→Chủ nhiệm, 师父→Sư phụ
+"""
+    if src in ("ko", "korean", "kor"):
+        return """
+🔤 TÊN RIÊNG (source = Tiếng Hàn):
+   → PHIÊN ÂM HÁN-VIỆT (convention phim Hàn dubbed VN).
+   Ví dụ:
+   - 이민호 / Lee Min Ho → Lý Mẫn Hạo
+   - 김태희 / Kim Tae-hee → Kim Thái Hi
+   - 박찬욱 / Park Chan-wook → Phác Tán Úc
+"""
+    if src in ("ja", "japanese", "jpn"):
+        return """
+🔤 TÊN RIÊNG (source = Tiếng Nhật):
+   → GIỮ Romaji nguyên dạng (convention phim Nhật subbed VN).
+   Ví dụ:
+   - 田中 / Tanaka → Tanaka
+   - 桜 / Sakura → Sakura
+   KHÔNG dịch sang Hán-Việt (vd Điền Trung — không phổ biến).
+"""
+    # English / Latin scripts / others → giữ nguyên
+    return """
+🔤 TÊN RIÊNG (source = Tiếng Anh/Latin):
+   → GIỮ NGUYÊN. KHÔNG phiên âm Hán-Việt.
+   Ví dụ:
+   - Tom → Tom
+   - Sarah → Sarah
+   - John Smith → John Smith
+   - Marie Curie → Marie Curie
+"""
+
+
 def build_translation_prompt(
     *,
     segments: list[dict],
@@ -168,12 +236,23 @@ BƯỚC 4 — ANCHOR ENTITIES BẮT BUỘC GIỮ:
    • Vật dụng: 钻石→kim cương, 婚戒→nhẫn cưới, 戒指→nhẫn, 手机→điện thoại
    • Quan hệ: 妈妈→mẹ, 爸爸→ba/bố, 姐姐→chị, 老板→sếp/ông chủ
    • Ăn uống: 咖啡→cà phê, 牛奶→sữa, 果汁→nước trái cây
-   • Tên riêng (Wenxi, 阿絮, 张总): GIỮ NGUYÊN — KHÔNG dịch sang Việt
-
+{_name_translation_rule(source_lang)}
 BƯỚC 5 — NGÔN NGỮ:
    • Mượt như phim VTV — KHÔNG word-by-word literal
    • Match emotion: angry→gắt, whisper→nhỏ, happy→tươi
    • Tiếng Việt tự nhiên: chêm "nhé/à/vậy" hợp ngữ cảnh
+
+BƯỚC 6 — SELF-VERIFY GENDER (tự kiểm tra giới tính speaker):
+   Pipeline đoán giới tính TRƯỚC khi bạn dịch — nhưng có thể SAI vì chỉ
+   dựa F0 pitch. Bạn — LLM — có thể nhận ra từ CONTEXT (lời thoại) ai
+   thực sự là nam/nữ:
+   • Speaker tự xưng "bố/cha/anh/ông" → NAM
+   • Speaker tự xưng "mẹ/chị/em (với chồng)/cô" → NỮ
+   • Speaker được người khác gọi "anh ơi" → NAM; "em ơi"/"chị ơi" → NỮ
+   Sau khi dịch xong, KÈM field "speaker_genders" cuối output:
+   nếu evidence rõ → ghi "male"/"female" + lý do; nếu không chắc → "unsure".
+
+   Đây là CHECKING LẠI pipeline — backend sẽ override gender nếu bạn rõ ràng.
 {extra_block}{context_section}
 
 ═══════════════════════════════════════════════════════════════
@@ -184,18 +263,25 @@ OUTPUT: JSON object với schema:
   "translations": [
     {{"index": 1, "translated": "...", "speech": "...", "emotion": "neutral"}},
     {{"index": 2, "translated": "...", "speech": "...", "emotion": "happy"}}
-  ]
+  ],
+  "speaker_genders": {{
+    "SPEAKER_00": {{"gender": "male", "evidence": "tự xưng 'bố' ở line 3"}},
+    "SPEAKER_01": {{"gender": "female", "evidence": "chồng gọi 'em ơi'"}}
+  }}
 }}
 
 • "translated": câu Việt mượt + đúng pronoun + KHÔNG vượt max_chars
 • "speech": tối ưu TTS — thêm "..." giữa cụm cho ngắt nhịp
 • "emotion": 1 trong 7 tag
+• "speaker_genders": với MỖI SPKx, gender "male"/"female"/"unsure"
+  + evidence ngắn gọn (1 câu). Đây là self-verify pipeline detection.
 
 KIỂM TRA TRƯỚC XUẤT:
 [ ] Mọi line ≤ max_chars?
 [ ] Pronoun nhất quán cho mỗi SPKx?
 [ ] Anchor entities (vật/người/ăn) đầy đủ?
-[ ] Tên riêng giữ nguyên?
+[ ] Tên riêng dịch ĐÚNG convention source language (Hán-Việt cho Trung)?
+[ ] speaker_genders cuối output đủ mọi SPKx?
 [ ] JSON hợp lệ, đủ index?
 """
 
@@ -230,20 +316,28 @@ def build_retry_addendum(errors: list[dict]) -> str:
     return "\n".join(lines)
 
 
-def parse_translation_response(response_text: str, n_segments: int) -> list[dict]:
+def parse_translation_response(
+    response_text: str,
+    n_segments: int,
+) -> tuple[list[dict], dict]:
     """Parse JSON response từ LLM. Robust với markdown wrapper, partial JSON.
 
-    Returns list[dict] length=n_segments với keys translated_text, speech_text, emotion.
-    Empty entries cho missing index.
+    Returns:
+      (translations, speaker_genders)
+      - translations: list[dict] length=n_segments với translated_text/speech_text/emotion
+      - speaker_genders: dict[str, dict] — LLM self-verify gender per speaker
+        {"SPEAKER_00": {"gender": "male", "evidence": "..."}, ...}
+        Empty {} nếu LLM không trả field này.
     """
     import re
 
     results = [{"translated_text": "", "speech_text": "", "emotion": "neutral"}
                for _ in range(n_segments)]
+    speaker_genders: dict = {}
 
     text = (response_text or "").strip()
     if not text:
-        return results
+        return results, speaker_genders
 
     # Strip markdown code fence
     if text.startswith("```"):
@@ -255,7 +349,6 @@ def parse_translation_response(response_text: str, n_segments: int) -> list[dict
     try:
         parsed = json.loads(text)
     except json.JSONDecodeError:
-        # Try extract JSON object from text
         m = re.search(r"\{.*\}", text, re.DOTALL)
         if m:
             try:
@@ -263,18 +356,33 @@ def parse_translation_response(response_text: str, n_segments: int) -> list[dict
             except Exception:
                 pass
     if parsed is None:
-        return results
+        return results, speaker_genders
 
-    # Accept both: {"translations": [...]} and direct [...]
     if isinstance(parsed, dict):
         items = parsed.get("translations") or parsed.get("data") or []
+        # NEW: parse speaker_genders cuối output (LLM self-verify)
+        sg = parsed.get("speaker_genders") or {}
+        if isinstance(sg, dict):
+            valid_g = {"male", "female", "unsure", "unknown"}
+            for spk_id, info in sg.items():
+                if isinstance(info, dict):
+                    g = (info.get("gender") or "").lower().strip()
+                    if g in valid_g:
+                        speaker_genders[spk_id] = {
+                            "gender": g,
+                            "evidence": (info.get("evidence") or "").strip()[:200],
+                        }
+                elif isinstance(info, str):
+                    g = info.lower().strip()
+                    if g in valid_g:
+                        speaker_genders[spk_id] = {"gender": g, "evidence": ""}
     elif isinstance(parsed, list):
         items = parsed
     else:
-        return results
+        return results, speaker_genders
 
     if not isinstance(items, list):
-        return results
+        return results, speaker_genders
 
     valid_emotions = {"neutral", "happy", "sad", "angry", "whisper",
                        "surprised", "fearful"}
@@ -298,4 +406,4 @@ def parse_translation_response(response_text: str, n_segments: int) -> list[dict
                 "speech_text": speech or translated,
                 "emotion": emotion,
             }
-    return results
+    return results, speaker_genders

@@ -1795,6 +1795,55 @@ def translate_project(
             seg["speech_text"] = trans
             seg["emotion"] = "neutral"
 
+    # ── LLM Self-verify gender (Option A) ──
+    # LLM trả speaker_genders cuối output → so sánh với pipeline detect →
+    # override nếu LLM tự tin (có evidence). LLM giỏi infer từ CONTEXT
+    # (lời nói "bố/mẹ/anh/em") hơn pipeline F0/F1 heuristic.
+    try:
+        llm_genders = cloud_translate_svc.get_last_llm_genders()
+        pipeline_genders = project.get("speaker_genders") or {}
+        if llm_genders:
+            overridden = {}
+            for spk, info in llm_genders.items():
+                llm_g = info.get("gender", "unsure")
+                pipeline_g = pipeline_genders.get(spk, "unknown")
+                evidence = info.get("evidence", "")
+                if llm_g in ("male", "female") and llm_g != pipeline_g:
+                    # LLM disagree + có evidence → override
+                    if evidence and len(evidence) > 5:
+                        overridden[spk] = llm_g
+                        logger.info(
+                            "LLM corrected %s: pipeline=%s → %s (evidence: %s)",
+                            spk, pipeline_g, llm_g, evidence,
+                        )
+            if overridden:
+                # Update project meta
+                new_genders = dict(pipeline_genders)
+                new_genders.update(overridden)
+                project["speaker_genders"] = new_genders
+                project["speaker_genders_llm"] = llm_genders  # save full for UI
+                logger.info("Gender overrides applied: %s", overridden)
+                # Rebuild voice_map với gender mới
+                try:
+                    from app.services.speaker_pipeline import build_speaker_voice_map
+                    speakers = list(new_genders.keys())
+                    voice_slots = project.get("voice_slots") or []
+                    user_overrides = project.get("speaker_voice_map") or {}
+                    new_voice_map = build_speaker_voice_map(
+                        speakers=speakers,
+                        voice_slots=voice_slots,
+                        user_overrides=user_overrides,
+                        speaker_genders=new_genders,
+                    )
+                    project["speaker_voice_map"] = new_voice_map
+                    logger.info("Voice map rebuilt: %s", new_voice_map)
+                except Exception as e:
+                    logger.warning("Voice map rebuild fail: %s", e)
+        # Clear cache cho project sau
+        cloud_translate_svc.clear_llm_genders()
+    except Exception as e:
+        logger.warning("LLM self-verify gender failed: %s", e)
+
     method = eng
     # Polish bằng Qwen — chỉ áp dụng khi engine là Google Free + CUDA có
     # (LLM-based engines như openai/claude/gemini đã polish sẵn).
