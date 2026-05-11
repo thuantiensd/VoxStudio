@@ -322,3 +322,46 @@ class DubbingProject(Base):
 # Composite index cho list query: user + active + sort by recent
 Index("idx_dubproj_user_recent",
       DubbingProject.user_id, DubbingProject.deleted_at, DubbingProject.created_at.desc())
+
+
+# ── User API Keys (BYOK per user, encrypted) ────────────────────
+class UserApiKey(Base):
+    """API keys cho cloud engines, lưu encrypted per-user.
+
+    Provider: gemini / openai / claude / deepl / google_cloud.
+    Encrypt: Fernet (cryptography), key derive từ JWT_SECRET — xem
+    app/services/api_key_svc.py.
+
+    test_status: untested | ok | invalid | error — sync sau khi user
+    click nút Test trên UI.
+    """
+    __tablename__ = "user_api_keys"
+
+    id:             Mapped[int] = mapped_column(primary_key=True)
+    user_id:        Mapped[int] = mapped_column(
+                      ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    provider:       Mapped[str] = mapped_column(String(32), index=True)
+    encrypted_key:  Mapped[str] = mapped_column(Text)  # Fernet ciphertext
+    test_status:    Mapped[str] = mapped_column(String(20), default="untested")
+    test_message:   Mapped[str] = mapped_column(String(300), default="")
+    last_tested_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    created_at:     Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at:     Mapped[datetime] = mapped_column(
+                      DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    def public_dict(self):
+        """Serialize cho FE — KHÔNG trả encrypted_key plaintext."""
+        return {
+            "provider": self.provider,
+            "has_key": bool(self.encrypted_key),
+            "test_status": self.test_status,
+            "test_message": self.test_message,
+            "last_tested_at": self.last_tested_at.isoformat() if self.last_tested_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+
+# Composite unique: 1 key per (user, provider)
+Index("idx_user_api_keys_unique",
+      UserApiKey.user_id, UserApiKey.provider, unique=True)

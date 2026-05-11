@@ -21,6 +21,7 @@ from app.api.v1.dubbing import router as dubbing_router
 from app.api.v1.download import router as download_router
 from app.api.v1.translate import router as translate_router
 from app.api.v1.uploads import router as uploads_router
+from app.api.v1.user_keys import router as user_keys_router
 
 api_router = APIRouter(prefix="/api/v1")
 api_router.include_router(auth_router)
@@ -36,3 +37,4 @@ api_router.include_router(dubbing_router)
 api_router.include_router(download_router)
 api_router.include_router(translate_router)
 api_router.include_router(uploads_router)
+api_router.include_router(user_keys_router)

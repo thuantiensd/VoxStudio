@@ -528,6 +528,16 @@ async def translate_project(
     visual_model = body_params.get("visual_model")
     visual_api_key = body_params.get("visual_api_key")
 
+    # Fallback: load key từ DB nếu body không có (BYOK lưu server-side)
+    from app.services import api_key_svc as _aks
+    if not api_key:
+        provider = {"gemini": "gemini", "openai": "openai", "claude": "claude",
+                     "deepl": "deepl", "google_cloud": "google_cloud"}.get(eng.lower())
+        if provider:
+            api_key = await _aks.get_user_key(db, user.id, provider)
+    if enable_visual and visual_engine and not visual_api_key:
+        visual_api_key = await _aks.get_user_key(db, user.id, visual_engine)
+
     try:
         return dubbing_svc.translate_project(
             project_id,
@@ -842,6 +852,19 @@ async def auto_dub(
             visual_api_key = body.get("visual_api_key") or None
     except Exception:
         pass
+
+    # Fallback: nếu body không truyền key → đọc từ DB (user đã save trước)
+    from app.services import api_key_svc
+    if not translate_api_key:
+        provider_map = {
+            "gemini": "gemini", "openai": "openai", "claude": "claude",
+            "deepl": "deepl", "google_cloud": "google_cloud",
+        }
+        provider = provider_map.get((engine or "").lower())
+        if provider:
+            translate_api_key = await api_key_svc.get_user_key(db, user.id, provider)
+    if enable_visual_context and visual_engine and not visual_api_key:
+        visual_api_key = await api_key_svc.get_user_key(db, user.id, visual_engine)
 
     job = await job_svc.enqueue(
         db,
