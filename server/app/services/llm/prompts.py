@@ -555,6 +555,37 @@ def build_translator_prompt(
     anchor_block = ""
     if has_rels:
         anchor_block = "\n" + _format_speaker_anchor_block(speaker_relationships) + "\n"
+    else:
+        anchor_block = """
+🎭 KHÔNG CÓ SPEAKER MAP — TỰ SUY LUẬN (CỰC QUAN TRỌNG):
+
+Batch này KHÔNG có tag SPEAKER_XX → bạn PHẢI tự xác định người nói cho mỗi line
+từ NỘI DUNG TEXT, rồi GIỮ pronoun NHẤT QUÁN xuyên suốt batch.
+
+BƯỚC 1 — ĐỌC TOÀN BỘ BATCH TRƯỚC khi dịch line nào.
+BƯỚC 2 — Suy luận ai nói line nào từ tín hiệu sau:
+   • Vocative: "老公/亲爱的/宝贝" → người vợ/người yêu nói với chồng/người yêu
+   • Vocative: "老婆/媳妇" → chồng nói với vợ
+   • Vocative: "妈/爸/爷爷/奶奶" → con nói với bố mẹ/ông bà
+   • Tên riêng: gọi tên ai → KHÔNG phải người đó đang nói
+   • Pattern hỏi-đáp: line 1 hỏi → line 2 trả lời = 2 speaker khác nhau
+   • Câu chuyển chủ đề / tone đảo ngược thường = đổi speaker
+
+BƯỚC 3 — Sau khi suy luận, ASSIGN pronoun NHẤT QUÁN:
+   • Đánh nhãn nội bộ: SPEAKER A, SPEAKER B, SPEAKER C, ...
+   • Mỗi speaker chỉ dùng 1 self_pronoun XUYÊN SUỐT batch
+   • Mỗi cặp speaker chỉ dùng 1 cách xưng hô lẫn nhau
+   • Ví dụ: nếu A là vợ → A luôn xưng "em" gọi B là "anh", B luôn xưng "anh" gọi A là "em"
+   • KHÔNG được đầu batch "anh/em" cuối batch "tôi/cô" cho CÙNG cặp người
+
+BƯỚC 4 — TRƯỚC KHI XUẤT OUTPUT, đọc lại line 1 và line cuối:
+   • Nếu pronoun của cùng 1 speaker khác nhau → SỬA về thống nhất
+   • Default cho vợ chồng / yêu nhau / mới cưới: "anh/em" (xem rule cứng bên dưới)
+
+⚡ Nếu KHÔNG xác định được context (chỉ có 1-2 line ngắn không vocative):
+   → MẶC ĐỊNH coi là vợ chồng/yêu nhau → DÙNG "anh/em".
+   → KHÔNG bao giờ dùng "tôi/cô" làm default khi chưa rõ.
+"""
 
     extra_block = ""
     if topic_hint:
@@ -610,6 +641,15 @@ CHỈ DÙNG "tôi/cô" CHO VỢ CHỒNG KHI:
 
 🔹 NGUYÊN TẮC: theo SPEAKER MAP làm DEFAULT TUYỆT ĐỐI.
 KHÔNG được "đoán" emotion từ scene context để tự ý đổi pronoun.
+
+⚡⚡⚡ NHẤT QUÁN TOÀN BATCH (BUG hay gặp — CHECK KỸ):
+   • Mỗi speaker chỉ dùng 1 self_pronoun XUYÊN SUỐT batch (đầu→cuối).
+   • Mỗi cặp speaker chỉ dùng 1 cách gọi nhau XUYÊN SUỐT batch.
+   • TRƯỚC KHI TRẢ JSON: scan lại tất cả line — nếu line đầu "anh/em" mà
+     line cuối "tôi/cô" cho CÙNG cặp speaker → SAI → SỬA về "anh/em".
+   • Cuối batch dễ slip vì context "loãng" — đặc biệt cẩn thận 2-3 line cuối.
+   • Nếu nghi ngờ "có thể họ ly hôn" mà KHÔNG có bằng chứng rõ ràng trong
+     text (ký giấy, ra tòa, "đừng gọi tôi là vợ") → GIỮ "anh/em".
 
 🚨 RULE MAPPING ĐẠI TỪ (CỰC QUAN TRỌNG — đọc kỹ TRƯỚC khi dịch):
 
