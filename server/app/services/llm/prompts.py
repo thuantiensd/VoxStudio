@@ -136,8 +136,15 @@ và XÁC ĐỊNH QUAN HỆ giữa các SPEAKER.
 {visual_block}
 
 NHIỆM VỤ với MỖI speaker:
+• character_name — TÊN THẬT nếu detect được trong text (KHÔNG phải SPEAKER_XX)
+  Hán-Việt theo source: 叶辰→"Diệp Thần", 秦夏→"Tần Hạ", 林从安→"Lâm Tòng An"
+  Detect từ vocative trong dialogue: "Diệp Thần, anh đừng..." → speaker đó tên Diệp Thần
+  Nếu không detect được → để rỗng ""
 • gender (male/female/unsure)
-• role (chồng/vợ/cha/mẹ/con/sếp/bạn/đồng nghiệp/...)
+• age (child/adult/elder) — đoán theo lời thoại
+  VD: xưng "con" + gọi "mẹ/ba" → child; xưng "anh/em" + nói chuyện vợ chồng → adult;
+      gọi "cụ/ông cụ" → elder
+• role (chồng/vợ/cha/mẹ/con gái/con trai/sếp/bạn/đồng nghiệp/trợ lý/...)
 • self_pronoun — cách họ tự xưng (anh/em/tôi/ba/mẹ/con/ta/thiếp...)
 • addresses — vocative khi nói TRỰC TIẾP (你) với mỗi speaker khác
 • third_person_label — khi NGƯỜI KHÁC nhắc tới speaker này ở NGÔI 3 (他/她)
@@ -146,6 +153,13 @@ NHIỆM VỤ với MỖI speaker:
 EVIDENCE để suy:
 • Tự gọi "anh/bố/ba/chồng/ông" → NAM; "em/mẹ/má/vợ/chị/cô" → NỮ
 • Người khác gọi "anh ơi/cậu ơi/sếp ơi" → NAM; "em ơi/chị ơi" → NỮ
+
+⚠️ scene_context CỰC QUAN TRỌNG — đặc biệt RELATIONSHIP STATUS của cặp đôi:
+   • Vợ chồng bình thường → pronoun "anh/em"
+   • Vợ chồng đang LY HÔN / xung đột → có thể "tôi/cô" (lạnh nhạt) — TRUST context
+   • Con cái yêu cha mẹ → "bố/mẹ" + xưng "con"
+   • Con cái ghét cha mẹ tột độ → có thể "ông/bà" (hạ vai thành người dưng)
+   → KHÔNG cứng nhắc rule pronoun, để LLM Pass-1/2 đọc context → pick phù hợp
 
 ⚠️ TUYỆT ĐỐI ra TIẾNG VIỆT cho self_pronoun/addresses/third_person_label.
 KHÔNG để chữ Trung gốc (在下, 寡人, 郡主...) trong output JSON.
@@ -194,19 +208,31 @@ CẢNH BÁO:
 {genre_hint}
 OUTPUT JSON duy nhất:
 {{
-  "scene_context": "1-2 câu mô tả",
+  "scene_context": "Vợ chồng đang LY HÔN — vợ đã chuẩn bị giấy ly hôn, muốn cưới người khác. Con gái bị tẩy não, ghét cha. Chồng quyết định ra trận.",
   "register": "modern/cổ trang/business/family",
   "speakers": {{
     "SPEAKER_00": {{
-      "gender": "male", "role": "chồng", "self_pronoun": "anh",
-      "addresses": {{"SPEAKER_01": "em"}},
+      "character_name": "Diệp Thần",
+      "age": "adult",
+      "gender": "male", "role": "chồng", "self_pronoun": "tôi/anh (tuỳ tone)",
+      "addresses": {{"SPEAKER_01": "cô/em (tuỳ tone)", "SPEAKER_02": "con"}},
       "third_person_label": "anh ấy",
-      "evidence": "Line 3: gọi vợ 'em'"
+      "evidence": "Line 8: 'bố không bắt nạt chú Lâm'"
+    }},
+    "SPEAKER_02": {{
+      "character_name": "Nguyệt Nhi",
+      "age": "child",
+      "gender": "female", "role": "con gái",
+      "self_pronoun": "con",
+      "addresses": {{"SPEAKER_01": "mẹ", "SPEAKER_00": "bố/ông (giận → ông)"}},
+      "third_person_label": "con bé",
+      "evidence": "Line 1: 'Mẹ ơi, con muốn...'"
     }}
   }}
 }}
 
 QUY TẮC: mỗi SPEAKER có 1 entry, tiếng Việt, không đủ evidence → "unsure".
+character_name + age là field bắt buộc. age default = "adult" nếu không chắc.
 """
     user_input = "HỘI THOẠI:\n\n" + "\n".join(sample_lines)
     return {"system": system, "user": user_input}
@@ -222,6 +248,7 @@ def parse_speaker_analysis(response_text: str) -> dict:
         return {}
 
     valid_genders = {"male", "female", "unsure", "unknown"}
+    valid_ages = {"child", "adult", "elder"}
     speakers = {}
     for spk_id, info in speakers_raw.items():
         if not isinstance(info, dict):
@@ -229,14 +256,19 @@ def parse_speaker_analysis(response_text: str) -> dict:
         g = (info.get("gender") or "unsure").lower().strip()
         if g not in valid_genders:
             g = "unsure"
+        age = (info.get("age") or "adult").lower().strip()
+        if age not in valid_ages:
+            age = "adult"
         addr = info.get("addresses") or {}
         if not isinstance(addr, dict):
             addr = {}
         speakers[spk_id] = {
+            "character_name": (info.get("character_name") or "").strip()[:40],
+            "age": age,
             "gender": g,
             "role": (info.get("role") or "unknown").strip()[:40],
-            "self_pronoun": (info.get("self_pronoun") or "tôi").strip()[:20],
-            "addresses": {k: str(v).strip()[:20] for k, v in addr.items() if v},
+            "self_pronoun": (info.get("self_pronoun") or "tôi").strip()[:40],
+            "addresses": {k: str(v).strip()[:40] for k, v in addr.items() if v},
             "third_person_label": (info.get("third_person_label") or "").strip()[:30],
             "evidence": (info.get("evidence") or "").strip()[:200],
         }
@@ -248,32 +280,45 @@ def parse_speaker_analysis(response_text: str) -> dict:
 
 
 def _format_speaker_anchor_block(relationships: dict) -> str:
-    """Format speaker map thành text block cho prompt."""
+    """Format speaker map thành text block cho prompt.
+
+    Bao gồm character_name + age + pronoun guidance + scene_context
+    để Pass-1/2 đọc và pick pronoun theo CONTEXT (không cứng nhắc rule).
+    """
     if not relationships or not relationships.get("speakers"):
         return ""
-    lines = ["🎯 SPEAKER MAP (BẮT BUỘC tuân theo):"]
+    lines = ["🎯 SPEAKER MAP (đọc kỹ context trước khi pick pronoun):"]
     ctx = relationships.get("scene_context")
     reg = relationships.get("register")
     if ctx:
-        lines.append(f"   Bối cảnh: {ctx}")
+        lines.append(f"   📌 Bối cảnh: {ctx}")
     if reg:
-        lines.append(f"   Register: {reg}")
+        lines.append(f"   📌 Register: {reg}")
     lines.append("")
     for spk_id, info in relationships["speakers"].items():
+        name = info.get("character_name") or ""
         role = info.get("role", "?")
         g = info.get("gender", "?")
+        age = info.get("age", "adult")
         self_p = info.get("self_pronoun", "tôi")
         addr = info.get("addresses", {})
         tpl = info.get("third_person_label", "")
-        parts = [f'   • {spk_id} ({role}, {g}): tự xưng "{self_p}"']
+
+        label = f'{spk_id}'
+        if name:
+            label += f' ({name})'
+        label += f' [{role}, {g}, {age}]'
+
+        parts = [f'   • {label}: xưng "{self_p}"']
         if addr:
             parts.append("(với) " + ", ".join(f'{k}→"{v}"' for k, v in addr.items()))
         if tpl:
-            parts.append(f'(ngôi 3 nhắc tới)→"{tpl}"')
+            parts.append(f'(ngôi 3)→"{tpl}"')
         lines.append(" | ".join(parts))
     lines.append("")
-    lines.append("⚠️ 你 (ngôi 2) → vocative trong addresses.")
-    lines.append("⚠️ 他/她 (ngôi 3) → third_person_label.")
+    lines.append("⚠️ 你 (ngôi 2) → vocative trong addresses. 他/她 (ngôi 3) → third_person_label.")
+    lines.append("⚠️ TIN context — xung đột/ly hôn → pronoun có thể lạnh hơn (tôi/cô).")
+    lines.append("⚠️ KHÔNG cứng nhắc rule — đọc context để pick phù hợp emotion.")
     return "\n".join(lines)
 
 
@@ -424,6 +469,8 @@ def _per_segment_anchor(seg: dict, relationships: dict) -> str:
 
     self_p = info.get("self_pronoun", "")
     role = info.get("role", "")
+    name = info.get("character_name") or ""
+    age = info.get("age", "")
     addr = info.get("addresses") or {}
     if not self_p:
         return ""
@@ -431,7 +478,12 @@ def _per_segment_anchor(seg: dict, relationships: dict) -> str:
     text = (seg.get("original_text") or "").strip()
     resolved = _resolve_addressee(spk, relationships, text)
 
-    parts = [f'{role or spk}: 我="{self_p}"']
+    speaker_label = role or spk
+    if name:
+        speaker_label = f"{name}({role})" if role else name
+    if age and age != "adult":
+        speaker_label += f"[{age}]"
+    parts = [f'{speaker_label}: 我="{self_p}"']
 
     if resolved:
         target_id, target_pn = resolved
@@ -517,6 +569,15 @@ NHIỆM VỤ DUY NHẤT của Pass này:
 
 KHÔNG cần lo style cinematic — Editor pass sẽ polish.
 {anchor_block}
+🎭 PRONOUN PHỤ THUỘC CONTEXT (đọc scene_context phía trên TRƯỚC):
+   • Vợ chồng yêu thương: "anh/em"
+   • Vợ chồng XUNG ĐỘT / LY HÔN / cãi vã: chuyển sang "tôi/cô" (lạnh nhạt) — ĐÚNG
+   • Con yêu cha mẹ: "bố/mẹ" + xưng "con"
+   • Con CỰC GIẬN cha (drama): có thể "ông" (hạ vai = từ chối) — chấp nhận được
+   • Người yêu cũ giận → "tôi/anh" thay vì "anh/em"
+   self_pronoun + addresses trong SPEAKER MAP là DEFAULT — nếu context yêu cầu
+   pronoun lạnh hơn/khác đi → ĐƯỢC PHÉP đổi miễn nhất quán + đúng emotion.
+
 🚨 RULE MAPPING ĐẠI TỪ (CỰC QUAN TRỌNG — đọc kỹ TRƯỚC khi dịch):
 
 Mỗi line có anchor `[Role: 我="X" | → Target: 你="Y"]`. Ý nghĩa:
@@ -686,11 +747,21 @@ def build_editor_prompt(
     system = f"""Bạn là EDITOR phim chuyên dub VTV — chuyển lời dịch literal thành
 lời thoại phim CÓ HỒN, tự nhiên, biểu cảm.
 
-INPUT: mỗi line có literal translation đã ĐÚNG pronoun + ĐÚNG nghĩa.
-NHIỆM VỤ: polish thành câu PHIM thật — KHÔNG đổi pronoun, KHÔNG đổi nghĩa,
-chỉ làm cho TỰ NHIÊN + CÓ CẢM XÚC hơn.
+INPUT: mỗi line có literal translation đã ĐÚNG nghĩa.
+NHIỆM VỤ: polish thành câu PHIM thật — TỰ NHIÊN + CÓ CẢM XÚC + match emotion
+với scene_context. CHO PHÉP đổi pronoun nếu literal sai emotion (ví dụ:
+vợ chồng đang ly hôn mà literal dùng "anh/em" thân mật → đổi sang "tôi/cô" lạnh).
 
 {scene_block}
+🎭 PRONOUN THEO EMOTION (đọc scene_context phía trên):
+   • Vợ chồng yêu thương → "anh/em" (literal default)
+   • Vợ chồng XUNG ĐỘT / LY HÔN → chuyển "tôi/cô" lạnh nhạt
+   • Con yêu cha mẹ → "bố/mẹ" + xưng "con"
+   • Con CỰC GIẬN cha → có thể "ông" (hạ vai = ghê tởm — chấp nhận drama)
+   • Cãi vã giận dữ → "mày/tao" hoặc giữ "anh/em" cứng tuỳ tone
+   Pronoun phải MATCH cảm xúc thực — KHÔNG cứng nhắc rule.
+
+
 🎬 PATTERNS CẤM (literal hay gặp):
 ❌ "Đúng vậy"/"Đúng rồi" cho 对啊 → DÙNG: "Ừ"/"Phải rồi"/"Ờ"
 ❌ "Vâng" cho 嗯 → "Ừ" (thân mật), "Vâng ạ" (lễ phép)

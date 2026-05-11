@@ -305,14 +305,20 @@ def _translate_3pass(engine: str, texts: list[str], target: str, source: str,
             api_key=api_key, model=model, film_genre=film_genre,
             visual_context=visual_context,
         )
-        # Backward-compat: extract gender → cache cho dubbing_svc đọc lại
+        # Backward-compat: extract gender → cache cho dubbing_svc đọc lại.
+        # Store FULL info (character_name, age, role) để TTS routing + UI dùng.
         if relationships and relationships.get("speakers"):
-            genders = {
-                spk_id: {"gender": info.get("gender", "unsure"),
-                          "evidence": info.get("evidence", "")}
+            full_info = {
+                spk_id: {
+                    "gender": info.get("gender", "unsure"),
+                    "evidence": info.get("evidence", ""),
+                    "character_name": info.get("character_name", ""),
+                    "age": info.get("age", "adult"),
+                    "role": info.get("role", ""),
+                }
                 for spk_id, info in relationships["speakers"].items()
             }
-            _store_llm_genders(engine, genders)
+            _store_llm_genders(engine, full_info)
     except Exception as e:
         logger.warning("%s Pass-0 fail: %s", engine, e)
 

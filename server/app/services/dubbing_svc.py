@@ -1664,12 +1664,24 @@ def translate_project(
     # ── Pass-(-1): Visual Context Analysis (optional, BYOK) ──
     # Sample 8 keyframe → VLM call → JSON (genre/register/characters/relationships)
     # → feed Pass-0 audio analyze làm ground truth → giảm đoán mò pronoun/gender.
-    # Fallback engine: nếu user bật visual nhưng không pick engine/key riêng
-    # → reuse text translate engine + key (đơn giản UX).
+    # Fallback engine: nếu user bật "nâng cao" nhưng không pick riêng → reuse
+    # text translate engine + key. User đã chấp nhận trả phí khi bật toggle →
+    # mặc định dùng model PRO/cao cấp (không rẻ) để xứng đáng tiền.
     if enable_visual_context and not visual_engine and eng in ("gemini", "openai", "claude"):
         visual_engine = eng
         if not visual_api_key:
             visual_api_key = api_key
+    if enable_visual_context and visual_engine and not visual_model:
+        # Auto-pick PRO model khi user bật nâng cao mà không chỉ định model.
+        # "Nâng cao" = chất lượng cao → đáng dùng pro thay vì flash/mini/haiku.
+        pro_model_for = {
+            "gemini": "gemini-2.5-pro",
+            "openai": "gpt-4o",
+            "claude": "claude-sonnet-4-6",
+        }
+        visual_model = pro_model_for.get(visual_engine)
+        if visual_model:
+            logger.info("Visual context: auto-pick PRO model %s cho %s", visual_model, visual_engine)
     if enable_visual_context and visual_engine and visual_api_key:
         if not project.get("visual_context"):
             video_path = _project_dir(project_id) / "original.mp4"
@@ -1831,10 +1843,20 @@ def translate_project(
     if used_engine != eng:
         logger.info("Final engine = %s (yêu cầu ban đầu = %s)", used_engine, eng)
 
+    # Tag character_name + age + gender vào mỗi segment để output JSON sạch
+    # (theo format kịch bản: id/character/gender/age/text).
+    chars_meta = project.get("speaker_characters") or {}
     for seg, trans in zip(project["segments"], translated):
         if trans:
             seg["translated_text"] = trans
             seg["speech_text"] = trans
+        spk = seg.get("speaker")
+        if spk and spk in chars_meta:
+            ci = chars_meta[spk]
+            seg["character_name"] = ci.get("character_name", "")
+            seg["age"] = ci.get("age", "adult")
+            if ci.get("gender"):
+                seg["speaker_gender"] = ci["gender"]
             seg["emotion"] = "neutral"
 
     # ── LLM Self-verify gender (Option A) ──
@@ -1845,6 +1867,19 @@ def translate_project(
         llm_genders = cloud_translate_svc.get_last_llm_genders()
         pipeline_genders = project.get("speaker_genders") or {}
         if llm_genders:
+            # Save FULL speaker characters meta (character_name, age, gender, role)
+            # → cho TTS routing + UI hiển thị nhân vật như bản dịch kịch bản.
+            project["speaker_characters"] = {
+                spk: {
+                    "character_name": info.get("character_name", ""),
+                    "age": info.get("age", "adult"),
+                    "gender": info.get("gender", "unsure"),
+                    "role": info.get("role", ""),
+                    "evidence": info.get("evidence", ""),
+                }
+                for spk, info in llm_genders.items()
+            }
+
             overridden = {}
             for spk, info in llm_genders.items():
                 llm_g = info.get("gender", "unsure")

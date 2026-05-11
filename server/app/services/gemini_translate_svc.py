@@ -96,16 +96,22 @@ def _translate_uncached(
             film_genre=film_genre,
             visual_context=visual_context,
         )
-        # Backward-compat: lưu gender vào cache cho dubbing_svc đọc lại
+        # Backward-compat: store FULL info (character_name, age, role) cho
+        # dubbing_svc đọc lại — TTS routing + UI hiển thị nhân vật.
         if relationships and relationships.get("speakers"):
             try:
                 from app.services.cloud_translate_svc import _store_llm_genders
-                genders = {
-                    spk_id: {"gender": info.get("gender", "unsure"),
-                              "evidence": info.get("evidence", "")}
+                full_info = {
+                    spk_id: {
+                        "gender": info.get("gender", "unsure"),
+                        "evidence": info.get("evidence", ""),
+                        "character_name": info.get("character_name", ""),
+                        "age": info.get("age", "adult"),
+                        "role": info.get("role", ""),
+                    }
                     for spk_id, info in relationships["speakers"].items()
                 }
-                _store_llm_genders(ENGINE, genders)
+                _store_llm_genders(ENGINE, full_info)
             except Exception:
                 pass
     except Exception as e:
