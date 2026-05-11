@@ -510,22 +510,42 @@ NHIỆM VỤ: dịch lời thoại từ {src_name} → {tgt_name} cho lồng ti�
      - 她 = mẹ/chị/cô → "cô ấy" / "bà ấy" / "chị ấy"
    • PHÂN BIỆT: "你来" (ngôi 2) vs "他来" (ngôi 3) khác hoàn toàn!
 
-🔴 LỖI #3 — TÊN THÂN MẬT (小X/阿X/大X) DỊCH THÀNH "nhóc"/"bé"
+🔴 LỖI #3 — TÊN THÂN MẬT (小X/阿X/大X) DỊCH THÀNH "nhóc"/"bé"/"con yêu"
 
    Trong tiếng Trung, prefix 小/阿/大 + tên = TÊN THÂN MẬT, đây là
    DANH TỪ RIÊNG (tên gọi), KHÔNG phải nickname chung chung.
 
-   ❌ SAI: 小宝 → "nhóc" / "bé"
-   ✅ ĐÚNG: 小宝 → "Tiểu Bảo" (Hán-Việt, giữ là TÊN)
+   ❌ SAI hoàn toàn:
+   • 小宝 → "nhóc" / "bé" / "con yêu" / "cục cưng" (dùng pronoun chung)
+   • 我想小宝 → "Anh nhớ con" (mất tên 小宝)
+
+   ✅ ĐÚNG:
+   • 小宝 → "Tiểu Bảo" (Hán-Việt, giữ là TÊN)
+   • 我想小宝 → "Anh nhớ Tiểu Bảo"
+   • 小宝 爸爸抱抱 → "Tiểu Bảo, ba ôm cái nào!"
+
+   ⚡ RULE TUYỆT ĐỐI:
+   Nếu CÂU GỐC chứa chữ 小X / 阿X / 大X / 老X (X là 1 chữ Hán) →
+   OUTPUT BẮT BUỘC phải có "Tiểu X" / "A X" / "Đại X" / "Lão X".
+   KHÔNG được thay bằng từ trong "addresses" của SPEAKER MAP.
+   "addresses" chỉ áp dụng khi câu gốc dùng 你/anh/em chung — KHÔNG khi
+   gốc dùng TÊN cụ thể.
 
    QUY TẮC PHIÊN ÂM:
    • 小X → "Tiểu X" (小宝 → Tiểu Bảo, 小明 → Tiểu Minh, 小红 → Tiểu Hồng)
    • 阿X → "A X" (阿强 → A Cường, 阿珍 → A Trân)
    • 大X → "Đại X" (大牛 → Đại Ngưu, 大伟 → Đại Vĩ)
-   • 老X (gọi người lớn tuổi) → "lão X" (老王 → lão Vương)
+   • 老X (gọi người lớn tuổi) → "Lão X" (老王 → Lão Vương)
 
-   Quy tắc apply cho TÊN NHÂN VẬT thân mật. KHÔNG apply cho danh từ
-   chung 小孩 (đứa trẻ), 小姐 (cô — tước vị), 小心 (cẩn thận), v.v.
+   NGOẠI LỆ (KHÔNG apply rule, vì là từ chung):
+   • 小孩 = đứa trẻ (không phải tên)
+   • 小姐 = cô / tiểu thư (tước vị)
+   • 小心 = cẩn thận (động từ)
+   • 小时 = giờ (đơn vị thời gian)
+   • 大家 = mọi người (không phải tên)
+   • 大概 = đại khái
+   • 老板 = sếp / ông chủ
+   • 老婆/老公 = vợ/chồng (xem LỖI #1)
 
 ═══════════════════════════════════════════════════════════════
 📏 TIMING BUDGET — BẮT BUỘC TUÂN THỦ
