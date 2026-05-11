@@ -154,12 +154,21 @@ EVIDENCE để suy:
 • Tự gọi "anh/bố/ba/chồng/ông" → NAM; "em/mẹ/má/vợ/chị/cô" → NỮ
 • Người khác gọi "anh ơi/cậu ơi/sếp ơi" → NAM; "em ơi/chị ơi" → NỮ
 
-⚠️ scene_context CỰC QUAN TRỌNG — đặc biệt RELATIONSHIP STATUS của cặp đôi:
-   • Vợ chồng bình thường → pronoun "anh/em"
-   • Vợ chồng đang LY HÔN / xung đột → có thể "tôi/cô" (lạnh nhạt) — TRUST context
-   • Con cái yêu cha mẹ → "bố/mẹ" + xưng "con"
-   • Con cái ghét cha mẹ tột độ → có thể "ông/bà" (hạ vai thành người dưng)
-   → KHÔNG cứng nhắc rule pronoun, để LLM Pass-1/2 đọc context → pick phù hợp
+⚠️ scene_context — RELATIONSHIP STATUS của cặp đôi (CỰC QUAN TRỌNG):
+
+🚨 VỢ CHỒNG / CẶP ĐÔI YÊU NHAU: MẶC ĐỊNH "anh/em" (KHÔNG "tôi/cô"):
+   • Mới cưới còn ngượng → "anh/em"
+   • Cưới vì hợp đồng / không yêu → "anh/em" (đây là phim drama, vẫn vợ chồng)
+   • Cãi nhau / ghen tuông / hiểu lầm → "anh/em" (cãi yêu)
+   • Quan hệ phức tạp (ôm nhầm con, hôn nhân giả) → "anh/em"
+   • KHÔNG quen biết nhau lắm → "anh/em" (vẫn là vợ chồng)
+   CHỈ dùng "tôi/cô" khi ĐÃ LY HÔN CHÍNH THỨC hoặc thoại nói thẳng từ chối
+   ("ông đừng gọi tôi là vợ nữa") — RẤT HIẾM, KHÔNG được đoán.
+
+🚨 Con cái: MẶC ĐỊNH "con" gọi "bố/mẹ" (KHÔNG "ông/bà"):
+   • Giận, cãi cha mẹ → vẫn "bố/mẹ"
+   • Bị tẩy não, không thích cha → vẫn "bố/mẹ"
+   • CHỈ "ông/bà" khi con đoạn tuyệt + nói thẳng từ chối làm con
 
 ⚠️ TUYỆT ĐỐI ra TIẾNG VIỆT cho self_pronoun/addresses/third_person_label.
 KHÔNG để chữ Trung gốc (在下, 寡人, 郡主...) trong output JSON.
@@ -569,26 +578,38 @@ NHIỆM VỤ DUY NHẤT của Pass này:
 
 KHÔNG cần lo style cinematic — Editor pass sẽ polish.
 {anchor_block}
-🎭 PRONOUN PHỤ THUỘC CONTEXT — CHỈ ĐỔI KHI scene_context RÕ RÀNG:
+🚨🚨🚨 PRONOUN VỢ CHỒNG — RULE CỨNG BẮT BUỘC 🚨🚨🚨
 
-⚡ DEFAULT cho vợ chồng / yêu nhau: LUÔN "anh/em" (90% trường hợp).
-   KHÔNG được tự ý đổi sang "tôi/cô" khi không có bằng chứng rõ.
+Vợ chồng / cặp đôi yêu nhau / mới cưới / đính hôn TUYỆT ĐỐI DÙNG "anh/em".
+KHÔNG bao giờ "tôi/cô" cho vợ chồng trừ trường hợp SIÊU HIẾM dưới đây.
 
-CHỈ đổi sang "tôi/cô" / "tôi/anh" lạnh nhạt KHI scene_context CHỨA RÕ:
-   • "ly hôn" / "ly thân" / "chuẩn bị giấy ly hôn"
-   • "muốn cưới người khác" / "đã yêu người khác"
-   • "căm thù" / "thù hận"
-   • Speaker chính đang nói rõ: "tôi/cô" (không phải dịch giả tự thêm)
-   Cãi vã thông thường (vợ chồng giận nhau, ghen tuông, hiểu lầm tạm thời)
-   → VẪN dùng "anh/em" (cãi yêu cũng dùng anh/em, không lạnh đến mức tôi/cô).
+ÁP DỤNG "anh/em" cho TẤT CẢ trường hợp:
+✓ Vợ chồng mới cưới còn ngượng → "anh/em" (KHÔNG "tôi/cô")
+✓ Vợ chồng cưới vì hợp đồng / không yêu nhau → VẪN "anh/em" (đây là phim drama)
+✓ Vợ chồng cãi nhau, ghen tuông, hiểu lầm → VẪN "anh/em"
+✓ Vợ chồng có chuyện phức tạp (ôm nhầm con, hôn nhân giả, etc) → VẪN "anh/em"
+✓ Đối thoại lạnh nhạt giữa vợ chồng → VẪN "anh/em" (chỉ tone lạnh, KHÔNG pronoun lạnh)
 
-🔹 Cha/mẹ ↔ con (tương tự):
-   DEFAULT: con xưng "con", gọi "bố/mẹ"
-   CHỈ "ông/bà" khi scene_context rõ: "con cực giận từ chối làm con",
-   "đoạn tuyệt quan hệ", hoặc lời thoại con NÓI THẲNG ("không phải bố tôi").
+CHỈ DÙNG "tôi/cô" CHO VỢ CHỒNG KHI:
+✗ Đã LY HÔN chính thức (đã ký giấy / tòa xử xong)
+✗ Đã LY THÂN >6 tháng + không còn coi là vợ chồng
+✗ Speaker dùng "tôi/cô" để CỐ Ý hạ thấp + thể hiện sự khinh thường tột độ
+  (vd thoại có "cô không xứng" / "ông đừng gọi tôi là vợ nữa")
+→ Nếu KHÔNG có dấu hiệu trên rõ ràng → mặc định "anh/em".
 
-🔹 NGUYÊN TẮC: theo SPEAKER MAP làm DEFAULT. KHÔNG override trừ khi
-scene_context có keyword rõ ràng. KHÔNG được "đoán" emotion từ 1-2 câu cãi.
+🔴 KEYWORD GÂY NHẦM (KHÔNG nghĩa là phải dùng "tôi/cô"):
+- "Đối tượng kết hôn không rõ ràng" / "kết hôn vội vàng" / "kết hôn nhầm"
+  → vẫn là vợ chồng → "anh/em"
+- "Ôm nhầm con" / "hiểu lầm" / "không hợp nhau" → vẫn vợ chồng → "anh/em"
+- "Không quen biết nhau lắm" / "mới cưới chưa quen" → vẫn vợ chồng → "anh/em"
+- Vợ chồng phim ngôn tình / drama luôn dùng "anh/em" kể cả tình huống xa cách
+
+🔹 Cha/mẹ ↔ con:
+   DEFAULT MẠNH: con xưng "con", gọi "bố/mẹ"
+   "Ông/bà" CHỈ khi con đã đoạn tuyệt + nói thẳng từ chối ("ông không phải bố tôi")
+
+🔹 NGUYÊN TẮC: theo SPEAKER MAP làm DEFAULT TUYỆT ĐỐI.
+KHÔNG được "đoán" emotion từ scene context để tự ý đổi pronoun.
 
 🚨 RULE MAPPING ĐẠI TỪ (CỰC QUAN TRỌNG — đọc kỹ TRƯỚC khi dịch):
 
@@ -765,16 +786,17 @@ với scene_context. CHO PHÉP đổi pronoun nếu literal sai emotion (ví d�
 vợ chồng đang ly hôn mà literal dùng "anh/em" thân mật → đổi sang "tôi/cô" lạnh).
 
 {scene_block}
-🎭 PRONOUN THEO EMOTION — GIỮ literal pronoun làm DEFAULT:
+🚨 PRONOUN — KHÔNG TỰ Ý ĐỔI khỏi literal:
 
-⚡ KHÔNG TỰ Ý ĐỔI pronoun khỏi literal. Pass-1 đã pick đúng cho context.
-Chỉ đổi nếu literal SAI emotion RÕ RÀNG (vd literal "anh/em" mà scene
-context ghi rõ "ly hôn" — hiếm khi Pass-1 sai).
+⚡ Vợ chồng / cặp đôi: PHẢI "anh/em" (kể cả literal có "tôi/cô" do Pass-1
+   nhầm). Editor SỬA NGƯỢC LẠI nếu literal sai pronoun:
+   - literal "tôi/cô" cho vợ chồng → SỬA thành "anh/em"
+   - literal "ông/bà" cho con-cha mẹ → SỬA thành "bố/mẹ"
 
-90% case: GIỮ NGUYÊN pronoun, chỉ polish style (thêm tiểu từ, đảo từ).
+⚡ "Tôi/cô" CHỈ giữ khi: đã ly hôn chính thức / thoại từ chối rõ ràng.
 
-Cãi vã thường (vợ chồng yêu nhau cãi nhau, ghen tuông) → "anh/em" KHÔNG
-đổi sang "tôi/cô". Vợ chồng phim tình cảm cãi nhau VẪN dùng "anh/em".
+Editor TASK: polish style (thêm tiểu từ, đảo từ, cảm xúc) + SỬA pronoun
+sai về DEFAULT "anh/em" cho vợ chồng + "con/bố/mẹ" cho gia đình.
 
 
 🎬 PATTERNS CẤM (literal hay gặp):
