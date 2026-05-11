@@ -33,6 +33,7 @@ def translate_segments(
     glossary: list[tuple[str, str]] | None = None,
     speaker_genders: dict | None = None,
     film_genre: str | None = None,
+    visual_context: dict | None = None,
 ) -> list[dict]:
     """Translate film dialogue segments — 3-pass cinematic.
 
@@ -49,7 +50,7 @@ def translate_segments(
         def _llm_call(uncached: list[dict]) -> list[dict]:
             return _translate_uncached(
                 uncached, target_language, source_language,
-                topic_hint, glossary, film_genre,
+                topic_hint, glossary, film_genre, visual_context,
             )
 
         return cached_translate_segments(
@@ -64,7 +65,7 @@ def translate_segments(
     except ImportError:
         return _translate_uncached(
             segments, target_language, source_language,
-            topic_hint, glossary, film_genre,
+            topic_hint, glossary, film_genre, visual_context,
         )
 
 
@@ -75,6 +76,7 @@ def _translate_uncached(
     topic_hint: str | None,
     glossary: list[tuple[str, str]] | None,
     film_genre: str | None,
+    visual_context: dict | None = None,
 ) -> list[dict]:
     """Internal — gọi 3-pass thực sự (sau cache miss)."""
     from app.services.llm import run_analyze, run_translate, run_edit
@@ -92,6 +94,7 @@ def _translate_uncached(
             segments=segments,
             source_lang=source_language,
             film_genre=film_genre,
+            visual_context=visual_context,
         )
         # Backward-compat: lưu gender vào cache cho dubbing_svc đọc lại
         if relationships and relationships.get("speakers"):

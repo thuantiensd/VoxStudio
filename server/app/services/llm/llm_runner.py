@@ -20,12 +20,33 @@ from .prompts import (
     parse_translator_response,
     build_editor_prompt,
     parse_editor_response,
+    build_visual_context_prompt,
+    parse_visual_context,
 )
 
 logger = logging.getLogger(__name__)
 
 TIMEOUT_S = 90
+VISION_TIMEOUT_S = 120  # VLM với images chậm hơn
 MIN_SPEAKERS_FOR_ANALYZE = 2
+
+
+# Vision-capable models per engine — backend list cho FE dropdown
+VISION_MODELS = {
+    "gemini": [
+        {"id": "gemini-2.5-flash", "label": "Gemini 2.5 Flash (nhanh, rẻ)", "default": True},
+        {"id": "gemini-2.5-pro",   "label": "Gemini 2.5 Pro (chuẩn nhất)"},
+    ],
+    "openai": [
+        {"id": "gpt-4o-mini", "label": "GPT-4o mini (rẻ)", "default": True},
+        {"id": "gpt-4o",      "label": "GPT-4o (chuẩn nhất)"},
+    ],
+    "claude": [
+        {"id": "claude-3-5-haiku-20241022",  "label": "Claude 3.5 Haiku (rẻ)", "default": True},
+        {"id": "claude-3-5-sonnet-20241022", "label": "Claude 3.5 Sonnet (chuẩn)"},
+        {"id": "claude-sonnet-4-6",          "label": "Claude Sonnet 4.6 (mạnh nhất)"},
+    ],
+}
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -40,8 +61,11 @@ def run_analyze(
     api_key: Optional[str] = None,
     model: Optional[str] = None,
     film_genre: Optional[str] = None,
+    visual_context: Optional[dict] = None,
 ) -> dict:
     """Pass-0: speaker relationship analysis. Skip nếu 1 speaker.
+
+    Nếu có visual_context (từ Pass-(-1) VLM) → inject làm ground truth.
 
     Returns {} nếu skip/fail (caller phải fallback Pass-1 không anchor).
     """
@@ -52,7 +76,8 @@ def run_analyze(
         return {}
 
     prompt = build_speaker_analysis_prompt(
-        segments=segments, source_lang=source_lang, film_genre=film_genre,
+        segments=segments, source_lang=source_lang,
+        film_genre=film_genre, visual_context=visual_context,
     )
     try:
         raw = _call_llm(engine, prompt, api_key=api_key, model=model)
@@ -96,6 +121,51 @@ def run_translate(
     )
     raw = _call_llm(engine, prompt, api_key=api_key, model=model)
     return parse_translator_response(raw, len(segments))
+
+
+def run_visual_analyze(
+    *,
+    engine: str,
+    frame_paths: list,
+    source_lang: str = "auto",
+    api_key: str | None = None,
+    model: str | None = None,
+) -> dict:
+    """Pass-(-1): visual context analysis qua VLM.
+
+    Args:
+      engine: gemini/openai/claude
+      frame_paths: list[Path|str] tới keyframe JPG/PNG (8 frames ideal)
+      api_key: required (BYOK)
+      model: optional override; default = bản rẻ nhất từ VISION_MODELS
+
+    Returns: {genre, register, scene_summary, characters[], relationships[]}
+             hoặc {} nếu fail.
+    """
+    if not frame_paths:
+        return {}
+    prompt_text = build_visual_context_prompt(source_lang=source_lang, n_frames=len(frame_paths))
+
+    try:
+        if engine == "gemini":
+            raw = _call_gemini_vision(prompt_text, frame_paths, api_key=api_key, model=model)
+        elif engine == "openai":
+            raw = _call_openai_vision(prompt_text, frame_paths, api_key=api_key, model=model)
+        elif engine == "claude":
+            raw = _call_claude_vision(prompt_text, frame_paths, api_key=api_key, model=model)
+        else:
+            logger.warning("Visual: engine %r không support", engine)
+            return {}
+    except Exception as e:
+        logger.warning("run_visual_analyze fail (%s): %s", engine, e)
+        return {}
+
+    result = parse_visual_context(raw)
+    if result.get("characters"):
+        logger.info("Visual (%s): %d characters, genre=%r, register=%r",
+                     engine, len(result["characters"]),
+                     result.get("genre", ""), result.get("register", ""))
+    return result
 
 
 def run_edit(
@@ -233,6 +303,111 @@ def _call_claude_http(prompt: dict, api_key: Optional[str], model: Optional[str]
         "Content-Type": "application/json",
     }
     with httpx.Client(timeout=TIMEOUT_S) as c:
+        r = c.post("https://api.anthropic.com/v1/messages",
+                    json=payload, headers=headers)
+        r.raise_for_status()
+    return r.json()["content"][0]["text"]
+
+
+# ═══════════════════════════════════════════════════════════════
+# Vision (VLM) callers — encode image base64 + multimodal request
+# ═══════════════════════════════════════════════════════════════
+
+def _read_image_b64(path) -> tuple[str, str]:
+    """Read image file → (mime_type, base64_str)."""
+    import base64
+    from pathlib import Path
+    p = Path(path)
+    suffix = p.suffix.lower()
+    mime = {".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+            ".png": "image/png", ".webp": "image/webp"}.get(suffix, "image/jpeg")
+    return mime, base64.b64encode(p.read_bytes()).decode("ascii")
+
+
+def _call_gemini_vision(prompt_text: str, frame_paths: list,
+                         api_key: Optional[str], model: Optional[str]) -> str:
+    """Gemini vision via HTTP (multimodal generateContent)."""
+    if not api_key:
+        raise ValueError("api_key required cho gemini vision")
+    import httpx
+    m = model or "gemini-2.5-flash"
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent"
+
+    parts = [{"text": prompt_text}]
+    for fp in frame_paths:
+        mime, b64 = _read_image_b64(fp)
+        parts.append({"inline_data": {"mime_type": mime, "data": b64}})
+
+    payload = {
+        "contents": [{"parts": parts}],
+        "generationConfig": {"temperature": 0.1},
+    }
+    with httpx.Client(timeout=VISION_TIMEOUT_S) as c:
+        r = c.post(url, params={"key": api_key}, json=payload,
+                    headers={"Content-Type": "application/json"})
+        r.raise_for_status()
+    return r.json()["candidates"][0]["content"]["parts"][0]["text"]
+
+
+def _call_openai_vision(prompt_text: str, frame_paths: list,
+                         api_key: Optional[str], model: Optional[str]) -> str:
+    """OpenAI vision (gpt-4o family) — chat.completions với image_url base64."""
+    if not api_key:
+        raise ValueError("api_key required cho openai vision")
+    import httpx
+    m = model or "gpt-4o-mini"
+
+    content = [{"type": "text", "text": prompt_text}]
+    for fp in frame_paths:
+        mime, b64 = _read_image_b64(fp)
+        content.append({
+            "type": "image_url",
+            "image_url": {"url": f"data:{mime};base64,{b64}"},
+        })
+
+    payload = {
+        "model": m,
+        "temperature": 0.1,
+        "response_format": {"type": "json_object"},
+        "messages": [{"role": "user", "content": content}],
+    }
+    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+    with httpx.Client(timeout=VISION_TIMEOUT_S) as c:
+        r = c.post("https://api.openai.com/v1/chat/completions",
+                    json=payload, headers=headers)
+        r.raise_for_status()
+    return r.json()["choices"][0]["message"]["content"]
+
+
+def _call_claude_vision(prompt_text: str, frame_paths: list,
+                         api_key: Optional[str], model: Optional[str]) -> str:
+    """Claude vision — messages API với image content blocks."""
+    if not api_key:
+        raise ValueError("api_key required cho claude vision")
+    import httpx
+    m = model or "claude-3-5-haiku-20241022"
+
+    content = []
+    for fp in frame_paths:
+        mime, b64 = _read_image_b64(fp)
+        content.append({
+            "type": "image",
+            "source": {"type": "base64", "media_type": mime, "data": b64},
+        })
+    content.append({"type": "text", "text": prompt_text})
+
+    payload = {
+        "model": m,
+        "max_tokens": 2048,
+        "temperature": 0.1,
+        "messages": [{"role": "user", "content": content}],
+    }
+    headers = {
+        "x-api-key": api_key,
+        "anthropic-version": "2023-06-01",
+        "Content-Type": "application/json",
+    }
+    with httpx.Client(timeout=VISION_TIMEOUT_S) as c:
         r = c.post("https://api.anthropic.com/v1/messages",
                     json=payload, headers=headers)
         r.raise_for_status()

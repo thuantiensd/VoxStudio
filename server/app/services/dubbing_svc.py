@@ -1609,20 +1609,21 @@ def translate_project(
     api_key: str | None = None,
     topic_hint: str | None = None,
     glossary: list[tuple[str, str]] | None = None,
+    enable_visual_context: bool = False,
+    visual_engine: str | None = None,
+    visual_model: str | None = None,
+    visual_api_key: str | None = None,
 ) -> dict:
     """Auto-translate all segments to target language.
 
-    Engines:
-      · google           — Google Free (legacy alias, no key)
-      · google_free      — Google Free (no key)
-      · google_cloud     — Google Cloud Translate (BYOK)
-      · deepl            — DeepL (BYOK)
-      · gemini           — Gemini (BYOK; fallback env key nếu không truyền)
-      · openai           — OpenAI GPT (BYOK)
-      · claude           — Anthropic Claude (BYOK)
-      · qwen             — Qwen local LLM (no key, GPU)
+    Engines text:
+      · google_free / google_cloud / deepl / gemini / openai / claude / qwen
 
-    use_llm: với google_free, có polish bằng Qwen local nếu CUDA có.
+    Visual context (optional, BYOK, +cost):
+      · enable_visual_context=True → sample keyframes + VLM call trước translate
+      · visual_engine: gemini/openai/claude (cùng/khác text engine)
+      · visual_model: optional override (default = bản rẻ trong VISION_MODELS)
+      · visual_api_key: BYOK cho VLM (có thể trùng api_key text)
     """
     project = _load_meta(project_id)
     if not project:
@@ -1660,6 +1661,40 @@ def translate_project(
         except Exception as e:
             logger.warning("Genre detection failed: %s — fallback generic", e)
 
+    # ── Pass-(-1): Visual Context Analysis (optional, BYOK) ──
+    # Sample 8 keyframe → VLM call → JSON (genre/register/characters/relationships)
+    # → feed Pass-0 audio analyze làm ground truth → giảm đoán mò pronoun/gender.
+    # Skip nếu disable, hoặc thiếu key, hoặc đã có visual_context cached.
+    if enable_visual_context and visual_engine and visual_api_key:
+        if not project.get("visual_context"):
+            video_path = _project_dir(project_id) / "original.mp4"
+            if video_path.exists():
+                try:
+                    from app.services import visual_context_svc
+                    logger.info("Visual context: analyzing keyframes via %s/%s…",
+                                 visual_engine, visual_model or "(default)")
+                    vctx = visual_context_svc.analyze_video(
+                        video_path=video_path,
+                        engine=visual_engine,
+                        api_key=visual_api_key,
+                        model=visual_model,
+                        source_lang=source_lang,
+                    )
+                    if vctx:
+                        project["visual_context"] = vctx
+                        _save_meta(project)
+                        logger.info("Visual context ok: %d characters, genre=%r",
+                                     len(vctx.get("characters", [])),
+                                     vctx.get("genre", ""))
+                    else:
+                        logger.warning("Visual context returned empty — fallback no anchor")
+                except Exception as e:
+                    logger.warning("Visual context fail: %s — fallback no anchor", e)
+            else:
+                logger.warning("Visual context: video %s không tồn tại — skip", video_path)
+        else:
+            logger.info("Visual context: dùng cached từ trước")
+
     # ── Path A: Gemini — server-side context-aware (env key) ──
     # Giữ path cũ để backward-compat khi user KHÔNG truyền api_key (admin
     # set env GEMINI_API_KEY). Nếu user truyền key → đi path BYOK chung.
@@ -1671,6 +1706,7 @@ def translate_project(
             topic_hint=topic_hint, glossary=glossary,
             speaker_genders=project.get("speaker_genders") or {},
             film_genre=project.get("film_genre"),
+            visual_context=project.get("visual_context") or None,
         )
         for seg, result in zip(project["segments"], results):
             if result.get("translated_text"):
@@ -1750,6 +1786,7 @@ def translate_project(
                 segments_meta=segments_meta,
                 speaker_genders=speaker_genders_meta,
                 film_genre=film_genre_meta,
+                visual_context=project.get("visual_context") or None,
             )
             # Check thực sự có output (không phải all empty)
             non_empty = sum(1 for t in translated if t and t.strip())

@@ -19,6 +19,8 @@ from .llm_runner import (
     run_analyze,
     run_translate,
     run_edit,
+    run_visual_analyze,
+    VISION_MODELS,
 )
 
 # Backward-compat alias — code cũ vẫn gọi analyze_speakers
@@ -34,5 +36,7 @@ __all__ = [
     "run_analyze",
     "run_translate",
     "run_edit",
+    "run_visual_analyze",
+    "VISION_MODELS",
     "analyze_speakers",  # alias
 ]

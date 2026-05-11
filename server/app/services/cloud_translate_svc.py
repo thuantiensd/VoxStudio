@@ -279,10 +279,11 @@ def _translate_3pass(engine: str, texts: list[str], target: str, source: str,
                        api_key: str, model: str | None,
                        topic_hint: str | None, glossary_block: str | None,
                        segments_meta: list[dict] | None,
-                       film_genre: str | None) -> list[str]:
+                       film_genre: str | None,
+                       visual_context: dict | None = None) -> list[str]:
     """3-pass translation cho OpenAI/Claude qua HTTP.
 
-    Pass-0: analyze speakers (skip nếu 1 speaker)
+    Pass-0: analyze speakers (skip nếu 1 speaker; có visual_context = ground truth)
     Pass-1: literal translator
     Pass-2: editor polish
     """
@@ -302,6 +303,7 @@ def _translate_3pass(engine: str, texts: list[str], target: str, source: str,
         relationships = run_analyze(
             engine=engine, segments=segments_meta, source_lang=source,
             api_key=api_key, model=model, film_genre=film_genre,
+            visual_context=visual_context,
         )
         # Backward-compat: extract gender → cache cho dubbing_svc đọc lại
         if relationships and relationships.get("speakers"):
@@ -362,12 +364,14 @@ def _openai(texts: list[str], target: str, source: str, api_key: str,
             glossary_block: str | None = None,
             segments_meta: list[dict] | None = None,
             speaker_genders: dict | None = None,
-            film_genre: str | None = None) -> list[str]:
+            film_genre: str | None = None,
+            visual_context: dict | None = None) -> list[str]:
     """OpenAI translate — 3-pass."""
     api_key = _sanitize_api_key(api_key, "OpenAI")
     model = model or DEFAULT_MODELS["openai"]
     return _translate_3pass("openai", texts, target, source, api_key, model,
-                              topic_hint, glossary_block, segments_meta, film_genre)
+                              topic_hint, glossary_block, segments_meta, film_genre,
+                              visual_context)
 
 
 def _claude(texts: list[str], target: str, source: str, api_key: str,
@@ -376,12 +380,14 @@ def _claude(texts: list[str], target: str, source: str, api_key: str,
             glossary_block: str | None = None,
             segments_meta: list[dict] | None = None,
             speaker_genders: dict | None = None,
-            film_genre: str | None = None) -> list[str]:
+            film_genre: str | None = None,
+            visual_context: dict | None = None) -> list[str]:
     """Claude translate — 3-pass."""
     api_key = _sanitize_api_key(api_key, "Claude")
     model = model or DEFAULT_MODELS["claude"]
     return _translate_3pass("claude", texts, target, source, api_key, model,
-                              topic_hint, glossary_block, segments_meta, film_genre)
+                              topic_hint, glossary_block, segments_meta, film_genre,
+                              visual_context)
 
 
 # ── Helpers ────────────────────────────────────────────────
@@ -431,6 +437,7 @@ def translate_texts(
     segments_meta: list[dict] | None = None,
     speaker_genders: dict | None = None,
     film_genre: str | None = None,
+    visual_context: dict | None = None,
 ) -> list[str]:
     """Translate list of strings with chosen engine.
 
@@ -477,7 +484,8 @@ def translate_texts(
                                 glossary_block=glossary_block or None,
                                 segments_meta=sub_meta,
                                 speaker_genders=speaker_genders,
-                                film_genre=film_genre)
+                                film_genre=film_genre,
+                                visual_context=visual_context)
             elif engine == "gemini":
                 # Gemini path cũ giữ tương thích — đã có rich prompt riêng
                 translated = fn(sub, target, source, api_key, model=model,

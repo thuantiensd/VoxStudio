@@ -472,18 +472,72 @@ async def download_subtitle(
 
 # ── Translate ──────────────────────────────────────
 
+class TranslateRequest(BaseModel):
+    engine: str = "google"
+    api_key: str | None = None
+    use_llm: bool = False
+    topic_hint: str | None = None
+    glossary: list[list[str]] | None = None  # list[[zh,vi]] frontend dễ gửi
+    # Visual context (Pass-(-1) VLM, optional, BYOK)
+    enable_visual_context: bool = False
+    visual_engine: str | None = None      # gemini/openai/claude
+    visual_model: str | None = None        # optional override
+    visual_api_key: str | None = None      # BYOK cho VLM
+
+
+@router.get("/vision-models")
+async def list_vision_models():
+    """List VLM-capable models per engine cho FE build dropdown."""
+    from app.services.llm import VISION_MODELS
+    return {"models": VISION_MODELS}
+
+
 @router.post("/projects/{project_id}/translate")
 async def translate_project(
     project_id: str,
+    request: Request,
     use_llm: bool = False,
     engine: str = "google",
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_session),
 ):
-    """Auto-translate all segments to target language."""
+    """Auto-translate all segments to target language.
+
+    Body JSON (optional, override query params):
+      engine, api_key, use_llm, topic_hint, glossary,
+      enable_visual_context, visual_engine, visual_model, visual_api_key
+    """
     await dubbing_project_svc.require_owned(db, project_id, user)
+
+    # Parse body nếu có (JSON > query params)
+    body_params = {}
     try:
-        return dubbing_svc.translate_project(project_id, use_llm=use_llm, engine=engine)
+        if request.headers.get("content-type", "").startswith("application/json"):
+            body_params = await request.json()
+    except Exception:
+        pass
+
+    eng = body_params.get("engine") or engine
+    api_key = body_params.get("api_key")
+    use_llm_flag = body_params.get("use_llm", use_llm)
+    topic_hint = body_params.get("topic_hint")
+    glossary_raw = body_params.get("glossary") or []
+    glossary = [(g[0], g[1]) for g in glossary_raw if isinstance(g, (list, tuple)) and len(g) >= 2]
+    enable_visual = bool(body_params.get("enable_visual_context"))
+    visual_engine = body_params.get("visual_engine")
+    visual_model = body_params.get("visual_model")
+    visual_api_key = body_params.get("visual_api_key")
+
+    try:
+        return dubbing_svc.translate_project(
+            project_id,
+            use_llm=use_llm_flag, engine=eng, api_key=api_key,
+            topic_hint=topic_hint, glossary=glossary,
+            enable_visual_context=enable_visual,
+            visual_engine=visual_engine,
+            visual_model=visual_model,
+            visual_api_key=visual_api_key,
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:

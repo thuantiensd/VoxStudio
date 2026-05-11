@@ -105,9 +105,14 @@ def build_speaker_analysis_prompt(
     segments: list[dict],
     source_lang: str,
     film_genre: Optional[str] = None,
+    visual_context: Optional[dict] = None,
     max_lines: int = 200,
 ) -> dict:
-    """Pass-0: phân tích quan hệ giữa SPEAKER_XX → JSON map."""
+    """Pass-0: phân tích quan hệ giữa SPEAKER_XX → JSON map.
+
+    Nếu có visual_context (từ VLM Pass-(-1)) → inject làm GROUND TRUTH.
+    LLM dùng để confirm gender + role thay vì đoán từ text alone.
+    """
     src_name = _lang_display_name(source_lang)
     sample_lines = []
     for seg in segments[:max_lines]:
@@ -121,8 +126,14 @@ def build_speaker_analysis_prompt(
     if film_genre and film_genre != "auto":
         genre_hint = f"\n• Thể loại detect: {film_genre} → pick register phù hợp.\n"
 
+    # Visual context block (nếu có) — đặt lên đầu prompt làm anchor mạnh
+    visual_block = ""
+    if visual_context:
+        visual_block = "\n" + format_visual_context_for_audio_analyze(visual_context) + "\n"
+
     system = f"""Bạn là chuyên gia phân tích kịch bản phim. Đọc hội thoại từ {src_name}
 và XÁC ĐỊNH QUAN HỆ giữa các SPEAKER.
+{visual_block}
 
 NHIỆM VỤ với MỖI speaker:
 • gender (male/female/unsure)
@@ -472,7 +483,7 @@ Mỗi line có anchor `[Role: 我="X" | → Target: 你="Y"]`. Ý nghĩa:
    • 你/你们 trong gốc → DÙNG "Y" (đã pre-resolve)
    • 他/她/它 trong gốc → DÙNG third_person_label của người đó (KHÔNG phải vocative)
 
-Nếu anchor `你 ∈ {role_a="X"; role_b="Y"}` (chưa resolve được) → LLM tự
+Nếu anchor `你 ∈ {{role_a="X"; role_b="Y"}}` (chưa resolve được) → LLM tự
 chọn theo context (xem vocative trong text, hoặc câu trước/sau).
 
 ❌ SAI HAY GẶP NHẤT — ĐẢO 我/你:
@@ -739,6 +750,124 @@ def parse_editor_response(response_text: str, n_items: int) -> list[dict]:
                 "emotion": emotion,
             }
     return results
+
+
+# ═══════════════════════════════════════════════════════════════
+# Pass (-1): VISUAL CONTEXT ANALYSIS (VLM)
+# Đọc keyframe video → JSON {genre, register, characters, relationships}.
+# Output feed Pass-0 audio analyze làm ground truth → giảm đoán mò.
+# ═══════════════════════════════════════════════════════════════
+
+def build_visual_context_prompt(
+    *,
+    source_lang: str = "auto",
+    n_frames: int = 8,
+) -> str:
+    """Prompt cho VLM phân tích keyframe video → JSON context.
+
+    KHÔNG có user message — VLM nhận frames + system prompt này.
+    Returns raw prompt string (caller bundle với images).
+    """
+    src_name = _lang_display_name(source_lang)
+    return f"""Bạn là chuyên gia phân tích phim. Xem {n_frames} keyframe từ video
+(ngôn ngữ gốc: {src_name}) và XÁC ĐỊNH BỐI CẢNH để dub.
+
+NHIỆM VỤ:
+1. Genre + register (cổ trang/hiện đại/business/family/action/romcom...)
+2. Danh sách nhân vật chính (mô tả ngắn, tuổi ước lượng, gender từ MẶT)
+3. Quan hệ giữa nhân vật (cặp đôi/cha con/đồng nghiệp/...)
+4. Trang phục/bối cảnh → register (formal/casual/cổ trang/...)
+
+OUTPUT JSON DUY NHẤT (không markdown, không giải thích):
+{{
+  "genre": "modern_drama / cổ trang / business / family / action / romcom / ...",
+  "register": "modern / cổ trang / business / casual / formal",
+  "scene_summary": "1-2 câu mô tả bối cảnh + ai có mặt",
+  "characters": [
+    {{
+      "id": "char_01",
+      "description": "Phụ nữ ~30, áo trắng",
+      "gender": "female",
+      "estimated_age": "30s",
+      "likely_role": "vợ / mẹ / cô / chị / ...",
+      "appears_in_frames": [1, 3, 5]
+    }}
+  ],
+  "relationships": [
+    "char_01 và char_02 = vợ chồng (cảnh ôm/ăn cơm chung)",
+    "char_03 = con của char_01 và char_02 (bé trai ~6 tuổi)"
+  ]
+}}
+
+QUY TẮC:
+• Gender đoán từ KHUÔN MẶT, KHÔNG đoán từ trang phục.
+• Role là HYPOTHESIS — backend sẽ kết hợp với audio diarization để confirm.
+• Nếu không đủ tự tin → gender = "unsure", role = "unknown".
+• KHÔNG bịa scene không thấy trong frame.
+"""
+
+
+def parse_visual_context(response_text: str) -> dict:
+    """Parse JSON từ VLM. Returns {} nếu fail."""
+    parsed = _parse_json_robust(response_text)
+    if not isinstance(parsed, dict):
+        return {}
+
+    characters = []
+    for c in parsed.get("characters") or []:
+        if not isinstance(c, dict):
+            continue
+        g = (c.get("gender") or "unsure").lower().strip()
+        if g not in {"male", "female", "unsure", "unknown"}:
+            g = "unsure"
+        characters.append({
+            "id": (c.get("id") or "").strip()[:20],
+            "description": (c.get("description") or "").strip()[:200],
+            "gender": g,
+            "estimated_age": (c.get("estimated_age") or "").strip()[:20],
+            "likely_role": (c.get("likely_role") or "").strip()[:40],
+            "appears_in_frames": c.get("appears_in_frames") or [],
+        })
+
+    rels = parsed.get("relationships") or []
+    if isinstance(rels, list):
+        rels = [str(r).strip()[:200] for r in rels if r]
+    else:
+        rels = []
+
+    return {
+        "genre": (parsed.get("genre") or "").strip()[:40],
+        "register": (parsed.get("register") or "").strip()[:40],
+        "scene_summary": (parsed.get("scene_summary") or "").strip()[:400],
+        "characters": characters,
+        "relationships": rels,
+    }
+
+
+def format_visual_context_for_audio_analyze(visual_ctx: dict) -> str:
+    """Format visual context thành text block inject vào Pass-0 audio analyze
+    prompt. Pass-0 LLM sẽ dùng làm ground truth khi link với diarization.
+    """
+    if not visual_ctx:
+        return ""
+    lines = ["📹 VISUAL CONTEXT (từ VLM phân tích keyframe video — ground truth):"]
+    if visual_ctx.get("genre"):
+        lines.append(f"   Genre: {visual_ctx['genre']}")
+    if visual_ctx.get("register"):
+        lines.append(f"   Register: {visual_ctx['register']}")
+    if visual_ctx.get("scene_summary"):
+        lines.append(f"   Scene: {visual_ctx['scene_summary']}")
+    if visual_ctx.get("characters"):
+        lines.append("   Nhân vật detected:")
+        for c in visual_ctx["characters"]:
+            desc = f"     • {c['id']}: {c['description']} — gender={c['gender']}, role≈{c['likely_role']}"
+            lines.append(desc)
+    if visual_ctx.get("relationships"):
+        lines.append("   Quan hệ detected:")
+        for r in visual_ctx["relationships"]:
+            lines.append(f"     • {r}")
+    lines.append("⚠️ DÙNG visual context này để CONFIRM gender + role khi link SPEAKER_XX với character.")
+    return "\n".join(lines)
 
 
 # ═══════════════════════════════════════════════════════════════
