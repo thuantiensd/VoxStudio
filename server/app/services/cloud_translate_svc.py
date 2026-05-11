@@ -275,19 +275,19 @@ def _sanitize_api_key(api_key: str, provider: str) -> str:
     return cleaned
 
 
-def _openai(texts: list[str], target: str, source: str, api_key: str,
-            model: str | None = None,
-            topic_hint: str | None = None,
-            glossary_block: str | None = None,
-            segments_meta: list[dict] | None = None,
-            speaker_genders: dict | None = None,
-            film_genre: str | None = None) -> list[str]:
-    """OpenAI translate với unified prompt CÙNG chất lượng Gemini.
+def _translate_3pass(engine: str, texts: list[str], target: str, source: str,
+                       api_key: str, model: str | None,
+                       topic_hint: str | None, glossary_block: str | None,
+                       segments_meta: list[dict] | None,
+                       film_genre: str | None) -> list[str]:
+    """3-pass translation cho OpenAI/Claude qua HTTP.
 
-    2-pass: Pass-1 analyze speaker relationships → anchor cho Pass-2.
+    Pass-0: analyze speakers (skip nếu 1 speaker)
+    Pass-1: literal translator
+    Pass-2: editor polish
     """
-    api_key = _sanitize_api_key(api_key, "OpenAI")
-    model = model or DEFAULT_MODELS["openai"]
+    from app.services.llm import run_analyze, run_translate, run_edit
+    from app.services.llm.prompts import _max_chars
 
     if not segments_meta:
         segments_meta = [
@@ -296,67 +296,79 @@ def _openai(texts: list[str], target: str, source: str, api_key: str,
             for i, t in enumerate(texts)
         ]
 
-    from app.services.llm.prompts import (
-        build_translation_prompt,
-        parse_translation_response,
-    )
-
-    # Pass-1: speaker analysis (chỉ chạy khi multi-speaker)
-    speaker_relationships: dict = {}
+    # Pass-0: speaker analysis
+    relationships: dict = {}
     try:
-        from app.services.llm import analyze_speakers
-        speaker_relationships = analyze_speakers(
-            engine="openai",
-            segments=segments_meta,
-            source_lang=source,
-            api_key=api_key,
-            model=model,
+        relationships = run_analyze(
+            engine=engine, segments=segments_meta, source_lang=source,
+            api_key=api_key, model=model, film_genre=film_genre,
+        )
+        # Backward-compat: extract gender → cache cho dubbing_svc đọc lại
+        if relationships and relationships.get("speakers"):
+            genders = {
+                spk_id: {"gender": info.get("gender", "unsure"),
+                          "evidence": info.get("evidence", "")}
+                for spk_id, info in relationships["speakers"].items()
+            }
+            _store_llm_genders(engine, genders)
+    except Exception as e:
+        logger.warning("%s Pass-0 fail: %s", engine, e)
+
+    # Pass-1: literal translate
+    try:
+        literal = run_translate(
+            engine=engine, segments=segments_meta,
+            target_lang=target, source_lang=source,
+            speaker_relationships=relationships,
+            topic_hint=topic_hint, glossary_block=glossary_block,
             film_genre=film_genre,
+            api_key=api_key, model=model,
         )
     except Exception as e:
-        logger.warning("OpenAI Pass-1 fail: %s", e)
+        logger.error("%s Pass-1 fail: %s", engine, e)
+        raise ValueError(f"{engine} lỗi: {e}") from e
 
-    prompt = build_translation_prompt(
-        segments=segments_meta,
-        target_lang=target,
-        source_lang=source,
-        topic_hint=topic_hint,
-        glossary_block=glossary_block,
-        speaker_genders=speaker_genders,
-        speaker_relationships=speaker_relationships,
-        film_genre=film_genre,
-        engine="openai",
-    )
-
-    payload = {
-        "model": model,
-        "temperature": 0.2,
-        "response_format": {"type": "json_object"},
-        "messages": [
-            {"role": "system", "content": prompt["system"]},
-            {"role": "user", "content": prompt["user"]},
-        ],
-    }
-    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
-    r = _post_with_retry("openai", "https://api.openai.com/v1/chat/completions",
-                          json_body=payload, headers=headers)
+    # Pass-2: editor polish
+    polished = literal
     try:
-        raw = r.json()["choices"][0]["message"]["content"]
-    except (KeyError, IndexError):
-        raise ValueError("OpenAI trả về dữ liệu không đúng định dạng. Vui lòng thử lại.")
+        items = []
+        for i, seg in enumerate(segments_meta):
+            lit_text = literal[i].get("translated_text", "") if i < len(literal) else ""
+            items.append({
+                "index": seg["index"],
+                "speaker": seg.get("speaker"),
+                "original": seg["original_text"],
+                "literal": lit_text,
+                "max_chars": _max_chars(seg),
+            })
+        polished_raw = run_edit(
+            engine=engine, items=items,
+            target_lang=target, source_lang=source,
+            speaker_relationships=relationships,
+            api_key=api_key, model=model,
+        )
+        for i, p in enumerate(polished_raw):
+            if p.get("translated_text"):
+                polished[i] = p
+    except Exception as e:
+        logger.warning("%s Pass-2 (editor) fail: %s — dùng literal", engine, e)
 
-    # Parse với unified parser (handle markdown fence, partial JSON, speaker_genders)
-    parsed, llm_genders = parse_translation_response(raw, len(texts))
-    out = [item["translated_text"] for item in parsed]
-    if not any(out):
-        # Last-resort fallback (no speaker_genders)
-        out = _parse_numbered(raw, len(texts))
-    # Store LLM-inferred genders trong module-level cache cho caller đọc
-    _store_llm_genders("openai", llm_genders)
-    return out
+    return [p.get("translated_text", "") for p in polished]
 
 
-# ── Anthropic Claude ───────────────────────────────────────
+def _openai(texts: list[str], target: str, source: str, api_key: str,
+            model: str | None = None,
+            topic_hint: str | None = None,
+            glossary_block: str | None = None,
+            segments_meta: list[dict] | None = None,
+            speaker_genders: dict | None = None,
+            film_genre: str | None = None) -> list[str]:
+    """OpenAI translate — 3-pass."""
+    api_key = _sanitize_api_key(api_key, "OpenAI")
+    model = model or DEFAULT_MODELS["openai"]
+    return _translate_3pass("openai", texts, target, source, api_key, model,
+                              topic_hint, glossary_block, segments_meta, film_genre)
+
 
 def _claude(texts: list[str], target: str, source: str, api_key: str,
             model: str | None = None,
@@ -365,110 +377,11 @@ def _claude(texts: list[str], target: str, source: str, api_key: str,
             segments_meta: list[dict] | None = None,
             speaker_genders: dict | None = None,
             film_genre: str | None = None) -> list[str]:
-    """Claude translate với unified prompt + 2-pass (analyze → translate)."""
+    """Claude translate — 3-pass."""
     api_key = _sanitize_api_key(api_key, "Claude")
     model = model or DEFAULT_MODELS["claude"]
-    if not segments_meta:
-        segments_meta = [
-            {"index": i, "start": float(i * 3), "end": float((i + 1) * 3),
-             "original_text": t}
-            for i, t in enumerate(texts)
-        ]
-    from app.services.llm.prompts import (
-        build_translation_prompt,
-        parse_translation_response,
-    )
-
-    # Pass-1: speaker analysis (chỉ chạy khi multi-speaker)
-    speaker_relationships: dict = {}
-    try:
-        from app.services.llm import analyze_speakers
-        speaker_relationships = analyze_speakers(
-            engine="claude",
-            segments=segments_meta,
-            source_lang=source,
-            api_key=api_key,
-            model=model,
-            film_genre=film_genre,
-        )
-    except Exception as e:
-        logger.warning("Claude Pass-1 fail: %s", e)
-
-    prompt = build_translation_prompt(
-        segments=segments_meta,
-        target_lang=target,
-        source_lang=source,
-        topic_hint=topic_hint,
-        glossary_block=glossary_block,
-        speaker_genders=speaker_genders,
-        speaker_relationships=speaker_relationships,
-        film_genre=film_genre,
-        engine="claude",
-    )
-    payload = {
-        "model": model,
-        "max_tokens": 4096,
-        "temperature": 0.2,
-        "system": prompt["system"],
-        "messages": [{"role": "user", "content": prompt["user"]}],
-    }
-    headers = {
-        "x-api-key": api_key,
-        "anthropic-version": "2023-06-01",
-        "Content-Type": "application/json",
-    }
-    r = _post_with_retry("claude", "https://api.anthropic.com/v1/messages",
-                          json_body=payload, headers=headers)
-    try:
-        raw = r.json()["content"][0]["text"]
-    except (KeyError, IndexError):
-        raise ValueError("Claude trả về dữ liệu không đúng định dạng. Vui lòng thử lại.")
-    parsed, llm_genders = parse_translation_response(raw, len(texts))
-    out = [item["translated_text"] for item in parsed]
-    if not any(out):
-        out = _parse_numbered(raw, len(texts))
-    _store_llm_genders("claude", llm_genders)
-    return out
-
-
-def _claude_old_unused(texts: list[str], target: str, source: str, api_key: str,
-            model: str | None = None,
-            topic_hint: str | None = None,
-            glossary_block: str | None = None) -> list[str]:
-    """DEPRECATED — kept for reference."""
-    model = model or DEFAULT_MODELS["claude"]
-    tgt_name = _lang_display(target)
-    src_name = _lang_display(source) if source and source.lower() != "auto" else "auto-detected source"
-    numbered = "\n".join(f"{i+1}. {t}" for i, t in enumerate(texts))
-    sys_extras = []
-    if topic_hint: sys_extras.append(topic_hint)
-    if glossary_block: sys_extras.append(glossary_block)
-    extra_block = ("\n\n" + "\n\n".join(sys_extras)) if sys_extras else ""
-    system = (
-        f"You are a precise {tgt_name} translator. Translate numbered {src_name} lines "
-        f"into natural, idiomatic {tgt_name}. Output ONLY the translated lines in format "
-        f"'N. <text>'. No preamble."
-        f"{extra_block}"
-    )
-    payload = {
-        "model": model,
-        "max_tokens": 4096,
-        "temperature": 0.2,
-        "system": system,
-        "messages": [{"role": "user", "content": numbered}],
-    }
-    headers = {
-        "x-api-key": api_key,
-        "anthropic-version": "2023-06-01",
-        "Content-Type": "application/json",
-    }
-    r = _post_with_retry("claude", "https://api.anthropic.com/v1/messages",
-                          json_body=payload, headers=headers)
-    try:
-        raw = r.json()["content"][0]["text"]
-    except (KeyError, IndexError):
-        raise ValueError("Claude trả về dữ liệu không đúng định dạng. Vui lòng thử lại.")
-    return _parse_numbered(raw, len(texts))
+    return _translate_3pass("claude", texts, target, source, api_key, model,
+                              topic_hint, glossary_block, segments_meta, film_genre)
 
 
 # ── Helpers ────────────────────────────────────────────────

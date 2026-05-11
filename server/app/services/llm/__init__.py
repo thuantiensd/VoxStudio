@@ -1,11 +1,9 @@
-"""LLM provider utilities + genre/register detection.
-
-Các module này cải thiện chất lượng dịch cho từng provider khác nhau
-(Gemini/OpenAI/Claude) + auto-detect register cho phim cổ trang vs hiện đại.
+"""LLM dịch phim — kiến trúc 3-pass (analyze → translate → edit).
 
 Public API:
-  - detect_genre(text): auto-detect genre từ original_text (zh/ja/ko)
-  - get_genre_prompt_block(genre): prompt block tuỳ chỉnh per genre
+  - detect_genre / get_genre_prompt_block: register detection
+  - cached_translate_segments: cache layer cho translate
+  - run_analyze / run_translate / run_edit: 3-pass dispatchers
 """
 from .genre_detector import (
     detect_genre,
@@ -17,7 +15,14 @@ from .cache import (
     cached_translate_segments,
     TranslationCache,
 )
-from .speaker_analyzer import analyze_speakers
+from .llm_runner import (
+    run_analyze,
+    run_translate,
+    run_edit,
+)
+
+# Backward-compat alias — code cũ vẫn gọi analyze_speakers
+analyze_speakers = run_analyze
 
 __all__ = [
     "detect_genre",
@@ -26,5 +31,8 @@ __all__ = [
     "get_translation_cache",
     "cached_translate_segments",
     "TranslationCache",
-    "analyze_speakers",
+    "run_analyze",
+    "run_translate",
+    "run_edit",
+    "analyze_speakers",  # alias
 ]

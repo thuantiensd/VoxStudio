@@ -12,7 +12,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app.services.llm.prompts import (
     build_speaker_analysis_prompt,
-    build_translation_prompt,
+    build_translator_prompt,
+    build_editor_prompt,
+    _max_chars,
 )
 
 SAMPLE_SEGMENTS = [
@@ -57,10 +59,34 @@ def main():
 
     print("\n\n")
     print("=" * 72)
-    print(" PASS-2: TRANSLATION PROMPT (với speaker_relationships từ Pass-1)")
+    print(" PASS-1: TRANSLATOR PROMPT (literal nhưng pronoun đúng)")
     print("=" * 72)
-    p2 = build_translation_prompt(
+    p1 = build_translator_prompt(
         segments=SAMPLE_SEGMENTS,
+        target_lang="vi",
+        source_lang="zh",
+        speaker_relationships=SAMPLE_RELATIONSHIPS,
+    )
+    print("\n[SYSTEM]")
+    print(p1["system"])
+    print("\n[USER]")
+    print(p1["user"])
+
+    print("\n\n")
+    print("=" * 72)
+    print(" PASS-2: EDITOR PROMPT (polish literal → VTV film style)")
+    print("=" * 72)
+    items = []
+    for seg in SAMPLE_SEGMENTS:
+        items.append({
+            "index": seg["index"],
+            "speaker": seg.get("speaker"),
+            "original": seg["original_text"],
+            "literal": "<literal translation từ Pass-1>",
+            "max_chars": _max_chars(seg),
+        })
+    p2 = build_editor_prompt(
+        items=items,
         target_lang="vi",
         source_lang="zh",
         speaker_relationships=SAMPLE_RELATIONSHIPS,
