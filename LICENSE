@@ -1,0 +1,203 @@
+VoxStudio End-User License Agreement (EULA)
+
+Copyright © 2026 Tiến Thuận (VoxStudio). All rights reserved.
+
+This End-User License Agreement ("Agreement") is a legal contract between
+you ("Licensee" or "You") and Tiến Thuận, doing business as VoxStudio
+("Licensor", "We", "Us"), governing
+your use of the VoxStudio software product, including the desktop
+application, server backend, web portal, admin dashboard, and any
+accompanying documentation (collectively, the "Software").
+
+By installing, copying, or otherwise using the Software, you agree to be
+bound by the terms of this Agreement. If you do not agree, do not
+install or use the Software.
+
+────────────────────────────────────────────────────────────────────────
+1. GRANT OF LICENSE
+────────────────────────────────────────────────────────────────────────
+
+Subject to your compliance with this Agreement and payment of applicable
+fees, VoxStudio grants you a limited, non-exclusive, non-transferable,
+revocable license to:
+
+  (a) Install and use the Software on the number of devices permitted
+      by your purchased plan (e.g. Pro: 2 devices, Studio: 5 devices,
+      Lifetime: 3 devices), as activated via a valid license key.
+
+  (b) Use the Software solely for your internal business or personal
+      purposes.
+
+  (c) Process content (videos, audio, scripts) that you own or have
+      legal rights to use.
+
+────────────────────────────────────────────────────────────────────────
+2. RESTRICTIONS
+────────────────────────────────────────────────────────────────────────
+
+You shall NOT, and shall not permit any third party to:
+
+  (a) Copy, modify, adapt, translate, or create derivative works of the
+      Software, in whole or in part, except as expressly permitted.
+
+  (b) Reverse engineer, decompile, disassemble, or otherwise attempt to
+      derive the source code of the Software, except to the extent such
+      activity is expressly permitted by applicable law.
+
+  (c) Rent, lease, sublicense, distribute, sell, resell, transfer, or
+      assign the Software or any license keys to any third party.
+
+  (d) Remove, alter, or obscure any proprietary notices, labels, or
+      marks on or in the Software.
+
+  (e) Use the Software to develop a competing product, or to clone,
+      replicate, or substantially imitate the features of the Software.
+
+  (f) Circumvent, disable, or otherwise interfere with the Software's
+      license validation, activation, or other security features.
+
+  (g) Use the Software to generate, process, or distribute content that
+      is unlawful, defamatory, infringing, or violates the rights of
+      any third party.
+
+  (h) Use the Software to create deepfakes, voice clones, or synthetic
+      media of real persons without their explicit, documented consent.
+
+────────────────────────────────────────────────────────────────────────
+3. LICENSE KEY & ACTIVATION
+────────────────────────────────────────────────────────────────────────
+
+Your license is enforced via a license key activation system. The
+license key is bound to your device(s) and account. You agree:
+
+  (a) Not to share your license key publicly or with unauthorized
+      parties.
+  (b) That license keys may be revoked for violation of this Agreement
+      or for fraudulent acquisition.
+  (c) That offline grace periods are provided for convenience but the
+      Software may require periodic online re-validation.
+
+────────────────────────────────────────────────────────────────────────
+4. OWNERSHIP & INTELLECTUAL PROPERTY
+────────────────────────────────────────────────────────────────────────
+
+The Software is licensed, not sold. VoxStudio retains all right, title,
+and interest in and to the Software, including all intellectual property
+rights. Except for the limited license granted in Section 1, no rights
+are granted to you by implication, estoppel, or otherwise.
+
+Your content (videos, audio, scripts you process with the Software)
+remains your property. VoxStudio claims no ownership over user-generated
+content.
+
+────────────────────────────────────────────────────────────────────────
+5. THIRD-PARTY COMPONENTS
+────────────────────────────────────────────────────────────────────────
+
+The Software incorporates third-party open-source components, including
+but not limited to:
+
+  • voxstudio-engine (TTS engine, derived from OmniVoice by Han Zhu /
+    k2-fsa) — licensed under Apache License 2.0. See:
+    voxstudio-engine/LICENSE
+  • Whisper / Faster-Whisper (OpenAI) — MIT License
+  • FFmpeg — LGPL/GPL components, redistributed under their respective
+    licenses
+  • Other open-source libraries — see desktop/package.json,
+    server/requirements.txt for full attribution
+
+Such components are governed by their own licenses, which are
+incorporated by reference. In case of conflict between this Agreement
+and a third-party license for that specific component, the third-party
+license governs the use of that component.
+
+────────────────────────────────────────────────────────────────────────
+6. UPDATES & SUPPORT
+────────────────────────────────────────────────────────────────────────
+
+VoxStudio may, but is not obligated to, provide updates, bug fixes, or
+new features. The terms of this Agreement apply to all updates unless
+accompanied by a separate license.
+
+────────────────────────────────────────────────────────────────────────
+7. DATA & PRIVACY
+────────────────────────────────────────────────────────────────────────
+
+Your use of the Software is also governed by the VoxStudio Privacy
+Policy (see docs/PRIVACY_POLICY.md or https://voxstudio.vn/privacy).
+The Software is local-first: most processing occurs on your device.
+License activation, account authentication, and certain cloud features
+require network communication with VoxStudio servers.
+
+────────────────────────────────────────────────────────────────────────
+8. TERMINATION
+────────────────────────────────────────────────────────────────────────
+
+This Agreement is effective until terminated. It will terminate
+automatically if you fail to comply with any term. VoxStudio may also
+revoke your license for violation of this Agreement, fraudulent
+acquisition, or chargeback. Upon termination:
+
+  (a) The license granted in Section 1 immediately ceases.
+  (b) You must uninstall and destroy all copies of the Software.
+  (c) Sections 2, 4, 9, 10, and 11 survive termination.
+
+────────────────────────────────────────────────────────────────────────
+9. DISCLAIMER OF WARRANTIES
+────────────────────────────────────────────────────────────────────────
+
+THE SOFTWARE IS PROVIDED "AS IS" AND "AS AVAILABLE", WITHOUT WARRANTY
+OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE
+WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE,
+NON-INFRINGEMENT, OR THAT THE SOFTWARE WILL OPERATE UNINTERRUPTED OR
+ERROR-FREE.
+
+You assume full responsibility for the selection, use, and results
+obtained from the Software.
+
+────────────────────────────────────────────────────────────────────────
+10. LIMITATION OF LIABILITY
+────────────────────────────────────────────────────────────────────────
+
+TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, IN NO EVENT SHALL
+VOXSTUDIO BE LIABLE FOR ANY INDIRECT, INCIDENTAL, SPECIAL,
+CONSEQUENTIAL, OR PUNITIVE DAMAGES, INCLUDING WITHOUT LIMITATION LOSS
+OF PROFITS, DATA, OR USE, ARISING OUT OF OR IN CONNECTION WITH THIS
+AGREEMENT OR THE SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH
+DAMAGES.
+
+VoxStudio's total cumulative liability under this Agreement shall not
+exceed the amount paid by you for the Software during the twelve (12)
+months preceding the event giving rise to the claim.
+
+────────────────────────────────────────────────────────────────────────
+11. GOVERNING LAW & DISPUTES
+────────────────────────────────────────────────────────────────────────
+
+This Agreement is governed by the laws of the Socialist Republic of
+Vietnam, without regard to its conflict-of-laws principles. Any dispute
+arising out of or relating to this Agreement shall be resolved in the
+courts located in Vietnam, except where prohibited by applicable law.
+
+────────────────────────────────────────────────────────────────────────
+12. ENTIRE AGREEMENT
+────────────────────────────────────────────────────────────────────────
+
+This Agreement, together with the VoxStudio Terms of Service and
+Privacy Policy, constitutes the entire agreement between you and
+VoxStudio regarding the Software. Any modifications must be in writing
+and signed by an authorized VoxStudio representative.
+
+If any provision of this Agreement is held to be unenforceable, the
+remaining provisions shall continue in full force and effect.
+
+────────────────────────────────────────────────────────────────────────
+13. CONTACT
+────────────────────────────────────────────────────────────────────────
+
+Questions about this Agreement should be directed to:
+  Email:   voxstudio.vn@gmail.com
+  Website: https://voxstudio.vn
+  Docs:    docs/TERMS_OF_SERVICE.md, docs/PRIVACY_POLICY.md
+
+Last updated: 2026-05-05

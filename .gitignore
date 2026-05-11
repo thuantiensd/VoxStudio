@@ -20,6 +20,8 @@ server/*.wav
 server/*.mp3
 server/*.db
 server/*.db-journal
+server/voxstudio.db.backup*
+server/*.db.backup*
 
 # Node / Frontend
 web/node_modules/
