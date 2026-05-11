@@ -158,7 +158,11 @@ NHIỆM VỤ:
    • gender (male/female/unsure)
    • role trong scene (chồng, vợ, cha, mẹ, con, sếp, bạn, đồng nghiệp...)
    • cách họ tự xưng (anh/em/tôi/ba/mẹ/con/ta/thiếp...)
-   • cách họ gọi MỖI speaker khác (anh/em/con/ba/mẹ/ngươi...)
+   • cách họ gọi MỖI speaker khác — VOCATIVE, khi nói TRỰC TIẾP (你)
+   • third_person_label — khi người KHÁC nhắc tới speaker này ở NGÔI 3 (他/她)
+     VD: con trai = "con" / "thằng bé" / "nó"
+         chồng = "anh ấy" / "ông xã"
+         sếp = "ông ấy" / "sếp"
 3) Identify scene context: vợ chồng cãi nhau? cha con tâm sự? sếp họp?
 
 ═══════════════════════════════════════════════════════════════
@@ -198,6 +202,7 @@ OUTPUT: JSON object DUY NHẤT (không markdown, không giải thích):
       "addresses": {{
         "SPEAKER_01": "em"
       }},
+      "third_person_label": "anh ấy",
       "evidence": "Line 3: tự xưng 'anh', gọi SPEAKER_01 'em' nhiều lần"
     }},
     "SPEAKER_01": {{
@@ -207,16 +212,33 @@ OUTPUT: JSON object DUY NHẤT (không markdown, không giải thích):
       "addresses": {{
         "SPEAKER_00": "anh"
       }},
+      "third_person_label": "cô ấy",
       "evidence": "Line 5: 'em không muốn cãi nữa anh'"
+    }},
+    "SPEAKER_02": {{
+      "gender": "male",
+      "role": "con trai",
+      "self_pronoun": "con",
+      "addresses": {{
+        "SPEAKER_00": "mẹ",
+        "SPEAKER_01": "ba"
+      }},
+      "third_person_label": "con",
+      "evidence": "Line 7: 'ba ơi con muốn chơi với ba'"
     }}
   }}
 }}
 
 QUY TẮC:
 • Mỗi SPEAKER trong transcript phải có 1 entry.
-• "self_pronoun" và "addresses[X]" PHẢI là tiếng Việt (kể cả source là Trung).
+• "self_pronoun", "addresses[X]", "third_person_label" PHẢI là tiếng Việt.
+• "addresses[X]" = cách gọi TRỰC TIẾP (vocative khi nói VỚI X).
+• "third_person_label" = cách nhắc khi nói VỀ speaker này cho người khác.
+  - Con (nhỏ) → "con" / "thằng bé" / "nó"
+  - Người ngang vai → "anh ấy" / "cô ấy" / "chị ấy"
+  - Người lớn tuổi/cấp trên → "ông ấy" / "bà ấy" / "sếp"
 • Nếu KHÔNG ĐỦ evidence → gender = "unsure", role = "unknown",
-  self_pronoun = "tôi", addresses = {{}}. KHÔNG được bịa.
+  self_pronoun = "tôi", addresses = {{}}, third_person_label = "người ấy".
 • "evidence" phải trỏ tới line cụ thể (không nói chung chung).
 """
 
@@ -277,6 +299,7 @@ def parse_speaker_analysis(response_text: str) -> dict:
             "role": (info.get("role") or "unknown").strip()[:40],
             "self_pronoun": (info.get("self_pronoun") or "tôi").strip()[:20],
             "addresses": {k: str(v).strip()[:20] for k, v in addr.items() if v},
+            "third_person_label": (info.get("third_person_label") or "").strip()[:30],
             "evidence": (info.get("evidence") or "").strip()[:200],
         }
 
@@ -310,15 +333,20 @@ def _format_speaker_anchor_block(relationships: dict) -> str:
         role = info.get("role", "unknown")
         self_p = info.get("self_pronoun", "tôi")
         addr = info.get("addresses", {})
+        tpl = info.get("third_person_label", "")
         parts = [f'   • {spk_id} ({role}, {g}): tự xưng "{self_p}"']
         if addr:
-            addr_str = ", ".join(f'gọi {k} là "{v}"' for k, v in addr.items())
+            addr_str = ", ".join(f'(vocative) gọi {k} là "{v}"' for k, v in addr.items())
             parts.append(addr_str)
+        if tpl:
+            parts.append(f'(ngôi 3) khi nhắc tới → "{tpl}"')
         lines.append(" — ".join(parts))
 
     lines.append("")
     lines.append("⚠️ TUYỆT ĐỐI dùng đúng cách xưng hô trên cho MỖI speaker.")
-    lines.append("⚠️ KHÔNG được tự ý đổi xưng hô giữa scene.")
+    lines.append("⚠️ KHÔNG đổi xưng hô giữa scene.")
+    lines.append("⚠️ Khi nói VỚI người này (你): dùng vocative (addresses).")
+    lines.append("⚠️ Khi nói VỀ người này cho người khác (他/她): dùng third_person_label.")
     lines.append("═══════════════════════════════════════════════════════════════")
     return "\n".join(lines)
 
@@ -432,74 +460,130 @@ def build_translation_prompt(
     if has_relationships:
         speaker_anchor_block = "\n" + _format_speaker_anchor_block(speaker_relationships) + "\n"
 
-    # System message — KHÔNG ĐỔI giữa engines, mọi rule chung ở đây
+    # System message — đặt 3 LỖI HAY GẶP lên đầu (sau SPEAKER MAP) vì
+    # đây là chỗ LLM hay sai nhất. Ví dụ cụ thể từ test thực tế.
     system = f"""Bạn là dịch giả phim chuyên nghiệp 10+ năm cho VTV/HTV.
 NHIỆM VỤ: dịch lời thoại từ {src_name} → {tgt_name} cho lồng tiếng/phụ đề.
 {speaker_anchor_block}
 ═══════════════════════════════════════════════════════════════
-QUY TRÌNH BẮT BUỘC TUẦN TỰ:
+🚨 3 LỖI XƯNG HÔ HAY GẶP — TUYỆT ĐỐI TRÁNH
+═══════════════════════════════════════════════════════════════
 
-BƯỚC 0 — ĐỌC HẾT SCENE TRƯỚC KHI DỊCH:
-   • Identify register (cổ trang/hiện đại/action/romcom)
-   • Identify quan hệ giữa speaker (vợ chồng / mẹ-con / sếp-nhân viên / bạn bè?)
-   • Tone (trang trọng/thân mật/căng thẳng/hài hước)
-   • Plan pronoun nhất quán cho mỗi SPKx XUYÊN SUỐT scene
+🔴 LỖI #1 — DỊCH VOCATIVE-TAIL LITERAL (cuối câu gọi "chồng/vợ/bé")
 
-BƯỚC 1 — PICK PRONOUN MATRIX (cực quan trọng):
+   Tiếng Trung có thói quen ĐẶT từ xưng hô CUỐI CÂU (vocative tail):
+   "你今天加班吗 老公?" — chữ "老公" cuối là cách VỢ gọi CHỒNG.
+
+   ❌ SAI: "Hôm nay anh tăng ca à, chồng?" (dịch chữ "老公" thành "chồng")
+   ✅ ĐÚNG: "Hôm nay anh tăng ca à, anh?" (dùng pronoun từ SPEAKER MAP)
+            HOẶC: "Hôm nay anh tăng ca à?" (bỏ tail nếu thừa)
+
+   BẢNG MAPPING vocative-tail (Trung → Việt):
+   • 老公 → "anh" / "anh ơi" (vợ gọi chồng)
+   • 老婆 → "em" / "em ơi" (chồng gọi vợ)
+   • 亲爱的 → "anh"/"em"/"cưng" (theo SPEAKER MAP)
+   • 宝贝 (cha/mẹ gọi con) → "con yêu"/"cục cưng"/"con"
+   • 宝贝 (yêu nhau) → "em yêu"/"anh yêu"
+   • 哥/哥哥 (gọi anh) → "anh"
+   • 姐/姐姐 (gọi chị) → "chị"
+   • 妈/娘 → "mẹ"/"má"
+   • 爹/爸 → "bố"/"ba"
+
+🔴 LỖI #2 — 他/她 (ĐẠI TỪ THỨ 3) DÙNG SAI NHƯ VOCATIVE
+
+   他/她/它/他们 = ĐẠI TỪ NGÔI 3 (he/she/it/they) — khác hoàn toàn
+   với 你/你们 = NGÔI 2 (you).
+
+   Khi vợ NÓI VỚI chồng VỀ CON: "他想你" — "他" là NGÔI 3 (chỉ con).
+   SPEAKER MAP nói "vợ gọi con là bé" — đây là VOCATIVE (vợ nói TRỰC TIẾP
+   với con). Khi vợ nói VỀ con cho chồng → KHÔNG dùng vocative "bé".
+
+   ❌ SAI: "他想你" → "bé nhớ anh" (sai — dùng vocative cho 3rd-person)
+   ✅ ĐÚNG: "他想你" → "con nhớ anh" (3rd-person dùng từ vai trò)
+
+   QUY TẮC:
+   • 你 (ngôi 2) → dùng từ SPEAKER MAP "addresses[target]"
+     VD: vợ gọi chồng "你 hôm nay..." → "anh hôm nay..."
+   • 他/她 (ngôi 3) → dùng từ VAI TRÒ của người được nhắc
+     - 他 = con → "con" / "thằng bé" / "nó"
+     - 他 = anh/chú/chồng-người-khác → "anh ấy"
+     - 她 = mẹ/chị/cô → "cô ấy" / "bà ấy" / "chị ấy"
+   • PHÂN BIỆT: "你来" (ngôi 2) vs "他来" (ngôi 3) khác hoàn toàn!
+
+🔴 LỖI #3 — TÊN THÂN MẬT (小X/阿X/大X) DỊCH THÀNH "nhóc"/"bé"
+
+   Trong tiếng Trung, prefix 小/阿/大 + tên = TÊN THÂN MẬT, đây là
+   DANH TỪ RIÊNG (tên gọi), KHÔNG phải nickname chung chung.
+
+   ❌ SAI: 小宝 → "nhóc" / "bé"
+   ✅ ĐÚNG: 小宝 → "Tiểu Bảo" (Hán-Việt, giữ là TÊN)
+
+   QUY TẮC PHIÊN ÂM:
+   • 小X → "Tiểu X" (小宝 → Tiểu Bảo, 小明 → Tiểu Minh, 小红 → Tiểu Hồng)
+   • 阿X → "A X" (阿强 → A Cường, 阿珍 → A Trân)
+   • 大X → "Đại X" (大牛 → Đại Ngưu, 大伟 → Đại Vĩ)
+   • 老X (gọi người lớn tuổi) → "lão X" (老王 → lão Vương)
+
+   Quy tắc apply cho TÊN NHÂN VẬT thân mật. KHÔNG apply cho danh từ
+   chung 小孩 (đứa trẻ), 小姐 (cô — tước vị), 小心 (cẩn thận), v.v.
+
+═══════════════════════════════════════════════════════════════
+📏 TIMING BUDGET — BẮT BUỘC TUÂN THỦ
+═══════════════════════════════════════════════════════════════
+
+Mỗi line có `[max N chars]` = số ký tự TỐI ĐA cho dub đúng nhịp.
+• Tiếng Việt thường dài hơn Trung 30% nếu literal → vượt slot → dub dồn.
+• Phải RÚT GỌN: cắt filler ("thì là", "vậy đó"), dùng từ ngắn.
+• Ưu tiên: ý chính > nuance > literal completeness.
+• HARD RULE: KHÔNG vượt max N chars cho bất kỳ line nào.
+
+═══════════════════════════════════════════════════════════════
+🔤 TÊN RIÊNG NHÂN VẬT
+═══════════════════════════════════════════════════════════════
+{_name_translation_rule(source_lang)}
+═══════════════════════════════════════════════════════════════
+🎬 GENRE / REGISTER
+═══════════════════════════════════════════════════════════════
 {genre_block if genre_block else '''
-   Đọc context để chọn:
+   Đọc context để chọn xưng hô (nếu Pass-1 chưa cover):
    • Vợ chồng / yêu nhau: "anh/em" — KHÔNG "tôi/bạn"
-   • Mẹ-con: "mẹ/con" — KHÔNG "tôi/bạn"
-   • Cha-con: "ba|bố|cha/con"
+   • Mẹ-con: "mẹ/con". Cha-con: "ba|bố|cha/con"
    • Anh-chị-em ruột: theo tuổi
-   • Bạn bè thân: "tao/mày" hoặc "tớ/cậu"
+   • Bạn thân: "tao/mày" hoặc "tớ/cậu"
    • Đồng nghiệp: "tôi/anh", "tôi/chị"
-   • Cổ trang: "ta/nàng/chàng/khanh/trẫm/thiếp" — KHÔNG "anh/em"
-   • Người LẠ mới dùng "tôi/bạn"
+   • Cổ trang: "ta/nàng/chàng/khanh/trẫm/thiếp"
+   • Người LẠ: "tôi/bạn"
 '''}
-
-BƯỚC 2 — PRONOUN GROUND TRUTH từ [SPKx:gender]:
-   • SPKx:male → speaker NAM, không tự xưng "em" với người ngang tuổi
-   • SPKx:female → speaker NỮ, không tự xưng "anh"
-   • CÙNG SPKx phải có CÙNG cách xưng từ đầu đến cuối
-   • KHÔNG include [SPKx:gender] trong output
-
-BƯỚC 3 — TIMING BUDGET (BẮT BUỘC):
-   Mỗi line có [max N chars] = số ký tự TỐI ĐA cho dub khớp nhịp.
-   Tiếng Việt thường dài hơn Trung 30% nếu literal → vượt → dub dồn.
-   Phải RÚT GỌN: cắt filler ("thì là", "vậy đó"), dùng từ ngắn.
-   Ưu tiên: ý chính > nuance > literal completeness.
-   HARD RULE: KHÔNG vượt max N chars cho bất kỳ line nào.
-
-BƯỚC 4 — ANCHOR ENTITIES BẮT BUỘC GIỮ:
-   Các từ key trong gốc PHẢI xuất hiện trong dịch (không được "đoán"
-   thay nội dung):
+═══════════════════════════════════════════════════════════════
+📦 ANCHOR ENTITIES — TỪ KHOÁ BẮT BUỘC GIỮ
+═══════════════════════════════════════════════════════════════
+   Các từ KEY trong gốc PHẢI xuất hiện trong dịch:
    • Vật dụng: 钻石→kim cương, 婚戒→nhẫn cưới, 戒指→nhẫn, 手机→điện thoại
    • Quan hệ: 妈妈→mẹ, 爸爸→ba/bố, 姐姐→chị, 老板→sếp/ông chủ
    • Ăn uống: 咖啡→cà phê, 牛奶→sữa, 果汁→nước trái cây
-{_name_translation_rule(source_lang)}
-BƯỚC 5 — NGÔN NGỮ:
-   • Mượt như phim VTV — KHÔNG word-by-word literal
-   • Match emotion: angry→gắt, whisper→nhỏ, happy→tươi
-   • Tiếng Việt tự nhiên: chêm "nhé/à/vậy" hợp ngữ cảnh
 
-BƯỚC 6 — SELF-VERIFY GENDER (tự kiểm tra giới tính speaker):
-   Pipeline đoán giới tính TRƯỚC khi bạn dịch — nhưng có thể SAI vì chỉ
-   dựa F0 pitch. Bạn — LLM — có thể nhận ra từ CONTEXT (lời thoại) ai
-   thực sự là nam/nữ:
-   • Speaker tự xưng "bố/cha/anh/ông" → NAM
-   • Speaker tự xưng "mẹ/chị/em (với chồng)/cô" → NỮ
-   • Speaker được người khác gọi "anh ơi" → NAM; "em ơi"/"chị ơi" → NỮ
-   Sau khi dịch xong, KÈM field "speaker_genders" cuối output:
-   nếu evidence rõ → ghi "male"/"female" + lý do; nếu không chắc → "unsure".
-
-   Đây là CHECKING LẠI pipeline — backend sẽ override gender nếu bạn rõ ràng.
+═══════════════════════════════════════════════════════════════
+✍️ STYLE — VIẾT NHƯ DỊCH GIẢ VTV
+═══════════════════════════════════════════════════════════════
+   • Mượt như phim truyền hình — KHÔNG word-by-word literal
+   • Match emotion: angry→gắt, whisper→nhỏ, happy→tươi, sad→buồn
+   • Tiếng Việt tự nhiên: chêm "nhé/à/vậy/đấy" hợp ngữ cảnh
+   • Bỏ chủ ngữ rườm rà nếu nghĩa vẫn rõ
 {extra_block}{context_section}
+═══════════════════════════════════════════════════════════════
+🎯 SELF-VERIFY GENDER (tự kiểm tra giới tính speaker)
+═══════════════════════════════════════════════════════════════
+   Pipeline đoán gender qua F0 pitch — có thể sai. LLM check lại từ context:
+   • Tự xưng "bố/cha/anh/ông" → male
+   • Tự xưng "mẹ/má/chị/cô" → female
+   • Người khác gọi "anh ơi" → male; "em ơi/chị ơi" → female
+   Output kèm "speaker_genders" — backend sẽ override pipeline nếu rõ.
 
+═══════════════════════════════════════════════════════════════
+📤 OUTPUT — JSON SCHEMA BẮT BUỘC
 ═══════════════════════════════════════════════════════════════
 EMOTION TAGS hợp lệ: neutral, happy, sad, angry, whisper, surprised, fearful
 
-OUTPUT: JSON object với schema:
 {{
   "translations": [
     {{"index": 1, "translated": "...", "speech": "...", "emotion": "neutral"}},
@@ -512,17 +596,18 @@ OUTPUT: JSON object với schema:
 }}
 
 • "translated": câu Việt mượt + đúng pronoun + KHÔNG vượt max_chars
-• "speech": tối ưu TTS — thêm "..." giữa cụm cho ngắt nhịp
-• "emotion": 1 trong 7 tag
-• "speaker_genders": với MỖI SPKx, gender "male"/"female"/"unsure"
-  + evidence ngắn gọn (1 câu). Đây là self-verify pipeline detection.
+• "speech": tối ưu TTS — thêm "..." giữa cụm cho ngắt nhịp tự nhiên
+• "emotion": 1 trong 7 tag trên
+• "speaker_genders": với MỖI SPKx, gender + evidence ngắn
 
-KIỂM TRA TRƯỚC XUẤT:
+CHECKLIST trước khi xuất:
 [ ] Mọi line ≤ max_chars?
-[ ] Pronoun nhất quán cho mỗi SPKx?
-[ ] Anchor entities (vật/người/ăn) đầy đủ?
-[ ] Tên riêng dịch ĐÚNG convention source language (Hán-Việt cho Trung)?
-[ ] speaker_genders cuối output đủ mọi SPKx?
+[ ] Theo SPEAKER MAP (xưng hô đúng)?
+[ ] Không dịch literal vocative-tail (老公→anh, không phải "chồng")?
+[ ] 他/她 (ngôi 3) dùng vai trò, không phải vocative?
+[ ] Tên 小X/阿X → Tiểu X/A X (không phải "nhóc")?
+[ ] Anchor entities đầy đủ?
+[ ] speaker_genders đủ mọi SPKx?
 [ ] JSON hợp lệ, đủ index?
 """
 
