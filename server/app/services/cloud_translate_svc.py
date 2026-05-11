@@ -322,46 +322,67 @@ def _translate_3pass(engine: str, texts: list[str], target: str, source: str,
     except Exception as e:
         logger.warning("%s Pass-0 fail: %s", engine, e)
 
-    # Pass-1: literal translate
-    try:
+    # Pass-1 + Pass-2: ADAPTIVE BATCH + PARALLEL (phim dài)
+    from app.services.llm.batch import adaptive_batch_size, run_parallel_batches
+    batch_size = adaptive_batch_size(len(segments_meta))
+    logger.info("%s: %d segments → adaptive batch_size=%d",
+                 engine, len(segments_meta), batch_size)
+
+    def _process_batch(batch_idx: int, batch: list[dict]) -> tuple[int, list[dict]]:
+        first_idx = batch[0]["index"]
+        # Pass-1
         literal = run_translate(
-            engine=engine, segments=segments_meta,
+            engine=engine, segments=batch,
             target_lang=target, source_lang=source,
             speaker_relationships=relationships,
             topic_hint=topic_hint, glossary_block=glossary_block,
-            film_genre=film_genre,
-            api_key=api_key, model=model,
+            film_genre=film_genre, api_key=api_key, model=model,
+        )
+        # Pass-2
+        polished = list(literal)
+        try:
+            items = []
+            for i, seg in enumerate(batch):
+                lit_text = literal[i].get("translated_text", "") if i < len(literal) else ""
+                items.append({
+                    "index": seg["index"],
+                    "speaker": seg.get("speaker"),
+                    "original": seg["original_text"],
+                    "literal": lit_text,
+                    "max_chars": _max_chars(seg),
+                })
+            polished_raw = run_edit(
+                engine=engine, items=items,
+                target_lang=target, source_lang=source,
+                speaker_relationships=relationships,
+                api_key=api_key, model=model,
+            )
+            for i, p in enumerate(polished_raw):
+                if p.get("translated_text"):
+                    polished[i] = p
+        except Exception as e:
+            logger.warning("%s Pass-2 fail batch starts at %d: %s — dùng literal",
+                            engine, first_idx, e)
+        return first_idx, polished
+
+    try:
+        batch_results = run_parallel_batches(
+            items=segments_meta, batch_size=batch_size, engine=engine,
+            process_fn=_process_batch,
         )
     except Exception as e:
-        logger.error("%s Pass-1 fail: %s", engine, e)
+        logger.error("%s parallel batch fail: %s", engine, e)
         raise ValueError(f"{engine} lỗi: {e}") from e
 
-    # Pass-2: editor polish
-    polished = literal
-    try:
-        items = []
-        for i, seg in enumerate(segments_meta):
-            lit_text = literal[i].get("translated_text", "") if i < len(literal) else ""
-            items.append({
-                "index": seg["index"],
-                "speaker": seg.get("speaker"),
-                "original": seg["original_text"],
-                "literal": lit_text,
-                "max_chars": _max_chars(seg),
-            })
-        polished_raw = run_edit(
-            engine=engine, items=items,
-            target_lang=target, source_lang=source,
-            speaker_relationships=relationships,
-            api_key=api_key, model=model,
-        )
-        for i, p in enumerate(polished_raw):
-            if p.get("translated_text"):
-                polished[i] = p
-    except Exception as e:
-        logger.warning("%s Pass-2 (editor) fail: %s — dùng literal", engine, e)
-
-    return [p.get("translated_text", "") for p in polished]
+    # Merge tất cả batch results vào output array
+    final = [""] * len(segments_meta)
+    for first_idx, batch_polished in batch_results:
+        for i, p in enumerate(batch_polished):
+            tr = p.get("translated_text", "")
+            target_idx = first_idx + i
+            if tr and target_idx < len(final):
+                final[target_idx] = tr
+    return final
 
 
 def _openai(texts: list[str], target: str, source: str, api_key: str,

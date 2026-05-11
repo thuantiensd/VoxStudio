@@ -117,47 +117,32 @@ def _translate_uncached(
     except Exception as e:
         logger.warning("Gemini Pass-0 fail: %s — Pass-1/2 chạy không anchor", e)
 
-    # ── Pass-1 + Pass-2: per batch ──
+    # ── Pass-1 + Pass-2: ADAPTIVE BATCH + PARALLEL DISPATCH ──
+    # Với phim dài, sequential batch quá lâu. Parallel 3-6 batch song song
+    # (concurrent limit theo engine tier) → 3-4× nhanh hơn.
+    from app.services.llm.batch import adaptive_batch_size, run_parallel_batches
+    batch_size = adaptive_batch_size(len(segments))
+    logger.info("Gemini: %d segments → adaptive batch_size=%d",
+                 len(segments), batch_size)
+
     results = [{"translated_text": "", "speech_text": "", "emotion": "neutral"}
                for _ in segments]
 
-    for batch_start in range(0, len(segments), BATCH_SIZE):
-        batch_end = min(batch_start + BATCH_SIZE, len(segments))
-        batch = segments[batch_start:batch_end]
-
-        # Context cho continuity (3 line gần nhất đã dịch)
-        context_before = []
-        if batch_start > 0:
-            ctx_start = max(0, batch_start - 3)
-            for seg in segments[ctx_start:batch_start]:
-                prev = results[seg["index"]]
-                if prev["translated_text"]:
-                    context_before.append({
-                        "index": seg["index"] + 1,
-                        "original": seg["original_text"],
-                        "translated": prev["translated_text"],
-                    })
-
+    def _process_batch(batch_idx: int, batch: list[dict]) -> tuple[int, list[dict]]:
+        """Pass-1 + Pass-2 cho 1 batch. KHÔNG dùng context_before vì parallel.
+        Pass-0 + scene_context đã cover continuity ở mức scene level.
+        """
+        first_seg_idx = batch[0]["index"]
         # Pass-1: literal translator
-        try:
-            literal = run_translate(
-                engine=ENGINE,
-                segments=batch,
-                target_lang=target_language,
-                source_lang=source_language,
-                speaker_relationships=relationships,
-                context_before=context_before,
-                topic_hint=topic_block,
-                glossary_block=glossary_block,
-                film_genre=film_genre,
-            )
-        except Exception as e:
-            logger.error("Gemini Pass-1 fail batch %d-%d: %s",
-                          batch_start + 1, batch_end, e)
-            raise ValueError(f"Gemini lỗi: {e}") from e
-
+        literal = run_translate(
+            engine=ENGINE, segments=batch,
+            target_lang=target_language, source_lang=source_language,
+            speaker_relationships=relationships,
+            topic_hint=topic_block, glossary_block=glossary_block,
+            film_genre=film_genre,
+        )
         # Pass-2: editor polish
-        polished = literal  # fallback nếu Pass-2 fail
+        polished = list(literal)  # default fallback
         try:
             items = []
             for i, seg in enumerate(batch):
@@ -170,31 +155,33 @@ def _translate_uncached(
                     "max_chars": _max_chars(seg),
                 })
             polished_raw = run_edit(
-                engine=ENGINE,
-                items=items,
-                target_lang=target_language,
-                source_lang=source_language,
+                engine=ENGINE, items=items,
+                target_lang=target_language, source_lang=source_language,
                 speaker_relationships=relationships,
             )
-            # Merge: polished thay literal khi có
             for i, p in enumerate(polished_raw):
                 if p.get("translated_text"):
                     polished[i] = p
         except Exception as e:
-            logger.warning("Gemini Pass-2 (editor) fail batch %d-%d: %s — dùng literal",
-                            batch_start + 1, batch_end, e)
+            logger.warning("Gemini Pass-2 fail batch starts at %d: %s — dùng literal",
+                            first_seg_idx, e)
+        return first_seg_idx, polished
 
-        # Merge vào results với speech_text (default = translated)
-        for i, p in enumerate(polished):
+    batch_results = run_parallel_batches(
+        items=segments, batch_size=batch_size, engine=ENGINE,
+        process_fn=_process_batch,
+    )
+
+    # Merge tất cả batch results vào results array theo segment.index
+    for first_idx, batch_polished in batch_results:
+        for i, p in enumerate(batch_polished):
             tr = p.get("translated_text", "")
-            if tr:
-                results[batch_start + i] = {
+            if tr and (first_idx + i) < len(results):
+                results[first_idx + i] = {
                     "translated_text": tr,
                     "speech_text": tr,
                     "emotion": p.get("emotion", "neutral"),
                 }
-
-        logger.info("Gemini batch %d-%d (%d segs) ok", batch_start + 1, batch_end, len(batch))
 
     missing = sum(1 for r in results if not r["translated_text"])
     if missing:
