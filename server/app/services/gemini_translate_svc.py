@@ -297,6 +297,26 @@ def _translate_uncached(
     results = [{"translated_text": "", "speech_text": "", "emotion": "neutral"}
                for _ in segments]
 
+    # ── Pass-1: speaker relationship analysis (chỉ multi-speaker) ──
+    # 1 call duy nhất cho cả phim → output anchor map → inject vào MỖI
+    # batch Pass-2 → LLM hết chỗ đoán mò pronoun.
+    speaker_relationships: dict = {}
+    try:
+        from app.services.llm import analyze_speakers
+        speaker_relationships = analyze_speakers(
+            engine="gemini",
+            segments=segments,
+            source_lang=source_language,
+            film_genre=film_genre,
+        )
+        if speaker_relationships:
+            n_spk = len(speaker_relationships.get("speakers", {}))
+            logger.info("Gemini Pass-1 ok: %d speakers, register=%r, scene=%r",
+                         n_spk, speaker_relationships.get("register", ""),
+                         speaker_relationships.get("scene_context", "")[:80])
+    except Exception as e:
+        logger.warning("Gemini Pass-1 fail: %s — Pass-2 chạy không anchor", e)
+
     # Process in batches with overlap for context
     for batch_start in range(0, len(segments), BATCH_SIZE):
         batch_end = min(batch_start + BATCH_SIZE, len(segments))
@@ -320,6 +340,7 @@ def _translate_uncached(
             topic_hint=topic_hint, glossary=glossary,
             speaker_genders=speaker_genders,
             film_genre=film_genre,
+            speaker_relationships=speaker_relationships,
         )
 
         # Translate batch với retry-on-validation-fail
@@ -464,6 +485,7 @@ def _build_prompt(
     glossary: list[tuple[str, str]] | None = None,
     speaker_genders: dict | None = None,
     film_genre: str | None = None,
+    speaker_relationships: dict | None = None,
 ) -> str:
     """Build a detailed prompt for context-aware film translation."""
 
@@ -475,24 +497,38 @@ def _build_prompt(
     tgt_name = lang_names.get(target_lang, target_lang)
     src_name = lang_names.get(source_lang, source_lang) if source_lang != "auto" else "auto-detect"
 
-    # Build segment list — kèm [SPKx:gender] khi có diarization để chọn pronoun đúng
-    # + [max N chars] budget để LLM tự rút gọn câu cho khớp slot duration
-    # (Việt ~13 chars/giây speech rate, để headroom 10% tránh overflow TTS)
+    # Build segment list — kèm anchor pronoun từ Pass-1 (mạnh nhất),
+    # fallback [SPKx:gender] khi không có Pass-1.
+    has_relationships = bool(speaker_relationships and speaker_relationships.get("speakers"))
     has_speakers = bool(speaker_genders) and any(seg.get("speaker") for seg in segments)
+
     seg_lines = []
     for seg in segments:
         text = seg["original_text"].strip()
         if not text:
             continue
         dur = max(0.3, seg["end"] - seg["start"])
-        # Tiếng Việt ~13 chars/s thoải mái; ép 11.5 chars/s để dub có headroom
         max_chars = max(8, int(dur * 11.5))
         prefix = f'[{seg["start"]:.1f}s-{seg["end"]:.1f}s, max {max_chars} chars]'
-        if has_speakers and seg.get("speaker"):
+
+        if has_relationships and seg.get("speaker"):
+            from app.services.llm.prompts import _per_segment_anchor
+            anchor = _per_segment_anchor(seg, speaker_relationships)
+            if anchor:
+                prefix = f'{prefix} [{seg["speaker"]}: {anchor}]'
+            else:
+                prefix = f'{prefix} [{seg["speaker"]}]'
+        elif has_speakers and seg.get("speaker"):
             spk = seg["speaker"]
             g = (speaker_genders or {}).get(spk, "unknown")
             prefix = f'{prefix} [{spk}:{g}]'
         seg_lines.append(f'{seg["index"] + 1}. {prefix} {text}')
+
+    # ANCHOR block từ Pass-1 — đặt lên đầu prompt để LLM thấy NGAY TRƯỚC mọi rule
+    speaker_anchor_block = ""
+    if has_relationships:
+        from app.services.llm.prompts import _format_speaker_anchor_block
+        speaker_anchor_block = "\n" + _format_speaker_anchor_block(speaker_relationships) + "\n"
 
     # Build context section
     context_section = ""
@@ -502,7 +538,7 @@ def _build_prompt(
 
     prompt = f"""Bạn là dịch giả phim chuyên nghiệp đã làm 10+ năm phim Trung/Hàn cho VTV/HTV.
 NHIỆM VỤ: dịch lời thoại từ {src_name} → {tgt_name} cho phụ đề/lồng tiếng.
-
+{speaker_anchor_block}
 ═══════════════════════════════════════════════════════════════
 QUY TRÌNH BẮT BUỘC — THỰC HIỆN TUẦN TỰ:
 

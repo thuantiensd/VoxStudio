@@ -118,6 +118,231 @@ def _name_translation_rule(source_lang: Optional[str]) -> str:
 """
 
 
+def build_speaker_analysis_prompt(
+    *,
+    segments: list[dict],
+    source_lang: str,
+    film_genre: Optional[str] = None,
+    max_lines: int = 200,
+) -> dict:
+    """Pass-1 prompt: analyze speaker relationships TRƯỚC khi dịch.
+
+    LLM đọc transcript có SPEAKER_XX tag → output JSON quan hệ:
+    ai là ai, nói với ai, gender, pronoun chuẩn cho từng cặp.
+    Pass-2 (translate) sẽ dùng map này làm ANCHOR → LLM hết chỗ đoán mò.
+
+    Trả {system, user}. Caller gửi tới LLM (Gemini/OpenAI/Claude), parse
+    với parse_speaker_analysis().
+    """
+    src_name = _lang_display_name(source_lang)
+
+    sample_lines = []
+    for seg in segments[:max_lines]:
+        text = (seg.get("original_text") or "").strip()
+        if not text:
+            continue
+        spk = seg.get("speaker") or "?"
+        sample_lines.append(f"{spk}: {text}")
+
+    genre_hint = ""
+    if film_genre and film_genre != "auto":
+        genre_hint = f"\n• Thể loại đã detect: {film_genre} — pick register phù hợp.\n"
+
+    system = f"""Bạn là chuyên gia phân tích kịch bản phim. Đọc đoạn hội thoại
+sau (từ {src_name}) và XÁC ĐỊNH QUAN HỆ giữa các speaker.
+
+═══════════════════════════════════════════════════════════════
+NHIỆM VỤ:
+1) Đọc HẾT đoạn hội thoại — từng SPEAKER_XX là 1 nhân vật.
+2) Với MỖI speaker, suy ra:
+   • gender (male/female/unsure)
+   • role trong scene (chồng, vợ, cha, mẹ, con, sếp, bạn, đồng nghiệp...)
+   • cách họ tự xưng (anh/em/tôi/ba/mẹ/con/ta/thiếp...)
+   • cách họ gọi MỖI speaker khác (anh/em/con/ba/mẹ/ngươi...)
+3) Identify scene context: vợ chồng cãi nhau? cha con tâm sự? sếp họp?
+
+═══════════════════════════════════════════════════════════════
+EVIDENCE để suy luận (đọc kỹ — KHÔNG đoán mò):
+
+🔹 Gender:
+   • Speaker tự gọi "anh/bố/ba/chồng/ông/cậu" → NAM
+   • Speaker tự gọi "em/mẹ/má/vợ/chị/cô/bà" → NỮ
+   • Người khác gọi "anh ơi/cậu ơi/sếp ơi" → speaker NAM
+   • Người khác gọi "em ơi/chị ơi/cô ơi" → speaker NỮ
+
+🔹 Quan hệ (CẨN THẬN — không nhầm):
+   • Vợ ↔ chồng: tự xưng "anh"/"em", gọi nhau "anh"/"em". KHÔNG dùng "con".
+   • Cha/mẹ → con: tự xưng "ba/bố/mẹ", gọi con "con".
+   • Con → cha/mẹ: tự xưng "con", gọi "ba/bố/mẹ".
+   • Anh/chị → em: tự xưng "anh/chị", gọi "em".
+   • Em → anh/chị: tự xưng "em", gọi "anh/chị".
+   • Sếp ↔ nhân viên: "tôi/anh", "tôi/chị", "sếp/em".
+   • Bạn ngang vai: "tôi/cậu", "tao/mày" (thân).
+
+🔹 CẢNH BÁO TUYỆT ĐỐI:
+   ❌ "Con" KHÔNG phải từ vợ gọi chồng / chồng gọi vợ.
+   ❌ "Con" KHÔNG phải từ cha mẹ tự xưng (cha mẹ tự xưng "ba/mẹ").
+   ❌ "Con" CHỈ là: (1) con cái tự xưng với cha mẹ, (2) cha mẹ gọi con.
+{genre_hint}
+═══════════════════════════════════════════════════════════════
+OUTPUT: JSON object DUY NHẤT (không markdown, không giải thích):
+
+{{
+  "scene_context": "Mô tả ngắn bối cảnh + quan hệ (1-2 câu)",
+  "register": "modern/cổ trang/business/family/...",
+  "speakers": {{
+    "SPEAKER_00": {{
+      "gender": "male",
+      "role": "chồng",
+      "self_pronoun": "anh",
+      "addresses": {{
+        "SPEAKER_01": "em"
+      }},
+      "evidence": "Line 3: tự xưng 'anh', gọi SPEAKER_01 'em' nhiều lần"
+    }},
+    "SPEAKER_01": {{
+      "gender": "female",
+      "role": "vợ",
+      "self_pronoun": "em",
+      "addresses": {{
+        "SPEAKER_00": "anh"
+      }},
+      "evidence": "Line 5: 'em không muốn cãi nữa anh'"
+    }}
+  }}
+}}
+
+QUY TẮC:
+• Mỗi SPEAKER trong transcript phải có 1 entry.
+• "self_pronoun" và "addresses[X]" PHẢI là tiếng Việt (kể cả source là Trung).
+• Nếu KHÔNG ĐỦ evidence → gender = "unsure", role = "unknown",
+  self_pronoun = "tôi", addresses = {{}}. KHÔNG được bịa.
+• "evidence" phải trỏ tới line cụ thể (không nói chung chung).
+"""
+
+    user_input = (
+        "ĐOẠN HỘI THOẠI CẦN PHÂN TÍCH (đọc HẾT trước khi trả lời):\n\n"
+        + "\n".join(sample_lines)
+    )
+
+    return {
+        "system": system,
+        "user": user_input,
+    }
+
+
+def parse_speaker_analysis(response_text: str) -> dict:
+    """Parse JSON output từ Pass-1. Robust với markdown wrapper."""
+    import re
+
+    text = (response_text or "").strip()
+    if not text:
+        return {}
+
+    if text.startswith("```"):
+        text = re.sub(r"^```\w*\n?", "", text)
+        text = re.sub(r"\n?```$", "", text)
+    text = text.strip()
+
+    parsed = None
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError:
+        m = re.search(r"\{.*\}", text, re.DOTALL)
+        if m:
+            try:
+                parsed = json.loads(m.group(0))
+            except Exception:
+                pass
+    if not isinstance(parsed, dict):
+        return {}
+
+    speakers_raw = parsed.get("speakers") or {}
+    if not isinstance(speakers_raw, dict):
+        return {}
+
+    valid_genders = {"male", "female", "unsure", "unknown"}
+    speakers = {}
+    for spk_id, info in speakers_raw.items():
+        if not isinstance(info, dict):
+            continue
+        g = (info.get("gender") or "unsure").lower().strip()
+        if g not in valid_genders:
+            g = "unsure"
+        addr = info.get("addresses") or {}
+        if not isinstance(addr, dict):
+            addr = {}
+        speakers[spk_id] = {
+            "gender": g,
+            "role": (info.get("role") or "unknown").strip()[:40],
+            "self_pronoun": (info.get("self_pronoun") or "tôi").strip()[:20],
+            "addresses": {k: str(v).strip()[:20] for k, v in addr.items() if v},
+            "evidence": (info.get("evidence") or "").strip()[:200],
+        }
+
+    return {
+        "scene_context": (parsed.get("scene_context") or "").strip()[:300],
+        "register": (parsed.get("register") or "").strip()[:40],
+        "speakers": speakers,
+    }
+
+
+def _format_speaker_anchor_block(relationships: dict) -> str:
+    """Format Pass-1 result thành ANCHOR block cho Pass-2 prompt."""
+    if not relationships or not relationships.get("speakers"):
+        return ""
+
+    lines = [
+        "═══════════════════════════════════════════════════════════════",
+        "🎯 SPEAKER MAP — ANCHOR BẮT BUỘC TUÂN THEO (từ Pass-1 analysis):",
+    ]
+
+    ctx = relationships.get("scene_context")
+    if ctx:
+        lines.append(f"   Bối cảnh: {ctx}")
+    reg = relationships.get("register")
+    if reg:
+        lines.append(f"   Register: {reg}")
+    lines.append("")
+
+    for spk_id, info in relationships["speakers"].items():
+        g = info.get("gender", "unsure")
+        role = info.get("role", "unknown")
+        self_p = info.get("self_pronoun", "tôi")
+        addr = info.get("addresses", {})
+        parts = [f'   • {spk_id} ({role}, {g}): tự xưng "{self_p}"']
+        if addr:
+            addr_str = ", ".join(f'gọi {k} là "{v}"' for k, v in addr.items())
+            parts.append(addr_str)
+        lines.append(" — ".join(parts))
+
+    lines.append("")
+    lines.append("⚠️ TUYỆT ĐỐI dùng đúng cách xưng hô trên cho MỖI speaker.")
+    lines.append("⚠️ KHÔNG được tự ý đổi xưng hô giữa scene.")
+    lines.append("═══════════════════════════════════════════════════════════════")
+    return "\n".join(lines)
+
+
+def _per_segment_anchor(seg: dict, relationships: dict) -> str:
+    """Format anchor cho 1 segment dựa trên Pass-1 result."""
+    if not relationships or not relationships.get("speakers"):
+        return ""
+    spk = seg.get("speaker")
+    if not spk:
+        return ""
+    info = (relationships["speakers"] or {}).get(spk)
+    if not info:
+        return ""
+    self_p = info.get("self_pronoun", "")
+    addr = info.get("addresses") or {}
+    if not self_p:
+        return ""
+    if addr:
+        addr_str = "/".join(f"{k.replace('SPEAKER_', 'SPK')}={v}" for k, v in addr.items())
+        return f'xưng "{self_p}", gọi {addr_str}'
+    return f'xưng "{self_p}"'
+
+
 def build_translation_prompt(
     *,
     segments: list[dict],
@@ -127,6 +352,7 @@ def build_translation_prompt(
     topic_hint: Optional[str] = None,
     glossary_block: Optional[str] = None,
     speaker_genders: Optional[dict] = None,
+    speaker_relationships: Optional[dict] = None,
     film_genre: Optional[str] = None,
     engine: str = "gemini",
 ) -> dict:
@@ -144,7 +370,9 @@ def build_translation_prompt(
     src_name = _lang_display_name(source_lang)
 
     # Build segment list — kèm budget + STRONG pronoun anchor per line
-    # (không chỉ rule chung — mỗi line có hint pronoun cụ thể để LLM follow)
+    # Ưu tiên speaker_relationships (Pass-1 result) → anchor mạnh nhất
+    # Fallback speaker_genders → pronoun hint theo gender
+    has_relationships = bool(speaker_relationships and speaker_relationships.get("speakers"))
     has_speakers = bool(speaker_genders) and any(seg.get("speaker") for seg in segments)
     seg_lines = []
     for seg in segments:
@@ -152,17 +380,24 @@ def build_translation_prompt(
         if not text:
             continue
         budget = _max_chars(seg)
-        prefix = f'[max {budget} chars]'
-        if has_speakers and seg.get("speaker"):
+
+        if has_relationships and seg.get("speaker"):
+            anchor = _per_segment_anchor(seg, speaker_relationships)
+            if anchor:
+                prefix = f'[{seg["speaker"]}: {anchor}, max {budget} chars]'
+            else:
+                prefix = f'[{seg["speaker"]}, max {budget} chars]'
+        elif has_speakers and seg.get("speaker"):
             spk = seg["speaker"]
             g = (speaker_genders or {}).get(spk, "unknown")
-            # STRONG hint: kèm pronoun cụ thể cho gender (theo register VN)
-            # → LLM khó nhầm hơn so với chỉ "[SPK:female]"
             pronoun_hint = _pronoun_hint_for_gender(g)
             if pronoun_hint:
                 prefix = f'[{spk}, {g}, {pronoun_hint}, max {budget} chars]'
             else:
                 prefix = f'[{spk}, {g}, max {budget} chars]'
+        else:
+            prefix = f'[max {budget} chars]'
+
         seg_lines.append(f'{seg["index"] + 1}. {prefix} {text}')
 
     # Context section
@@ -191,10 +426,16 @@ def build_translation_prompt(
     if glossary_block:
         extra_block += f"\n\n📖 Glossary:\n{glossary_block}\n"
 
+    # SPEAKER MAP anchor block (từ Pass-1) — đặt lên ĐẦU system prompt
+    # để LLM thấy NGAY TRƯỚC mọi rule khác. Đây là rule MẠNH NHẤT.
+    speaker_anchor_block = ""
+    if has_relationships:
+        speaker_anchor_block = "\n" + _format_speaker_anchor_block(speaker_relationships) + "\n"
+
     # System message — KHÔNG ĐỔI giữa engines, mọi rule chung ở đây
     system = f"""Bạn là dịch giả phim chuyên nghiệp 10+ năm cho VTV/HTV.
 NHIỆM VỤ: dịch lời thoại từ {src_name} → {tgt_name} cho lồng tiếng/phụ đề.
-
+{speaker_anchor_block}
 ═══════════════════════════════════════════════════════════════
 QUY TRÌNH BẮT BUỘC TUẦN TỰ:
 

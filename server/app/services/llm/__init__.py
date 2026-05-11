@@ -17,6 +17,7 @@ from .cache import (
     cached_translate_segments,
     TranslationCache,
 )
+from .speaker_analyzer import analyze_speakers
 
 __all__ = [
     "detect_genre",
@@ -25,4 +26,5 @@ __all__ = [
     "get_translation_cache",
     "cached_translate_segments",
     "TranslationCache",
+    "analyze_speakers",
 ]

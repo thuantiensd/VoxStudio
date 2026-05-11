@@ -284,16 +284,12 @@ def _openai(texts: list[str], target: str, source: str, api_key: str,
             film_genre: str | None = None) -> list[str]:
     """OpenAI translate với unified prompt CÙNG chất lượng Gemini.
 
-    Trước đây OpenAI dùng prompt 1-dòng minimal → user chat trực tiếp
-    cho output tốt nhưng pipeline thì kém. Fix: dùng cùng prompt builder
-    với genre + pronoun matrix + budget + anchor entities.
+    2-pass: Pass-1 analyze speaker relationships → anchor cho Pass-2.
     """
     api_key = _sanitize_api_key(api_key, "OpenAI")
     model = model or DEFAULT_MODELS["openai"]
 
-    # Convert texts → segment dicts cho unified prompt builder
     if not segments_meta:
-        # Fallback nếu caller không truyền meta — generate từ texts
         segments_meta = [
             {"index": i, "start": float(i * 3), "end": float((i + 1) * 3),
              "original_text": t}
@@ -304,6 +300,22 @@ def _openai(texts: list[str], target: str, source: str, api_key: str,
         build_translation_prompt,
         parse_translation_response,
     )
+
+    # Pass-1: speaker analysis (chỉ chạy khi multi-speaker)
+    speaker_relationships: dict = {}
+    try:
+        from app.services.llm import analyze_speakers
+        speaker_relationships = analyze_speakers(
+            engine="openai",
+            segments=segments_meta,
+            source_lang=source,
+            api_key=api_key,
+            model=model,
+            film_genre=film_genre,
+        )
+    except Exception as e:
+        logger.warning("OpenAI Pass-1 fail: %s", e)
+
     prompt = build_translation_prompt(
         segments=segments_meta,
         target_lang=target,
@@ -311,6 +323,7 @@ def _openai(texts: list[str], target: str, source: str, api_key: str,
         topic_hint=topic_hint,
         glossary_block=glossary_block,
         speaker_genders=speaker_genders,
+        speaker_relationships=speaker_relationships,
         film_genre=film_genre,
         engine="openai",
     )
@@ -352,7 +365,7 @@ def _claude(texts: list[str], target: str, source: str, api_key: str,
             segments_meta: list[dict] | None = None,
             speaker_genders: dict | None = None,
             film_genre: str | None = None) -> list[str]:
-    """Claude translate với unified prompt + JSON output (Claude follow OK)."""
+    """Claude translate với unified prompt + 2-pass (analyze → translate)."""
     api_key = _sanitize_api_key(api_key, "Claude")
     model = model or DEFAULT_MODELS["claude"]
     if not segments_meta:
@@ -365,6 +378,22 @@ def _claude(texts: list[str], target: str, source: str, api_key: str,
         build_translation_prompt,
         parse_translation_response,
     )
+
+    # Pass-1: speaker analysis (chỉ chạy khi multi-speaker)
+    speaker_relationships: dict = {}
+    try:
+        from app.services.llm import analyze_speakers
+        speaker_relationships = analyze_speakers(
+            engine="claude",
+            segments=segments_meta,
+            source_lang=source,
+            api_key=api_key,
+            model=model,
+            film_genre=film_genre,
+        )
+    except Exception as e:
+        logger.warning("Claude Pass-1 fail: %s", e)
+
     prompt = build_translation_prompt(
         segments=segments_meta,
         target_lang=target,
@@ -372,6 +401,7 @@ def _claude(texts: list[str], target: str, source: str, api_key: str,
         topic_hint=topic_hint,
         glossary_block=glossary_block,
         speaker_genders=speaker_genders,
+        speaker_relationships=speaker_relationships,
         film_genre=film_genre,
         engine="claude",
     )
