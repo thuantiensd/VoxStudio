@@ -225,12 +225,141 @@ def _format_speaker_anchor_block(relationships: dict) -> str:
     return "\n".join(lines)
 
 
-def _per_segment_anchor(seg: dict, relationships: dict) -> str:
-    """Anchor inline cho 1 segment — format explicit 我/你/他 mapping.
+# Vocative-only markers (Trung) — terms of direct address.
+# CHỈ tính khi marker ở ĐẦU hoặc CUỐI câu (vocative position).
+# Mention ở giữa câu (儿子 trong "你不管儿子") KHÔNG tính.
+_VOCATIVE_MARKERS = {
+    # Vợ chồng
+    "老公": ["chồng", "anh", "ông xã"],
+    "夫君": ["chồng", "chàng"],
+    "相公": ["chồng", "chàng"],
+    "老婆": ["vợ", "em", "bà xã"],
+    "媳妇": ["vợ", "em"],
+    "夫人": ["vợ", "phu nhân"],
+    "太太": ["vợ", "bà"],
+    # Cha mẹ
+    "爸爸": ["ba", "bố", "cha"],
+    "爸": ["ba", "bố", "cha"],
+    "爹": ["ba", "cha"],
+    "老爸": ["ba", "bố"],
+    "父亲": ["cha", "phụ thân"],
+    "妈妈": ["mẹ", "má"],
+    "妈": ["mẹ", "má"],
+    "娘": ["mẹ"],
+    "老妈": ["mẹ", "má"],
+    "母亲": ["mẹ", "mẫu thân"],
+    # Anh chị em
+    "哥哥": ["anh"],
+    "哥": ["anh"],
+    "大哥": ["anh", "anh cả"],
+    "姐姐": ["chị"],
+    "姐": ["chị"],
+    "大姐": ["chị", "chị cả"],
+    "弟弟": ["em"],
+    "妹妹": ["em"],
+    # Con/em yêu (cha mẹ gọi con, vợ chồng gọi nhau)
+    "宝贝": ["con", "em", "cục cưng"],  # parent→child OR lovers
+    "宝宝": ["con", "em"],
+    "小宝贝": ["con", "em yêu"],
+    # Sếp / khác
+    "老板": ["sếp", "ông chủ"],
+    "老师": ["thầy", "cô"],
+    "师父": ["sư phụ"],
+    "陛下": ["bệ hạ"],
+    "殿下": ["điện hạ"],
+}
 
-    Định dạng:
-      我→"em" | 你→{SPK_01="anh", SPK_02="con"} | 他/她→tùy ngữ cảnh
-    LLM thấy ngay: 我 trong câu → self_pronoun, 你 → addresses[X].
+
+def _detect_vocative_pronouns(text: str) -> list[str]:
+    """Trả list pronoun Việt có thể dùng cho 你 trong text.
+
+    Vocative thường ở vị trí ĐẶC BIỆT:
+    - Đầu câu (老公...)
+    - Cuối câu (...老公?)
+    - Sau dấu phẩy / sau từ cảm thán (对啊 老婆 ..., 对啊, 老婆)
+    Mention ở giữa câu (你不管儿子) KHÔNG tính.
+    """
+    if not text:
+        return []
+    t = text.strip()
+    matches = []
+    sorted_markers = sorted(_VOCATIVE_MARKERS.keys(), key=len, reverse=True)
+    seen = set()
+
+    for marker in sorted_markers:
+        if marker in seen:
+            continue
+        pronouns = _VOCATIVE_MARKERS[marker]
+        m_esc = re.escape(marker)
+        is_vocative = False
+
+        # 1. Đầu câu
+        if t.startswith(marker):
+            is_vocative = True
+        # 2. Cuối câu (với optional particle/punctuation)
+        elif re.search(rf"{m_esc}\s*[啊呀吧呢哦]?\s*[?!。，,.…]?\s*$", t):
+            is_vocative = True
+        # 3. Sau dấu cách + sau từ cảm thán/đồng ý (对啊 老婆, 嗯 妈妈, 哎 哥)
+        elif re.search(
+            rf"(^|[，,。.！!？?\s])(?:对啊|对|嗯|哎|呃|啊|哦|喂|是)\s+{m_esc}(?=[\s，,。.！!？?]|$)",
+            t,
+        ):
+            is_vocative = True
+
+        if is_vocative:
+            matches.extend(pronouns)
+            seen.add(marker)
+
+    # Tên thân mật 小X / 阿X ở đầu câu HOẶC cuối câu (gọi con/em)
+    if re.match(r"^[小阿][一-龥][\s，,]", t) or re.search(r"[\s，,][小阿][一-龥]\s*[?!。，,.…]?\s*$", t):
+        if "con" not in matches:
+            matches.append("con")
+
+    # Dedup giữ thứ tự
+    dedup = []
+    seen2 = set()
+    for m in matches:
+        if m not in seen2:
+            seen2.add(m)
+            dedup.append(m)
+    return dedup
+
+
+def _resolve_addressee(
+    speaker_id: str,
+    relationships: dict,
+    text: str,
+) -> Optional[tuple[str, str]]:
+    """Tìm (addressee_spk_id, pronoun) cho 你 trong text.
+
+    Match vocative trong text với addresses của speaker → tìm chính xác
+    addressee nào. Returns None nếu không resolve được.
+    """
+    speakers = relationships.get("speakers", {})
+    own = speakers.get(speaker_id, {})
+    addresses = own.get("addresses", {})
+    if not addresses:
+        return None
+
+    vocative_prons = _detect_vocative_pronouns(text)
+    if not vocative_prons:
+        return None
+
+    # Match vocative pronoun với addresses values
+    for vp in vocative_prons:
+        for addr_spk, addr_pn in addresses.items():
+            if vp.lower() == addr_pn.lower() or vp.lower() in addr_pn.lower():
+                return (addr_spk, addr_pn)
+    return None
+
+
+def _per_segment_anchor(seg: dict, relationships: dict) -> str:
+    """Anchor inline — PRE-RESOLVE 你 từ vocative trong text.
+
+    Anchor format:
+      [Vợ → Chồng | 我="em", 你="anh"]
+    Đã resolve xong 你 → không cần LLM đoán. Còn 他/她 LLM tự xử lý theo
+    third_person_label của speaker được nhắc.
     """
     if not relationships or not relationships.get("speakers"):
         return ""
@@ -240,18 +369,33 @@ def _per_segment_anchor(seg: dict, relationships: dict) -> str:
     info = (relationships["speakers"] or {}).get(spk)
     if not info:
         return ""
+
     self_p = info.get("self_pronoun", "")
+    role = info.get("role", "")
     addr = info.get("addresses") or {}
     if not self_p:
         return ""
-    parts = [f'我→"{self_p}"']
-    if addr:
-        if len(addr) == 1:
-            v = next(iter(addr.values()))
-            parts.append(f'你→"{v}"')
-        else:
-            addr_str = ", ".join(f'{k.replace("SPEAKER_", "SPK_")}="{v}"' for k, v in addr.items())
-            parts.append(f'你→{{{addr_str}}}')
+
+    text = (seg.get("original_text") or "").strip()
+    resolved = _resolve_addressee(spk, relationships, text)
+
+    parts = [f'{role or spk}: 我="{self_p}"']
+
+    if resolved:
+        target_id, target_pn = resolved
+        target_role = relationships["speakers"].get(target_id, {}).get("role", "")
+        parts.append(f'→ {target_role or target_id}: 你="{target_pn}"')
+    elif len(addr) == 1:
+        target_id, target_pn = next(iter(addr.items()))
+        target_role = relationships["speakers"].get(target_id, {}).get("role", "")
+        parts.append(f'→ {target_role or target_id}: 你="{target_pn}"')
+    elif addr:
+        addr_str = "; ".join(
+            f'{relationships["speakers"].get(k, {}).get("role", k)}="{v}"'
+            for k, v in addr.items()
+        )
+        parts.append(f'你 ∈ {{{addr_str}}}')
+
     return " | ".join(parts)
 
 
@@ -321,34 +465,41 @@ NHIỆM VỤ DUY NHẤT của Pass này:
 
 KHÔNG cần lo style cinematic — Editor pass sẽ polish.
 {anchor_block}
-🚨 RULE MAPPING ĐẠI TỪ (CỰC QUAN TRỌNG — đọc kỹ trước khi dịch):
+🚨 RULE MAPPING ĐẠI TỪ (CỰC QUAN TRỌNG — đọc kỹ TRƯỚC khi dịch):
 
-Mỗi line có anchor `[SPEAKER_XX: 我→"X" | 你→"Y"]`. Ý nghĩa:
+Mỗi line có anchor `[Role: 我="X" | → Target: 你="Y"]`. Ý nghĩa:
    • 我/我们 trong gốc → DÙNG "X" (self_pronoun của speaker đang nói)
-   • 你/你们 trong gốc → DÙNG "Y" (addresses, từ speaker dùng để gọi addressee)
-   • 他/她/它 trong gốc → DÙNG third_person_label của người được nhắc tới
+   • 你/你们 trong gốc → DÙNG "Y" (đã pre-resolve)
+   • 他/她/它 trong gốc → DÙNG third_person_label của người đó (KHÔNG phải vocative)
+
+Nếu anchor `你 ∈ {role_a="X"; role_b="Y"}` (chưa resolve được) → LLM tự
+chọn theo context (xem vocative trong text, hoặc câu trước/sau).
 
 ❌ SAI HAY GẶP NHẤT — ĐẢO 我/你:
-   Speaker là vợ (xưng "em"). Vợ nói "你今天又加班吗 老公" với chồng.
-   你 trong câu này CHỈ CHỒNG (không phải vợ).
-   → 你 phải dịch "anh" (addresses[chồng]), KHÔNG phải "em".
+   Anchor [vợ: 我="em" | → chồng: 你="anh"], text "你今天又加班吗".
+   你 trong câu chỉ CHỒNG (người được hỏi). → "anh", KHÔNG phải "em".
 
-   ❌ "Hôm nay EM lại tăng ca à?"  ← SAI: dùng self_pronoun cho 你
-   ✅ "Hôm nay ANH lại tăng ca à?" ← ĐÚNG: 你 → addresses
+   ❌ "Hôm nay EM lại tăng ca à?"  ← SAI: dùng 我 mapping cho 你
+   ✅ "Hôm nay ANH lại tăng ca à?" ← ĐÚNG: 你 → "anh"
 
-   Ghi nhớ: 我 = NGƯỜI ĐANG NÓI, 你 = NGƯỜI ĐƯỢC HỎI/GỌI. KHÔNG ĐƯỢC ĐẢO.
+   Ghi nhớ: 我 = NGƯỜI ĐANG NÓI (speaker), 你 = NGƯỜI ĐƯỢC HỎI/GỌI (addressee).
+   KHÔNG ĐƯỢC ĐẢO. Mỗi line đọc lại anchor riêng.
 
-📝 VÍ DỤ CỤ THỂ:
+📝 VÍ DỤ CỤ THỂ (anchor → output):
 
-Speaker SPEAKER_00 (vợ, anchor 我→"em" | 你→"anh"):
-   "我也想你"     → "Em cũng nhớ anh"          ← 我=em, 你=anh
-   "你回来了"     → "Anh về rồi"                ← 你=anh
-   "他想你"       → "Con nhớ anh"               ← 他=con, 你=anh
+Anchor [vợ: 我="em" | → chồng: 你="anh"]:
+   "我也想你"  → "Em cũng nhớ anh"           ← 我="em", 你="anh"
+   "你回来了"  → "Anh về rồi"                ← 你="anh"
+   "他想你"    → "Con nhớ anh"               ← 他→con, 你="anh"
 
-Speaker SPEAKER_01 (chồng, anchor 我→"anh" | 你→"em"):
-   "我也想小宝"   → "Anh cũng nhớ Tiểu Bảo"     ← 我=anh
-   "你别担心"     → "Em đừng lo"                ← 你=em
-   "我带他去"     → "Anh đưa con đi"            ← 我=anh, 他=con
+Anchor [chồng: 我="anh" | → vợ: 你="em"]:
+   "我也想小宝" → "Anh cũng nhớ Tiểu Bảo"    ← 我="anh", 小宝=Tiểu Bảo
+   "你别担心"   → "Em đừng lo"                ← 你="em"
+   "我带他去"   → "Anh đưa con đi"            ← 我="anh", 他→con
+
+Anchor [con trai: 我="con" | → chồng: 你="ba"]:
+   "爸爸 你回来了" → "Ba ơi, ba về rồi"      ← 你="ba" (vocative 爸爸 confirms)
+   "我想跟你玩"   → "Con muốn chơi với ba"    ← 我="con", 你="ba"
 
 🚨 3 LỖI XƯNG HÔ KHÁC — TUYỆT ĐỐI TRÁNH:
 
