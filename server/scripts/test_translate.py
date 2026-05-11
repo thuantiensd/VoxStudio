@@ -141,6 +141,12 @@ def main():
     ap.add_argument("--source", default=None)
     ap.add_argument("--target", default="vi")
     ap.add_argument("--limit", type=int, default=0)
+    # Visual context (Pass-(-1))
+    ap.add_argument("--enable-visual", action="store_true",
+                     help="Bật Pass-(-1) visual context analysis")
+    ap.add_argument("--visual-engine", default=None,
+                     help="Engine VLM: gemini|openai|claude (default = main engine)")
+    ap.add_argument("--visual-model", default=None, help="Model VLM override")
     args = ap.parse_args()
 
     if args.sample or not args.project_id:
@@ -176,12 +182,45 @@ def main():
     from app.services.llm import run_analyze, run_translate, run_edit
     from app.services.llm.prompts import _max_chars
 
+    # Pass-(-1): Visual Context (optional)
+    visual_ctx = {}
+    if args.enable_visual and args.project_id:
+        v_engine = args.visual_engine or args.engine
+        v_key = get_api_key(v_engine) or api_key
+        if not v_key:
+            print(f"⚠️  Visual engine {v_engine} thiếu key — skip visual context")
+        else:
+            video_path = SERVER_DIR / "dubbing_projects" / args.project_id / "original.mp4"
+            if not video_path.exists():
+                print(f"⚠️  Không tìm thấy video {video_path} — skip visual context")
+            else:
+                print(f"⏱️  Running Pass-(-1) Visual Context via {v_engine}/{args.visual_model or '(default)'}...")
+                tv = time.time()
+                from app.services import visual_context_svc
+                visual_ctx = visual_context_svc.analyze_video(
+                    video_path=video_path, engine=v_engine,
+                    api_key=v_key, model=args.visual_model, source_lang=source_lang,
+                )
+                print(f"   ↳ Visual done in {time.time()-tv:.1f}s")
+                if visual_ctx:
+                    print(f"   ↳ Genre: {visual_ctx.get('genre','?')}, Register: {visual_ctx.get('register','?')}")
+                    print(f"   ↳ Scene: {visual_ctx.get('scene_summary','')[:80]}")
+                    print(f"   ↳ Characters: {len(visual_ctx.get('characters',[]))}")
+                    for c in visual_ctx.get("characters", []):
+                        print(f"     • {c.get('id')}: {c.get('description')} — {c.get('gender')}, {c.get('likely_role')}")
+                else:
+                    print("   ↳ (empty — VLM call failed)")
+                print()
+    elif args.enable_visual:
+        print("⚠️  --enable-visual yêu cầu --project_id (cần video thật)")
+        print()
+
     # Pass-0
     print("⏱️  Running Pass-0 (analyze)...")
     t0 = time.time()
     rels = run_analyze(
         engine=args.engine, segments=segments, source_lang=source_lang,
-        api_key=api_key,
+        api_key=api_key, visual_context=visual_ctx or None,
     )
     print(f"   ↳ Pass-0 done in {time.time()-t0:.1f}s")
     print_pass0(rels)
