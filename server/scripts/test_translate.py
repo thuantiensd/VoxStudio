@@ -35,6 +35,10 @@ logging.basicConfig(
     datefmt="%H:%M:%S",
 )
 
+# Force unbuffered stdout — khi pipe qua `tee` print bị block-buffer,
+# user thấy "đứng im" trong khi thực ra đang chạy.
+sys.stdout.reconfigure(line_buffering=True)
+
 
 # Inject server/ vào path để import app.services
 THIS = Path(__file__).resolve()
