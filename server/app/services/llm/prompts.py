@@ -475,14 +475,19 @@ NHIỆM VỤ: dịch lời thoại từ {src_name} → {tgt_name} cho lồng ti�
    "你今天加班吗 老公?" — chữ "老公" cuối là cách VỢ gọi CHỒNG.
 
    ❌ SAI: "Hôm nay anh tăng ca à, chồng?" (dịch chữ "老公" thành "chồng")
-   ✅ ĐÚNG: "Hôm nay anh tăng ca à, anh?" (dùng pronoun từ SPEAKER MAP)
-            HOẶC: "Hôm nay anh tăng ca à?" (bỏ tail nếu thừa)
+   ✅ ĐÚNG: "Hôm nay anh lại tăng ca à?" (BỎ tail — câu đã có "anh" đầu)
+   ✅ ĐÚNG: "Anh ơi, hôm nay lại tăng ca à?" (chuyển tail lên đầu thành vocative)
+
+   ⚡ RULE PHỤ: KHÔNG ĐẶT PRONOUN TRÙNG Ở ĐẦU VÀ CUỐI CÂU.
+   ❌ SAI: "Hôm nay ANH lại tăng ca à, ANH?" ← lặp "anh" 2 lần, ngớ ngẩn
+   ❌ SAI: "EM cũng nhớ con lắm, EM." ← lặp "em" 2 lần
+   ✅ ĐÚNG: pronoun XUẤT HIỆN 1 LẦN. Nếu đầu câu đã có → BỎ vocative cuối.
 
    BẢNG MAPPING vocative-tail (Trung → Việt):
-   • 老公 → "anh" / "anh ơi" (vợ gọi chồng)
-   • 老婆 → "em" / "em ơi" (chồng gọi vợ)
+   • 老公 → bỏ / "anh ơi" (vợ gọi chồng — KHÔNG dịch "chồng")
+   • 老婆 → bỏ / "em ơi" (chồng gọi vợ — KHÔNG dịch "vợ")
    • 亲爱的 → "anh"/"em"/"cưng" (theo SPEAKER MAP)
-   • 宝贝 (cha/mẹ gọi con) → "con yêu"/"cục cưng"/"con"
+   • 宝贝 (cha/mẹ gọi con) → "con"/"cục cưng"/"con yêu"
    • 宝贝 (yêu nhau) → "em yêu"/"anh yêu"
    • 哥/哥哥 (gọi anh) → "anh"
    • 姐/姐姐 (gọi chị) → "chị"
@@ -583,12 +588,77 @@ Mỗi line có `[max N chars]` = số ký tự TỐI ĐA cho dub đúng nhịp.
    • Ăn uống: 咖啡→cà phê, 牛奶→sữa, 果汁→nước trái cây
 
 ═══════════════════════════════════════════════════════════════
-✍️ STYLE — VIẾT NHƯ DỊCH GIẢ VTV
+✍️ STYLE PHIM — KHÔNG VIẾT NHƯ NÓI CHUYỆN HÀNG NGÀY
 ═══════════════════════════════════════════════════════════════
-   • Mượt như phim truyền hình — KHÔNG word-by-word literal
-   • Match emotion: angry→gắt, whisper→nhỏ, happy→tươi, sad→buồn
-   • Tiếng Việt tự nhiên: chêm "nhé/à/vậy/đấy" hợp ngữ cảnh
-   • Bỏ chủ ngữ rườm rà nếu nghĩa vẫn rõ
+
+Đây KHÔNG phải dịch chat. Đây là LỜI THOẠI PHIM cho dub VTV. Yêu cầu
+cảm xúc + mượt + có hồn — KHÔNG word-by-word, KHÔNG "đời thường" trần trụi.
+
+🎬 PATTERNS CẤM (dịch literal hay gặp):
+
+❌ "Đúng vậy" (dịch 对啊/是啊) → DÙNG: "Ừ" / "Phải rồi" / "Đúng rồi" / "Ờ"
+❌ "Vâng" cho 嗯/啊 → DÙNG: "Ừ" (thân mật), "Vâng ạ" (lễ phép)
+❌ "Bạn" giữa người thân → DÙNG pronoun theo SPEAKER MAP
+❌ "Tôi tưởng..." giữa vợ chồng → DÙNG: "Em tưởng..." / "Anh tưởng..."
+❌ Pronoun đầu + cuối câu trùng → CHỌN 1 chỗ
+❌ Lặp "đó" / "rồi" / "à" 2-3 lần trong 1 câu
+
+🎭 PATTERNS NÊN DÙNG (Việt phim mượt):
+
+• Sentence-final particles (chêm cho có hồn):
+  - "...nhỉ?" — soft question, đồng cảm
+  - "...thế?" / "...thế nhỉ?" — ngạc nhiên nhẹ
+  - "...đấy / đó" — emphasis (KHÔNG lặp với "rồi")
+  - "...lắm / lắm rồi / lắm cơ" — nhấn mạnh cảm xúc
+  - "...cơ / cơ mà" — ngạc nhiên / phản đối nhẹ
+  - "...chứ" — confirmation
+  - "...mà" — giải thích / nhắc nhở
+
+• Filler chuyển tone:
+  - "Thật ra..." / "Thật sự..." — emphasis
+  - "Đúng là..." — exclamation
+  - "Hóa ra..." — discovery
+  - "Mà..." (đầu câu) — turn của thoại
+
+• Đại từ thân mật biểu cảm:
+  - "ta" (1st-person tự nhủ / suy ngẫm)
+  - "ấy" sau pronoun: "anh ấy / cô ấy / nó" (ngôi 3)
+
+📝 VÍ DỤ TRƯỚC/SAU (từ test thực tế):
+
+❌ "Hôm nay anh lại tăng ca à, anh?"      (lặp anh + literal)
+✅ "Hôm nay anh lại tăng ca à?"           (gọn)
+✅ "Anh ơi, hôm nay lại tăng ca à?"       (vocative đầu, mượt)
+✅ "Hôm nay anh lại tăng ca nữa hả?"      (cảm xúc trách)
+
+❌ "Đúng vậy, em. Công ty dạo này nhiều việc quá."
+✅ "Ừ em, dạo này công ty nhiều việc lắm."
+✅ "Phải rồi, dạo này bên anh nhiều việc cực."
+
+❌ "Anh không quan tâm đến con nữa à? Con nhớ anh."
+✅ "Anh chẳng còn đoái hoài đến con nữa, con nhớ anh lắm đấy."
+✅ "Anh không còn quan tâm đến con nữa hả? Con nhớ anh lắm rồi."
+
+❌ "Anh cũng nhớ Tiểu Bảo. Cuối tuần này sẽ đưa con đi công viên."
+✅ "Anh cũng nhớ Tiểu Bảo lắm. Cuối tuần anh đưa con đi công viên nhé."
+
+❌ "Ba ơi, ba về rồi!"  (literal — câu thực ra muốn vui mừng)
+✅ "Ba! Ba về rồi à!" (cảm xúc reo lên)
+
+❌ "Tiểu Bảo, ba ôm cái nào!"  (cứng — như đang ra lệnh)
+✅ "Tiểu Bảo, lại đây ba ôm nào!"  (mềm + thương)
+
+❌ "Ba ơi, con muốn chơi game với ba."
+✅ "Ba ơi, con muốn chơi game với ba cơ."  (làm nũng)
+
+❌ "Cục cưng, ăn cơm trước nhé?"
+✅ "Cục cưng ơi, ăn cơm đã rồi chơi nhé."
+
+🎯 NGUYÊN TẮC CHUNG:
+   1. Đọc emotion từ context → chọn từ ngữ phù hợp (vui/buồn/giận/làm nũng).
+   2. Khi câu gốc có cảm xúc → KHÔNG dịch trần trụi, phải truyền cảm xúc.
+   3. Người Việt nói phim DỊU và CHÊM HẠT — không thẳng đuột như chat.
+   4. Bớt chủ ngữ thừa; chêm tiểu từ cuối câu cho có vibe.
 {extra_block}{context_section}
 ═══════════════════════════════════════════════════════════════
 🎯 SELF-VERIFY GENDER (tự kiểm tra giới tính speaker)
