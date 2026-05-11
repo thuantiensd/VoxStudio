@@ -148,11 +148,12 @@ def _post_with_retry(engine: str, url: str, *, params=None, json_body=None, data
     raise ValueError(msg)
 
 # Default model mỗi engine — có thể override qua body request nếu cần.
-# Gemini 1.5 đã bị Google retire (04/2025). Dùng 2.5-flash (fast + free tier).
+# Đã bump lên pro tier (2026-05) vì translate phim cần khả năng theo dõi
+# context dài + pronoun nhất quán — tier rẻ hay slip ở cuối batch.
 DEFAULT_MODELS = {
-    "openai": "gpt-4o-mini",
-    "claude": "claude-3-5-haiku-20241022",
-    "gemini": "gemini-2.5-flash",
+    "openai": "gpt-4o",
+    "claude": "claude-sonnet-4-6",
+    "gemini": "gemini-2.5-pro",
 }
 
 TIMEOUT = 60.0

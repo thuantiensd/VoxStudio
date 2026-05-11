@@ -34,17 +34,17 @@ MIN_SPEAKERS_FOR_ANALYZE = 2
 # Vision-capable models per engine — backend list cho FE dropdown
 VISION_MODELS = {
     "gemini": [
-        {"id": "gemini-2.5-flash", "label": "Gemini 2.5 Flash (nhanh, rẻ)", "default": True},
-        {"id": "gemini-2.5-pro",   "label": "Gemini 2.5 Pro (chuẩn nhất)"},
+        {"id": "gemini-2.5-flash", "label": "Gemini 2.5 Flash (nhanh, rẻ)"},
+        {"id": "gemini-2.5-pro",   "label": "Gemini 2.5 Pro (chuẩn nhất)", "default": True},
     ],
     "openai": [
-        {"id": "gpt-4o-mini", "label": "GPT-4o mini (rẻ)", "default": True},
-        {"id": "gpt-4o",      "label": "GPT-4o (chuẩn nhất)"},
+        {"id": "gpt-4o-mini", "label": "GPT-4o mini (rẻ)"},
+        {"id": "gpt-4o",      "label": "GPT-4o (chuẩn nhất)", "default": True},
     ],
     "claude": [
-        {"id": "claude-3-5-haiku-20241022",  "label": "Claude 3.5 Haiku (rẻ)", "default": True},
+        {"id": "claude-3-5-haiku-20241022",  "label": "Claude 3.5 Haiku (rẻ)"},
         {"id": "claude-3-5-sonnet-20241022", "label": "Claude 3.5 Sonnet (chuẩn)"},
-        {"id": "claude-sonnet-4-6",          "label": "Claude Sonnet 4.6 (mạnh nhất)"},
+        {"id": "claude-sonnet-4-6",          "label": "Claude Sonnet 4.6 (mạnh nhất)", "default": True},
     ],
 }
 
@@ -249,7 +249,7 @@ def _call_gemini_http(prompt: dict, api_key: Optional[str], model: Optional[str]
     if not api_key:
         raise ValueError("api_key required cho gemini_http")
     import httpx
-    m = model or "gemini-2.5-flash"
+    m = model or "gemini-2.5-pro"
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent"
     full = prompt["system"] + "\n\n" + prompt["user"]
     payload = {
@@ -267,7 +267,7 @@ def _call_openai_http(prompt: dict, api_key: Optional[str], model: Optional[str]
     if not api_key:
         raise ValueError("api_key required cho openai")
     import httpx
-    m = model or "gpt-4o-mini"
+    m = model or "gpt-4o"
     payload = {
         "model": m,
         "temperature": 0.2,
@@ -289,7 +289,7 @@ def _call_claude_http(prompt: dict, api_key: Optional[str], model: Optional[str]
     if not api_key:
         raise ValueError("api_key required cho claude")
     import httpx
-    m = model or "claude-3-5-haiku-20241022"
+    m = model or "claude-sonnet-4-6"
     payload = {
         "model": m,
         "max_tokens": 4096,
@@ -330,7 +330,7 @@ def _call_gemini_vision(prompt_text: str, frame_paths: list,
     if not api_key:
         raise ValueError("api_key required cho gemini vision")
     import httpx
-    m = model or "gemini-2.5-flash"
+    m = model or "gemini-2.5-pro"
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent"
 
     parts = [{"text": prompt_text}]
@@ -355,7 +355,7 @@ def _call_openai_vision(prompt_text: str, frame_paths: list,
     if not api_key:
         raise ValueError("api_key required cho openai vision")
     import httpx
-    m = model or "gpt-4o-mini"
+    m = model or "gpt-4o"
 
     content = [{"type": "text", "text": prompt_text}]
     for fp in frame_paths:
@@ -385,7 +385,7 @@ def _call_claude_vision(prompt_text: str, frame_paths: list,
     if not api_key:
         raise ValueError("api_key required cho claude vision")
     import httpx
-    m = model or "claude-3-5-haiku-20241022"
+    m = model or "claude-sonnet-4-6"
 
     content = []
     for fp in frame_paths:
