@@ -761,3 +761,58 @@ export async function downloadToProject(body: {
   }
   return res;
 }
+
+/* ────────────────────────────────────────────────────────────────
+ * User API Keys (BYOK, server-side encrypted)
+ * ──────────────────────────────────────────────────────────────── */
+
+export type UserApiKeyInfo = {
+  provider: string;
+  has_key: boolean;
+  test_status: "untested" | "ok" | "invalid" | "error";
+  test_message: string;
+  last_tested_at: string | null;
+  updated_at: string | null;
+};
+
+export type UserKeysResponse = {
+  supported_providers: string[];
+  keys: UserApiKeyInfo[];
+};
+
+export async function listUserApiKeys(): Promise<UserKeysResponse> {
+  return api<UserKeysResponse>("/user/api-keys");
+}
+
+export async function setUserApiKey(provider: string, apiKey: string) {
+  return api<{ ok: boolean; key: UserApiKeyInfo }>(
+    `/user/api-keys/${encodeURIComponent(provider)}`,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ api_key: apiKey }),
+    },
+  );
+}
+
+export async function testUserApiKey(
+  provider: string,
+  apiKey?: string,
+): Promise<{ ok: boolean; message: string }> {
+  const body = apiKey ? { api_key: apiKey } : null;
+  return api<{ ok: boolean; message: string }>(
+    `/user/api-keys/${encodeURIComponent(provider)}/test`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      ...(body ? { body: JSON.stringify(body) } : {}),
+    },
+  );
+}
+
+export async function deleteUserApiKey(provider: string) {
+  return api<{ ok: boolean; deleted: boolean }>(
+    `/user/api-keys/${encodeURIComponent(provider)}`,
+    { method: "DELETE" },
+  );
+}

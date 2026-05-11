@@ -87,6 +87,7 @@ import {
   type PremiumVoice,
   type Voice,
 } from "@/lib/api";
+import { ApiKeysManager } from "@/components/api-keys-manager";
 
 type Tab =
   | "home"
@@ -4981,6 +4982,7 @@ type DubAdvancedModalProps = {
 
 function DubAdvancedModal(p: DubAdvancedModalProps) {
   const [tab, setTab] = useState<"quality" | "video" | "subtitle" | "audio" | "auto" | "translate">("quality");
+  const [keysManagerOpen, setKeysManagerOpen] = useState(false);
   const mounted = useClientMounted();
 
   useEffect(() => {
@@ -5795,11 +5797,31 @@ function DubAdvancedModal(p: DubAdvancedModalProps) {
                     </div>
                   </div>
 
-                  {/* API key — chỉ hiện khi engine cần key */}
+                  {/* Quản lý API keys server-side — recommended (BYOK lưu vĩnh viễn) */}
+                  <div className="rounded-lg border border-primary/30 bg-primary/5 p-3">
+                    <div className="flex items-center justify-between gap-3 flex-wrap">
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm font-semibold">🔑 Quản lý API Keys</div>
+                        <p className="mt-0.5 text-[11px] text-muted-foreground leading-snug">
+                          Lưu key 1 lần, dùng cho mọi project. Có nút test key valid không.
+                          Key được mã hoá server-side.
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setKeysManagerOpen(true)}
+                        className="rounded-md bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground hover:opacity-90"
+                      >
+                        Mở quản lý
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* API key inline — quick test mode (vẫn giữ cho user dùng key ad-hoc 1 lần) */}
                   {needsKey && (
                     <div>
                       <span className="mb-1.5 block text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
-                        API key cho {cur?.label}
+                        Hoặc nhập key trực tiếp (chỉ dùng lần này)
                       </span>
                       <input
                         type="password"
@@ -5822,16 +5844,18 @@ function DubAdvancedModal(p: DubAdvancedModalProps) {
                         <div className="mt-1.5 flex items-start gap-1.5 rounded-lg border border-amber-500/30 bg-amber-500/10 px-2.5 py-1.5">
                           <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0 text-amber-600" />
                           <p className="text-[10px] text-amber-700 dark:text-amber-300">
-                            Engine <strong>{cur?.label}</strong> cần API key. Nhập key hoặc chuyển sang Google miễn phí.
+                            Để trống cũng được nếu đã lưu key qua &quot;Quản lý API Keys&quot; phía trên.
                           </p>
                         </div>
                       ) : (
                         <p className="mt-1 text-[10px] text-muted-foreground">
-                          Key chỉ truyền theo từng job — server không lưu trữ.
+                          Để trống nếu đã lưu key server-side. Inline = quick test, không lưu.
                         </p>
                       )}
                     </div>
                   )}
+
+                  <ApiKeysManager open={keysManagerOpen} onClose={() => setKeysManagerOpen(false)} />
 
                   {/* Film genre — important context for LLM */}
                   <div>
@@ -5933,8 +5957,9 @@ function DubAdvancedModal(p: DubAdvancedModalProps) {
                         </div>
                         <div className="mt-0.5 text-[11px] leading-snug text-muted-foreground">
                           AI xem 8 keyframe video → detect bối cảnh + nhân vật → giảm sai xưng hô.
-                          Dùng <b>cùng engine + key</b> đã chọn ở &quot;Engine dịch&quot; phía trên.
-                          Tốn phí API thêm cho lần gọi VLM.
+                          Dùng <b>cùng engine + key</b> đã chọn ở &quot;Engine dịch&quot; phía trên,
+                          tự động pick model PRO của engine đó (Gemini Pro / GPT-4o / Claude Sonnet 4.6).
+                          Tốn phí API thêm khoảng $0.02-0.05/video.
                         </div>
                         {p.enableVisualContext && p.translateEngine === "google_free" && (
                           <div className="mt-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-1.5 text-[10.5px] text-amber-100/90">
