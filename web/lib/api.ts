@@ -588,10 +588,20 @@ export async function translateDubbingProject(
 /**
  * Trigger auto-dub pipeline cho project. Backend trả SSE stream, ta chỉ
  * cần xác nhận đã enqueue (200 OK) rồi bỏ kết nối — worker GPU sẽ tự chạy.
+ *
+ * Visual context params (optional, BYOK): enable_visual_context + engine +
+ * model + key cho Pass-(-1) VLM phân tích keyframe.
  */
 export async function startDubbingAutoDub(
   projectId: string,
-  options: { engine?: string; translate_api_key?: string | null } = {},
+  options: {
+    engine?: string;
+    translate_api_key?: string | null;
+    enable_visual_context?: boolean;
+    visual_engine?: string | null;
+    visual_model?: string | null;
+    visual_api_key?: string | null;
+  } = {},
 ): Promise<void> {
   const token = getToken();
   const headers: Record<string, string> = {
@@ -605,6 +615,10 @@ export async function startDubbingAutoDub(
     body: JSON.stringify({
       engine: options.engine || "google",
       translate_api_key: options.translate_api_key || null,
+      enable_visual_context: !!options.enable_visual_context,
+      visual_engine: options.visual_engine || null,
+      visual_model: options.visual_model || null,
+      visual_api_key: options.visual_api_key || null,
     }),
     signal: controller.signal,
   }).catch((err) => {
@@ -623,6 +637,16 @@ export async function startDubbingAutoDub(
   }
   // Đã 200 OK = job đã enqueue. Đóng stream để khỏi giữ kết nối.
   controller.abort();
+}
+
+/** List VLM-capable models per engine cho FE build dropdown. */
+export type VisionModel = { id: string; label: string; default?: boolean };
+export type VisionModelsResponse = {
+  models: Record<string, VisionModel[]>;
+};
+
+export async function getVisionModels(): Promise<VisionModelsResponse> {
+  return api<VisionModelsResponse>(`/dubbing/vision-models`);
 }
 
 /**
