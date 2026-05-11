@@ -247,7 +247,7 @@ def _translate_uncached(
         raise ValueError("Gemini API key not configured. Set GEMINI_API_KEY in Settings.")
 
     _configure()
-    model = genai.GenerativeModel("gemini-2.0-flash")
+    model = genai.GenerativeModel("gemini-2.5-flash")
 
     results = [{"translated_text": "", "speech_text": "", "emotion": "neutral"}
                for _ in segments]

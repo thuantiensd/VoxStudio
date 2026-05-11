@@ -104,7 +104,7 @@ def _call_gemini_sdk(prompt: dict, model: Optional[str] = None) -> str:
     if not GEMINI_API_KEY:
         raise ValueError("GEMINI_API_KEY not set")
     genai.configure(api_key=GEMINI_API_KEY)
-    m = genai.GenerativeModel(model or "gemini-2.0-flash")
+    m = genai.GenerativeModel(model or "gemini-2.5-flash")
 
     # Hard timeout với threading wrapper (SDK không có timeout native)
     import threading
