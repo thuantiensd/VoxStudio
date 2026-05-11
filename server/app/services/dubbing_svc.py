@@ -2116,10 +2116,12 @@ def generate_segment(project_id: str, seg_id: str) -> dict:
                 seg, target_duration, tts_text, actual_dur,
             )
 
-            # Pass 2: re-generate ở Edge TTS rate đó (nếu auto_pace + lệch đáng kể)
-            if auto_pace and abs(speed_factor - 1.0) > SPEED_TOLERANCE:
-                edge_speed = max(MIN_EDGE_SPEED, min(MAX_EDGE_SPEED, speed_factor))
-                logger.info("[dub] edge speed match: target=%.2fs actual=%.2fs "
+            # Pass 2: re-generate CHỈ KHI cần speedup (speed_factor > 1.0).
+            # speed_factor < 1.0 không bao giờ xảy ra sau fix _compute_target_speed,
+            # nhưng giữ guard rõ để tránh slow audio.
+            if auto_pace and speed_factor > 1.0 + SPEED_TOLERANCE:
+                edge_speed = max(1.0, min(MAX_EDGE_SPEED, speed_factor))
+                logger.info("[dub] edge speedup: target=%.2fs actual=%.2fs "
                             "speed=%.2fx reason=%s",
                             target_duration, actual_dur, edge_speed, reason)
                 mp3_v2 = seg_dir / f"{seg_id}_v2.mp3"
@@ -2129,13 +2131,12 @@ def generate_segment(project_id: str, seg_id: str) -> dict:
                 audio_np, sr = sf.read(str(out_path))
                 actual_dur = len(audio_np) / sr
 
-            # Fine-tune với atempo nếu vẫn lệch slot > 3% (đã được rate-match
-            # nhưng Edge TTS speed param không chính xác 100%).
+            # Fine-tune với atempo CHỈ KHI cần speedup (final_ratio > 1.0).
+            # KHÔNG stretch chậm — câu Việt ngắn hơn slot để silence tự nhiên fill.
             if auto_pace and actual_dur > 0 and target_duration > 0:
                 final_ratio = actual_dur / target_duration
-                # Chỉ atempo trong giới hạn strict, vượt thì để overflow
-                # (silence sẽ rơi vào gap kế bên hoặc segment lấn nhẹ).
-                if abs(final_ratio - 1.0) > 0.03 and final_ratio <= MAX_SPEED_FACTOR:
+                # Chỉ atempo khi cần SPEEDUP (ratio > 1.03) và trong giới hạn strict.
+                if final_ratio > 1.03 and final_ratio <= MAX_SPEED_FACTOR:
                     stretched = seg_dir / f"{seg_id}_stretched.wav"
                     _atempo_stretch(out_path, stretched, final_ratio)
                     audio_np, sr = sf.read(str(stretched))
@@ -2145,6 +2146,7 @@ def generate_segment(project_id: str, seg_id: str) -> dict:
                                    "ratio=%.2f > MAX %.2f — accepting overflow",
                                    seg.get("id", "?"), actual_dur, target_duration,
                                    final_ratio, MAX_SPEED_FACTOR)
+                # final_ratio < 1.0 (audio ngắn hơn slot) → KHÔNG làm gì, silence fill
 
         else:
             # ── OmniVoice (local GPU) ──
@@ -2436,15 +2438,21 @@ def _trim_trailing_silence(audio: np.ndarray, sr: int, threshold_db: float = -40
 
 
 def _atempo_stretch(in_path: Path, out_path: Path, tempo: float):
-    """Time-stretch audio with ffmpeg atempo (handles 0.5-2.0 range by chaining)."""
+    """Time-stretch audio with ffmpeg atempo (chỉ SPEEDUP, không slowdown).
+
+    Slowdown (tempo < 1.0) làm voice timbre nghe lờ đờ + giả tạo.
+    Caller phải đảm bảo tempo ≥ 1.0. Nếu tempo < 1.0 → guard về 1.0.
+    """
+    if tempo < 1.0:
+        # Safety guard — không bao giờ slow down audio.
+        import shutil
+        shutil.copy(str(in_path), str(out_path))
+        return
     filters = []
     t = tempo
     while t > 2.0:
         filters.append("atempo=2.0")
         t /= 2.0
-    while t < 0.5:
-        filters.append("atempo=0.5")
-        t *= 2.0
     filters.append(f"atempo={t:.4f}")
 
     (
@@ -2462,9 +2470,11 @@ def _atempo_stretch(in_path: Path, out_path: Path, tempo: float):
 # trailing silence + cap cứng overflow để KHÔNG overlap batch sau.
 SPEED_TOLERANCE = 0.05      # 5% — chỉ skip atempo nếu lệch < 5%
 MAX_SPEED_FACTOR = 1.25     # speedup tối đa (atempo)
-MIN_SPEED_FACTOR = 0.92     # slowdown tối đa (avoid muddy voice)
+# KHÔNG slowdown — câu Việt ngắn hơn slot Trung → để silence tự nhiên fill,
+# KHÔNG kéo dài audio (kéo nghe muddy + giả tạo).
+MIN_SPEED_FACTOR = 1.0      # KHÔNG slowdown (trước: 0.92 — gây kéo dài audio)
 MAX_EDGE_SPEED = 1.25       # Edge TTS rate max
-MIN_EDGE_SPEED = 0.92       # Edge TTS rate min
+MIN_EDGE_SPEED = 1.0        # KHÔNG slowdown Edge TTS (trước: 0.92)
 # Sau khi đã max speed, cho phép overflow X% rồi mới hard-trim. 15% grace
 # để cuối câu không bị cụt giật khi ratio nhỏ (1.10–1.20x).
 OVERFLOW_GRACE = 1.15
@@ -2541,12 +2551,18 @@ def _compute_target_speed(seg: dict, target_dur: float, dub_text: str,
         est_dur = dub_chars / orig_rate if orig_rate > 0 else target_dur
         ratio = est_dur / target_dur if target_dur > 0 else 1.0
 
-    # Clamp + decide với adaptive cap
+    # ── KHÔNG SLOWDOWN ──
+    # Audio Việt ngắn hơn slot → để silence tự nhiên fill, KHÔNG kéo dài.
+    # Slowdown làm voice nghe lờ đờ, méo (timbre artifact của atempo < 1.0).
+    if ratio <= 1.0:
+        return (1.0, "natural_no_slowdown")
+    # Speedup nhỏ trong tolerance → giữ natural 1.0
     if ratio <= 1.0 + SPEED_TOLERANCE:
-        return (max(MIN_SPEED_FACTOR, min(1.0, ratio)), "natural")
+        return (1.0, "natural")
+    # Speedup vừa phải trong cap (1.05-1.32 tuỳ emotion)
     if ratio <= speed_cap:
         return (ratio, "speedup_within_limit")
-    # Overflow — clamp + warn (cap đã adaptive theo emotion)
+    # Overflow vượt cap — clamp để audio không bị chipmunk
     reason = f"overflow_clamped_{emotion}" if emotion != "neutral" else "overflow_clamped"
     return (speed_cap, reason)
 
@@ -2597,9 +2613,11 @@ def _process_one_batch_audio(
         logger.info("Batch %d: target=%.1fs, actual=%.1fs, ratio=%.2f, gender=%s",
                     batch_idx + 1, target_duration, actual_duration, speed_ratio, gender or "?")
 
-        # Step 3: Re-gen with adjusted speed if needed
-        if abs(speed_ratio - 1.0) > SPEED_TOLERANCE:
-            edge_speed = max(MIN_EDGE_SPEED, min(MAX_EDGE_SPEED, speed_ratio))
+        # Step 3: Re-gen với speed CAO HƠN nếu audio dài hơn slot. KHÔNG slowdown.
+        # speed_ratio > 1.0 = audio dài hơn slot → cần speedup.
+        # speed_ratio < 1.0 = audio ngắn hơn → silence tự fill, không re-gen.
+        if speed_ratio > 1.0 + SPEED_TOLERANCE:
+            edge_speed = max(1.0, min(MAX_EDGE_SPEED, speed_ratio))
             batch_mp3_v2 = seg_dir / f"_batch_{batch_idx}_v2.mp3"
             _edge_generate_sync(combined_text, str(batch_mp3_v2),
                                 language=target_lang, voice=edge_voice, speed=edge_speed)
@@ -2608,10 +2626,10 @@ def _process_one_batch_audio(
             actual_duration = len(batch_audio) / sr
             speed_ratio = actual_duration / target_duration if target_duration > 0 else 1.0
 
-        # Step 4: atempo fine-tune (cap)
-        if actual_duration > 0 and abs(speed_ratio - 1.0) > 0.03:
+        # Step 4: atempo CHỈ KHI cần speedup (ratio > 1.03). KHÔNG stretch chậm.
+        if actual_duration > 0 and speed_ratio > 1.03:
             atempo_factor = min(speed_ratio, MAX_SPEED_FACTOR)
-            if abs(atempo_factor - 1.0) > 0.03:
+            if atempo_factor > 1.03:
                 stretched_wav = seg_dir / f"_batch_{batch_idx}_final.wav"
                 _atempo_stretch(batch_wav, stretched_wav, atempo_factor)
                 batch_audio, _ = sf.read(str(stretched_wav))
