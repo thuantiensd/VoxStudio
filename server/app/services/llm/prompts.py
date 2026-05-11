@@ -786,7 +786,13 @@ với scene_context. CHO PHÉP đổi pronoun nếu literal sai emotion (ví d�
 vợ chồng đang ly hôn mà literal dùng "anh/em" thân mật → đổi sang "tôi/cô" lạnh).
 
 {scene_block}
-🚨 PRONOUN — KHÔNG TỰ Ý ĐỔI khỏi literal:
+🚨🚨🚨 RULE TUYỆT ĐỐI VỀ PRONOUN — KHÔNG ĐƯỢC ĐỔI:
+
+⚡ NHẤT QUÁN XUYÊN SUỐT: pronoun của MỖI SPEAKER phải GIỐNG NHAU từ đầu
+   tới CUỐI batch. KHÔNG đổi giữa chừng (vd đầu "anh" cuối "em").
+   - Đọc literal lines → xác định speaker xưng gì (anh/em/con/...)
+   - GIỮ NGUYÊN xưng hô đó cho TẤT CẢ line của speaker này.
+   - Đặc biệt CUỐI BATCH dễ slip — đọc lại line đầu để check.
 
 ⚡ Vợ chồng / cặp đôi: PHẢI "anh/em" (kể cả literal có "tôi/cô" do Pass-1
    nhầm). Editor SỬA NGƯỢC LẠI nếu literal sai pronoun:
@@ -795,8 +801,12 @@ vợ chồng đang ly hôn mà literal dùng "anh/em" thân mật → đổi san
 
 ⚡ "Tôi/cô" CHỈ giữ khi: đã ly hôn chính thức / thoại từ chối rõ ràng.
 
+⚡ KHÔNG TỰ ĐỔI pronoun ở cuối câu/cuối batch chỉ vì nghĩ "câu này tone
+   khác". Tone thể hiện qua TIỂU TỪ + TỪ NGỮ, KHÔNG phải đổi pronoun.
+
 Editor TASK: polish style (thêm tiểu từ, đảo từ, cảm xúc) + SỬA pronoun
 sai về DEFAULT "anh/em" cho vợ chồng + "con/bố/mẹ" cho gia đình.
+GIỮ pronoun NHẤT QUÁN xuyên suốt cho mỗi speaker.
 
 
 🎬 PATTERNS CẤM (literal hay gặp):
