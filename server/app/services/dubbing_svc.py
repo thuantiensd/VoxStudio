@@ -3529,8 +3529,13 @@ def update_project_settings(project_id: str, settings: dict) -> dict:
         # Values: drama, romance, action, comedy, historical, crime, family,
         # horror, anime, documentary, kpop_drama, cdrama, wuxia, auto
         "film_genre",
+        # Visual context (Pass-(-1)) — bật VLM analyze keyframe trước translate.
+        # BYOK. enable_visual_context = toggle; visual_engine = gemini/openai/claude;
+        # visual_model = optional override.
+        "enable_visual_context", "visual_engine", "visual_model",
     }
-    nullable = {"edge_voice", "voice_id", "default_emotion", "topic_hint", "glossary"}
+    nullable = {"edge_voice", "voice_id", "default_emotion", "topic_hint", "glossary",
+                 "visual_engine", "visual_model"}
     for k, v in settings.items():
         if k in allowed and (v is not None or k in nullable):
             project[k] = v
@@ -3740,18 +3745,27 @@ def _mark_project_error(project_id: str, error_msg: str) -> None:
         logger.warning("Cannot mark project error: %s", e)
 
 
-def auto_dub(project_id: str, engine: str = "google", api_key: str | None = None):
+def auto_dub(
+    project_id: str,
+    engine: str = "google",
+    api_key: str | None = None,
+    enable_visual_context: bool = False,
+    visual_engine: str | None = None,
+    visual_model: str | None = None,
+    visual_api_key: str | None = None,
+):
     """Full pipeline: Demucs → Faster-Whisper → Translate → TTS → Export.
 
     Args:
         engine: translate engine — google_free / google_cloud / deepl /
                 gemini / openai / claude / qwen.
-        api_key: BYOK key cho engine cần (deepl/openai/claude/google_cloud/
-                 gemini-byok). Server không lưu, chỉ dùng cho lần chạy này.
+        api_key: BYOK key cho engine cần.
+        enable_visual_context: True → chạy Pass-(-1) VLM phân tích keyframe
+                trước translate (nâng cao, +cost).
+        visual_engine: gemini/openai/claude (BYOK).
+        visual_model: optional, default = bản rẻ.
+        visual_api_key: BYOK cho VLM.
 
-    Respects project toggles:
-      - enable_dubbing=False → skip TTS step entirely
-      - enable_subtitle=False → don't burn subtitle in export
     Yields progress updates as dicts for SSE streaming.
     """
     project = _load_meta(project_id)
@@ -3826,7 +3840,13 @@ def auto_dub(project_id: str, engine: str = "google", api_key: str | None = None
         # openai / claude / qwen. "google" là alias legacy.
         for tick in _run_step_with_progress(
             translate_project, [project_id],
-            {"engine": engine or "google_free", "api_key": api_key},
+            {
+                "engine": engine or "google_free", "api_key": api_key,
+                "enable_visual_context": enable_visual_context,
+                "visual_engine": visual_engine,
+                "visual_model": visual_model,
+                "visual_api_key": visual_api_key,
+            },
             start_pct=r_transl[0], end_pct=r_transl[1],
             label="Đang dịch thuật...", estimated_sec=20,
         ):

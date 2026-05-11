@@ -186,8 +186,9 @@ export function BatchProvider({ children }) {
         // google_cloud → BYOK, lookup key. Google Free / Qwen → no key.
         let translateEngine = "google_free";
         let translateApiKey = null;
+        let proj = null;
         try {
-          const proj = await getDubbingProject(next.projectId);
+          proj = await getDubbingProject(next.projectId);
           translateEngine = proj?.translate_engine || "google_free";
         } catch { /* fall back to default */ }
         const needsKey = ["deepl", "openai", "claude", "gemini", "google_cloud"]
@@ -199,6 +200,18 @@ export function BatchProvider({ children }) {
           } catch { /* user chưa có key — server sẽ trả error rõ ràng */ }
         }
 
+        // Visual context settings (per-project, optional, BYOK)
+        const enableVisualContext = !!proj?.enable_visual_context;
+        const visualEngine = proj?.visual_engine || null;
+        const visualModel = proj?.visual_model || null;
+        let visualApiKey = null;
+        if (enableVisualContext && visualEngine) {
+          try {
+            const { getKey } = await import("../services/keyvault");
+            visualApiKey = await getKey(visualEngine);
+          } catch { /* skip nếu thiếu key — backend sẽ skip visual */ }
+        }
+
         await new Promise((resolve, reject) => {
           let settled = false;
           const settle = (fn) => (v) => { if (!settled) { settled = true; fn(v); } };
@@ -207,6 +220,10 @@ export function BatchProvider({ children }) {
           autoDub(next.projectId, {
             engine: translateEngine,
             translateApiKey,
+            enableVisualContext,
+            visualEngine,
+            visualModel,
+            visualApiKey,
             signal: controller.signal,
             onProgress: (d) => {
               // SSE payload: {step, label, progress, detail}

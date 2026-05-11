@@ -366,12 +366,32 @@ export async function transcribeProject(id) {
   return res.json();
 }
 
-export async function translateProject(id, useLLM = false, engine = 'google') {
-  const params = new URLSearchParams();
-  if (useLLM) params.set('use_llm', 'true');
-  if (engine !== 'google') params.set('engine', engine);
-  const qs = params.toString();
-  const res = await request(`/dubbing/projects/${id}/translate${qs ? '?' + qs : ''}`, { method: 'POST' });
+export async function translateProject(id, options = {}) {
+  // Tương thích call cũ: translateProject(id, useLLM, engine) → wrap về dict
+  if (typeof options === 'boolean') {
+    options = { useLLM: options, engine: arguments[2] || 'google' };
+  }
+  const body = {
+    engine: options.engine || 'google',
+    api_key: options.apiKey || null,
+    use_llm: !!options.useLLM,
+    topic_hint: options.topicHint || null,
+    glossary: options.glossary || null,
+    enable_visual_context: !!options.enableVisualContext,
+    visual_engine: options.visualEngine || null,
+    visual_model: options.visualModel || null,
+    visual_api_key: options.visualApiKey || null,
+  };
+  const res = await request(`/dubbing/projects/${id}/translate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  return res.json();
+}
+
+export async function getVisionModels() {
+  const res = await request('/dubbing/vision-models');
   return res.json();
 }
 
@@ -508,14 +528,22 @@ export async function generateEdgeTTS({ text, voice, language, speed }) {
 }
 
 // ── Auto-Dub Pipeline ───────────────────────────────
-export function autoDub(projectId, { engine = 'google', translateApiKey, onProgress, onDone, onError, signal } = {}) {
+export function autoDub(projectId, {
+  engine = 'google', translateApiKey,
+  enableVisualContext = false, visualEngine, visualModel, visualApiKey,
+  onProgress, onDone, onError, signal,
+} = {}) {
   const url = `${API_BASE}/dubbing/projects/${projectId}/auto-dub`;
   const headers = buildHeaders({ 'Content-Type': 'application/json' });
   // Body: engine + key (key qua body để KHÔNG bị log vào access log như
-  // query string).
+  // query string). Visual context params optional, BYOK.
   const body = JSON.stringify({
     engine,
     translate_api_key: translateApiKey || null,
+    enable_visual_context: !!enableVisualContext,
+    visual_engine: visualEngine || null,
+    visual_model: visualModel || null,
+    visual_api_key: visualApiKey || null,
   });
 
   return fetch(url, {

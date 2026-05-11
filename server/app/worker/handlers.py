@@ -142,18 +142,30 @@ async def _run_sync_generator(gen_factory, progress_cb):
 # ── Dubbing handler ────────────────────────────────────────
 
 async def dubbing_handler(payload: dict, *, job_id: str, progress_cb) -> dict:
-    """Payload: { project_id, engine, translate_api_key? }"""
+    """Payload: { project_id, engine, translate_api_key?,
+                  enable_visual_context?, visual_engine?, visual_model?, visual_api_key? }"""
     project_id = payload.get("project_id")
     engine = payload.get("engine", "google")
     translate_api_key = payload.get("translate_api_key")
+    enable_visual_context = bool(payload.get("enable_visual_context"))
+    visual_engine = payload.get("visual_engine")
+    visual_model = payload.get("visual_model")
+    visual_api_key = payload.get("visual_api_key")
     if not project_id:
         raise ValueError("Thiếu project_id")
 
-    logger.info("[dubbing] start project=%s engine=%s", project_id, engine)
+    logger.info("[dubbing] start project=%s engine=%s visual=%s/%s",
+                 project_id, engine,
+                 visual_engine if enable_visual_context else "off",
+                 visual_model or "default")
 
     def gen_factory():
         return dubbing_svc.auto_dub(
             project_id, engine=engine, api_key=translate_api_key,
+            enable_visual_context=enable_visual_context,
+            visual_engine=visual_engine,
+            visual_model=visual_model,
+            visual_api_key=visual_api_key,
         )
 
     last = await _run_sync_generator(gen_factory, progress_cb)

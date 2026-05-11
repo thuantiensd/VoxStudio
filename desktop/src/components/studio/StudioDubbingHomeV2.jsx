@@ -77,6 +77,11 @@ function buildSettingsPayload(cfg, ttsEngine, omniVoiceId) {
     translate_engine: cfg.translateEngine || "google_free",
     topic_hint: (cfg.topicHint || "").trim(),
     glossary: (cfg.glossary || "").trim(),
+    // Visual context (Pass-(-1)) — toggle nâng cao + chọn engine/model.
+    // Key lookup từ KeyVault khi auto-dub chạy (BatchContext).
+    enable_visual_context: !!cfg.enableVisualContext,
+    visual_engine: cfg.visualEngine || null,
+    visual_model: cfg.visualModel || null,
   };
 }
 
@@ -190,6 +195,10 @@ export default function StudioDubbingHomeV2() {
       // qua post-process replacement.
       topicHint: p.topicHint || "",
       glossary: p.glossary || "",
+      // Visual Context (nâng cao) — BYOK, default OFF
+      enableVisualContext: p.enableVisualContext ?? false,
+      visualEngine: p.visualEngine || "",
+      visualModel: p.visualModel || "",
     };
   });
 
@@ -1060,7 +1069,116 @@ function TranslateEngineGroup({ cfg, set }) {
           {t("dubTrans.glossaryHelp")}
         </p>
       </div>
+
+      {/* Visual Context (Pass-(-1)) — toggle nâng cao + dropdown engine/model */}
+      <VisualContextGroup cfg={cfg} set={set} savedKeys={savedKeys} />
     </Section>
+  );
+}
+
+
+// ── Visual Context (nâng cao) — bật VLM phân tích keyframe ──
+function VisualContextGroup({ cfg, set, savedKeys }) {
+  const [models, setModels] = useState({});
+  const [loadingModels, setLoadingModels] = useState(false);
+
+  const enabled = !!cfg.enableVisualContext;
+  const vEngine = cfg.visualEngine || "gemini";
+
+  // Load model list từ backend lần đầu khi user bật toggle
+  useEffect(() => {
+    if (!enabled || Object.keys(models).length > 0) return;
+    setLoadingModels(true);
+    import("../../services/api").then(({ getVisionModels }) => {
+      getVisionModels()
+        .then((r) => { setModels(r?.models || {}); })
+        .catch(() => {})
+        .finally(() => setLoadingModels(false));
+    });
+  }, [enabled, models]);
+
+  const engineOptions = [
+    { id: "gemini", label: "Gemini" },
+    { id: "openai", label: "OpenAI" },
+    { id: "claude", label: "Claude" },
+  ];
+  const modelList = models[vEngine] || [];
+  const selectedModel = cfg.visualModel
+    || (modelList.find((m) => m.default)?.id || modelList[0]?.id || "");
+  const missingKey = enabled && !savedKeys[vEngine];
+
+  return (
+    <div style={{ marginTop: 16, paddingTop: 14, borderTop: "1px dashed var(--n-3)" }}>
+      <label style={{
+        display: "flex", alignItems: "center", gap: 10, cursor: "pointer",
+        userSelect: "none",
+      }}>
+        <input
+          type="checkbox"
+          checked={enabled}
+          onChange={(e) => set({ enableVisualContext: e.target.checked })}
+          style={{ cursor: "pointer", width: 14, height: 14 }}
+        />
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: 12.5, fontWeight: 600, color: "var(--n-10)" }}>
+            🎬 Phân tích video (nâng cao)
+          </div>
+          <div style={{ fontSize: 11, color: "var(--n-7)", marginTop: 2, lineHeight: 1.4 }}>
+            AI xem 8 keyframe video → detect bối cảnh + nhân vật → giảm sai xưng hô.
+            Cộng thêm chi phí API tuỳ engine bạn pick.
+          </div>
+        </div>
+      </label>
+
+      {enabled && (
+        <div style={{ marginTop: 12, paddingLeft: 24, display: "grid", gap: 10 }}>
+          <div>
+            <Label>Engine VLM</Label>
+            <select
+              value={vEngine}
+              onChange={(e) => set({ visualEngine: e.target.value, visualModel: "" })}
+              style={selectStyle}
+            >
+              {engineOptions.map((e) => (
+                <option key={e.id} value={e.id}>
+                  {e.label}{savedKeys[e.id] ? " ✓" : " (cần key)"}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <Label>Model</Label>
+            <select
+              value={selectedModel}
+              onChange={(e) => set({ visualModel: e.target.value })}
+              style={selectStyle}
+              disabled={loadingModels || modelList.length === 0}
+            >
+              {loadingModels && <option>Đang tải...</option>}
+              {!loadingModels && modelList.length === 0 && (
+                <option value="">(không có model)</option>
+              )}
+              {modelList.map((m) => (
+                <option key={m.id} value={m.id}>{m.label}</option>
+              ))}
+            </select>
+          </div>
+
+          {missingKey && (
+            <div style={{
+              padding: "8px 10px", borderRadius: 6,
+              background: "rgba(251,191,36,0.10)",
+              border: "1px solid rgba(251,191,36,0.30)",
+              fontSize: 11.5, color: "var(--n-9)", lineHeight: 1.5,
+            }}>
+              ⚠️ Chưa có API key cho {vEngine}. Visual context sẽ skip nếu thiếu key.
+              Vào Cài đặt → API keys để thêm.
+            </div>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 

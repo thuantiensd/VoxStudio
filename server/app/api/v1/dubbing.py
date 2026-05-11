@@ -827,11 +827,19 @@ async def auto_dub(
     await dubbing_project_svc.require_owned(db, project_id, user)
 
     translate_api_key: str | None = None
+    enable_visual_context: bool = False
+    visual_engine: str | None = None
+    visual_model: str | None = None
+    visual_api_key: str | None = None
     try:
         if request.headers.get("content-type", "").startswith("application/json"):
             body = await request.json()
             engine = body.get("engine") or engine
             translate_api_key = body.get("translate_api_key") or None
+            enable_visual_context = bool(body.get("enable_visual_context"))
+            visual_engine = body.get("visual_engine") or None
+            visual_model = body.get("visual_model") or None
+            visual_api_key = body.get("visual_api_key") or None
     except Exception:
         pass
 
@@ -843,6 +851,10 @@ async def auto_dub(
             "project_id": project_id,
             "engine": engine,
             "translate_api_key": translate_api_key,
+            "enable_visual_context": enable_visual_context,
+            "visual_engine": visual_engine,
+            "visual_model": visual_model,
+            "visual_api_key": visual_api_key,
         },
     )
     job_id = job.id
