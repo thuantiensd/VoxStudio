@@ -569,14 +569,26 @@ NHIỆM VỤ DUY NHẤT của Pass này:
 
 KHÔNG cần lo style cinematic — Editor pass sẽ polish.
 {anchor_block}
-🎭 PRONOUN PHỤ THUỘC CONTEXT (đọc scene_context phía trên TRƯỚC):
-   • Vợ chồng yêu thương: "anh/em"
-   • Vợ chồng XUNG ĐỘT / LY HÔN / cãi vã: chuyển sang "tôi/cô" (lạnh nhạt) — ĐÚNG
-   • Con yêu cha mẹ: "bố/mẹ" + xưng "con"
-   • Con CỰC GIẬN cha (drama): có thể "ông" (hạ vai = từ chối) — chấp nhận được
-   • Người yêu cũ giận → "tôi/anh" thay vì "anh/em"
-   self_pronoun + addresses trong SPEAKER MAP là DEFAULT — nếu context yêu cầu
-   pronoun lạnh hơn/khác đi → ĐƯỢC PHÉP đổi miễn nhất quán + đúng emotion.
+🎭 PRONOUN PHỤ THUỘC CONTEXT — CHỈ ĐỔI KHI scene_context RÕ RÀNG:
+
+⚡ DEFAULT cho vợ chồng / yêu nhau: LUÔN "anh/em" (90% trường hợp).
+   KHÔNG được tự ý đổi sang "tôi/cô" khi không có bằng chứng rõ.
+
+CHỈ đổi sang "tôi/cô" / "tôi/anh" lạnh nhạt KHI scene_context CHỨA RÕ:
+   • "ly hôn" / "ly thân" / "chuẩn bị giấy ly hôn"
+   • "muốn cưới người khác" / "đã yêu người khác"
+   • "căm thù" / "thù hận"
+   • Speaker chính đang nói rõ: "tôi/cô" (không phải dịch giả tự thêm)
+   Cãi vã thông thường (vợ chồng giận nhau, ghen tuông, hiểu lầm tạm thời)
+   → VẪN dùng "anh/em" (cãi yêu cũng dùng anh/em, không lạnh đến mức tôi/cô).
+
+🔹 Cha/mẹ ↔ con (tương tự):
+   DEFAULT: con xưng "con", gọi "bố/mẹ"
+   CHỈ "ông/bà" khi scene_context rõ: "con cực giận từ chối làm con",
+   "đoạn tuyệt quan hệ", hoặc lời thoại con NÓI THẲNG ("không phải bố tôi").
+
+🔹 NGUYÊN TẮC: theo SPEAKER MAP làm DEFAULT. KHÔNG override trừ khi
+scene_context có keyword rõ ràng. KHÔNG được "đoán" emotion từ 1-2 câu cãi.
 
 🚨 RULE MAPPING ĐẠI TỪ (CỰC QUAN TRỌNG — đọc kỹ TRƯỚC khi dịch):
 
@@ -753,13 +765,16 @@ với scene_context. CHO PHÉP đổi pronoun nếu literal sai emotion (ví d�
 vợ chồng đang ly hôn mà literal dùng "anh/em" thân mật → đổi sang "tôi/cô" lạnh).
 
 {scene_block}
-🎭 PRONOUN THEO EMOTION (đọc scene_context phía trên):
-   • Vợ chồng yêu thương → "anh/em" (literal default)
-   • Vợ chồng XUNG ĐỘT / LY HÔN → chuyển "tôi/cô" lạnh nhạt
-   • Con yêu cha mẹ → "bố/mẹ" + xưng "con"
-   • Con CỰC GIẬN cha → có thể "ông" (hạ vai = ghê tởm — chấp nhận drama)
-   • Cãi vã giận dữ → "mày/tao" hoặc giữ "anh/em" cứng tuỳ tone
-   Pronoun phải MATCH cảm xúc thực — KHÔNG cứng nhắc rule.
+🎭 PRONOUN THEO EMOTION — GIỮ literal pronoun làm DEFAULT:
+
+⚡ KHÔNG TỰ Ý ĐỔI pronoun khỏi literal. Pass-1 đã pick đúng cho context.
+Chỉ đổi nếu literal SAI emotion RÕ RÀNG (vd literal "anh/em" mà scene
+context ghi rõ "ly hôn" — hiếm khi Pass-1 sai).
+
+90% case: GIỮ NGUYÊN pronoun, chỉ polish style (thêm tiểu từ, đảo từ).
+
+Cãi vã thường (vợ chồng yêu nhau cãi nhau, ghen tuông) → "anh/em" KHÔNG
+đổi sang "tôi/cô". Vợ chồng phim tình cảm cãi nhau VẪN dùng "anh/em".
 
 
 🎬 PATTERNS CẤM (literal hay gặp):

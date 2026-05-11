@@ -328,9 +328,8 @@ def _translate_3pass(engine: str, texts: list[str], target: str, source: str,
     logger.info("%s: %d segments → adaptive batch_size=%d",
                  engine, len(segments_meta), batch_size)
 
-    def _process_batch(batch_idx: int, batch: list[dict]) -> tuple[int, list[dict]]:
-        first_idx = batch[0]["index"]
-        # Pass-1
+    def _process_batch(batch_idx: int, batch: list[dict]) -> list[str]:
+        """Return list[str] cùng length batch — translated text per seg."""
         literal = run_translate(
             engine=engine, segments=batch,
             target_lang=target, source_lang=source,
@@ -338,7 +337,6 @@ def _translate_3pass(engine: str, texts: list[str], target: str, source: str,
             topic_hint=topic_hint, glossary_block=glossary_block,
             film_genre=film_genre, api_key=api_key, model=model,
         )
-        # Pass-2
         polished = list(literal)
         try:
             items = []
@@ -361,12 +359,11 @@ def _translate_3pass(engine: str, texts: list[str], target: str, source: str,
                 if p.get("translated_text"):
                     polished[i] = p
         except Exception as e:
-            logger.warning("%s Pass-2 fail batch starts at %d: %s — dùng literal",
-                            engine, first_idx, e)
-        return first_idx, polished
+            logger.warning("%s Pass-2 fail batch %d: %s — dùng literal", engine, batch_idx, e)
+        return [p.get("translated_text", "") for p in polished]
 
     try:
-        batch_results = run_parallel_batches(
+        parallel = run_parallel_batches(
             items=segments_meta, batch_size=batch_size, engine=engine,
             process_fn=_process_batch,
         )
@@ -374,15 +371,8 @@ def _translate_3pass(engine: str, texts: list[str], target: str, source: str,
         logger.error("%s parallel batch fail: %s", engine, e)
         raise ValueError(f"{engine} lỗi: {e}") from e
 
-    # Merge tất cả batch results vào output array
-    final = [""] * len(segments_meta)
-    for first_idx, batch_polished in batch_results:
-        for i, p in enumerate(batch_polished):
-            tr = p.get("translated_text", "")
-            target_idx = first_idx + i
-            if tr and target_idx < len(final):
-                final[target_idx] = tr
-    return final
+    # parallel là list[str] cùng length segments_meta (None khi fail)
+    return [t or "" for t in parallel]
 
 
 def _openai(texts: list[str], target: str, source: str, api_key: str,

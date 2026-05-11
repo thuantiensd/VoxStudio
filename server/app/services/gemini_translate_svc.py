@@ -125,14 +125,10 @@ def _translate_uncached(
     logger.info("Gemini: %d segments → adaptive batch_size=%d",
                  len(segments), batch_size)
 
-    results = [{"translated_text": "", "speech_text": "", "emotion": "neutral"}
-               for _ in segments]
-
-    def _process_batch(batch_idx: int, batch: list[dict]) -> tuple[int, list[dict]]:
-        """Pass-1 + Pass-2 cho 1 batch. KHÔNG dùng context_before vì parallel.
-        Pass-0 + scene_context đã cover continuity ở mức scene level.
+    def _process_batch(batch_idx: int, batch: list[dict]) -> list[dict]:
+        """Pass-1 + Pass-2 cho 1 batch. Return list[dict] cùng length batch.
+        Mỗi item: {translated_text, speech_text, emotion}.
         """
-        first_seg_idx = batch[0]["index"]
         # Pass-1: literal translator
         literal = run_translate(
             engine=ENGINE, segments=batch,
@@ -142,7 +138,7 @@ def _translate_uncached(
             film_genre=film_genre,
         )
         # Pass-2: editor polish
-        polished = list(literal)  # default fallback
+        polished = list(literal)
         try:
             items = []
             for i, seg in enumerate(batch):
@@ -163,25 +159,29 @@ def _translate_uncached(
                 if p.get("translated_text"):
                     polished[i] = p
         except Exception as e:
-            logger.warning("Gemini Pass-2 fail batch starts at %d: %s — dùng literal",
-                            first_seg_idx, e)
-        return first_seg_idx, polished
+            logger.warning("Gemini Pass-2 fail batch %d: %s — dùng literal", batch_idx, e)
+        # Trả format đúng cho merge: {translated_text, speech_text, emotion}
+        return [
+            {
+                "translated_text": p.get("translated_text", ""),
+                "speech_text": p.get("translated_text", ""),
+                "emotion": p.get("emotion", "neutral"),
+            }
+            for p in polished
+        ]
 
-    batch_results = run_parallel_batches(
+    parallel_results = run_parallel_batches(
         items=segments, batch_size=batch_size, engine=ENGINE,
         process_fn=_process_batch,
     )
 
-    # Merge tất cả batch results vào results array theo segment.index
-    for first_idx, batch_polished in batch_results:
-        for i, p in enumerate(batch_polished):
-            tr = p.get("translated_text", "")
-            if tr and (first_idx + i) < len(results):
-                results[first_idx + i] = {
-                    "translated_text": tr,
-                    "speech_text": tr,
-                    "emotion": p.get("emotion", "neutral"),
-                }
+    # Replace empty default với parallel result (None khi batch fail)
+    results = []
+    for i, p in enumerate(parallel_results):
+        if p and p.get("translated_text"):
+            results.append(p)
+        else:
+            results.append({"translated_text": "", "speech_text": "", "emotion": "neutral"})
 
     missing = sum(1 for r in results if not r["translated_text"])
     if missing:

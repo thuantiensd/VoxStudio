@@ -54,26 +54,21 @@ def run_parallel_batches(
     items: list,
     batch_size: int,
     engine: str,
-    process_fn: Callable[[int, list], T],
+    process_fn: Callable[[int, list], list],
     max_concurrent: int | None = None,
-) -> list[T]:
-    """Chia `items` thành batches, chạy song song qua `process_fn`.
+) -> list:
+    """Parallel map theo batch. `process_fn(batch_idx, batch)` → list cùng
+    length với batch (1 result per input item).
 
-    Args:
-      items: list cần chia.
-      batch_size: kích thước mỗi batch.
-      engine: tên engine (gemini/openai/claude) để pick concurrency limit.
-      process_fn: callable(batch_idx, batch_items) → result. CHẠY TRONG THREAD.
-      max_concurrent: override default per-engine concurrency.
-
-    Returns: list[T] song song với batches (theo thứ tự gốc).
+    Returns: flat list, length = len(items), aligned theo thứ tự gốc.
+    Failed batch → các item của batch đó là None trong output.
     """
     if not items:
         return []
 
     batches = []
     for start in range(0, len(items), batch_size):
-        batches.append((len(batches), items[start:start + batch_size]))
+        batches.append((len(batches), start, items[start:start + batch_size]))
 
     n_concurrent = max_concurrent or CONCURRENT_BATCHES.get(engine, 3)
     n_concurrent = max(1, min(n_concurrent, len(batches)))
@@ -83,25 +78,30 @@ def run_parallel_batches(
         len(batches), batch_size, n_concurrent, engine,
     )
 
-    results: list[T | None] = [None] * len(batches)
+    results: list = [None] * len(items)
     errors: list[tuple[int, Exception]] = []
 
     with ThreadPoolExecutor(max_workers=n_concurrent) as pool:
-        future_to_idx = {
-            pool.submit(process_fn, idx, batch): idx
-            for idx, batch in batches
+        future_to_meta = {
+            pool.submit(process_fn, idx, batch): (idx, start)
+            for idx, start, batch in batches
         }
-        for fut in as_completed(future_to_idx):
-            idx = future_to_idx[fut]
+        for fut in as_completed(future_to_meta):
+            idx, start = future_to_meta[fut]
             try:
-                results[idx] = fut.result()
+                batch_result = fut.result()
+                if not isinstance(batch_result, list):
+                    raise TypeError(f"process_fn phải trả list, got {type(batch_result)}")
+                # Fill kết quả vào đúng vị trí theo start offset
+                for i, r in enumerate(batch_result):
+                    if start + i < len(items):
+                        results[start + i] = r
                 logger.info("  batch %d/%d done", idx + 1, len(batches))
             except Exception as e:
                 logger.error("  batch %d/%d FAILED: %s", idx + 1, len(batches), e)
                 errors.append((idx, e))
 
     if errors:
-        # Nếu >50% fail → raise. Còn lại → log warning và trả partial.
         if len(errors) > len(batches) // 2:
             raise RuntimeError(
                 f"Translate fail: {len(errors)}/{len(batches)} batches lỗi. "
@@ -112,4 +112,4 @@ def run_parallel_batches(
             len(errors), len(batches),
         )
 
-    return [r for r in results if r is not None]  # type: ignore[return-value]
+    return results
