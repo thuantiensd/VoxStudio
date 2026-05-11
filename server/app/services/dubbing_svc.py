@@ -3632,28 +3632,49 @@ def get_thumbnail_path(project_id: str) -> Path | None:
 # ── Auto-Dub Pipeline ─────────────────────────────
 
 def _chunk_sentences_timed(text: str):
-    """Chia text dài thành các câu nhỏ, mỗi câu <= ~45 ký tự.
-    Trả về list[str]. Không có dấu chấm thì split theo mệnh đề/từ."""
+    """Chia text dài thành các câu CON, giữ NGUYÊN câu/ý nếu đủ ngắn.
+
+    Triết lý:
+    - Câu hoàn chỉnh (. ! ? …) luôn là 1 chunk độc lập, KHÔNG cắt.
+    - Chỉ chia thêm khi câu quá DÀI (> CHUNK_MAX chars).
+    - Khi chia: ưu tiên ranh giới mệnh đề (, ;), KHÔNG bao giờ cắt giữa từ/tên.
+    - Fallback cuối: KHÔNG slice theo số ký tự — giữ nguyên thay vì cắt từ.
+    """
     import re
-    CHUNK = 45
-    WORDS = 7
+    CHUNK_MAX = 80          # Mỗi chunk tối đa ~80 ký tự (≈ 1 câu Việt vừa)
+    SHORT_OK = 100          # Nếu câu < 100 chars → giữ nguyên (không chia)
+
+    # Split theo câu hoàn chỉnh — ranh giới chắc chắn (dấu kết câu)
     sents = [s.strip() for s in re.split(r'(?<=[.!?。！？…])\s+|\n+', text) if s.strip()]
-    out = []
+    out: list[str] = []
+
     for s in sents:
-        if len(s) <= CHUNK:
-            out.append(s); continue
-        clauses = [c.strip() for c in re.split(r'(?<=[,;:—–])\s+', s) if c.strip()]
+        # Câu ngắn/vừa → giữ nguyên, KHÔNG cắt
+        if len(s) <= SHORT_OK:
+            out.append(s)
+            continue
+
+        # Câu quá dài → chia theo clauses (dấu phẩy/chấm phẩy/dash)
+        clauses = [c.strip() for c in re.split(r'(?<=[,;—–])\s+', s) if c.strip()]
+        if len(clauses) <= 1:
+            # Không có dấu phẩy nào → đành giữ nguyên (KHÔNG cắt giữa từ/tên)
+            out.append(s)
+            continue
+
+        # Gom clauses lại thành chunks ≤ CHUNK_MAX, không cắt giữa clause
+        buf = ""
         for c in clauses:
-            if len(c) <= CHUNK:
-                out.append(c); continue
-            if re.search(r'\s', c):
-                words = c.split()
-                for i in range(0, len(words), WORDS):
-                    out.append(' '.join(words[i:i+WORDS]))
+            if not buf:
+                buf = c
+            elif len(buf) + len(c) + 2 <= CHUNK_MAX:
+                buf = buf + ", " + c
             else:
-                for i in range(0, len(c), 20):
-                    out.append(c[i:i+20])
-    return out
+                out.append(buf)
+                buf = c
+        if buf:
+            out.append(buf)
+
+    return out if out else [text]
 
 
 def auto_chunk_project_segments(project_id: str) -> dict:
