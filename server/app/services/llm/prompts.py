@@ -226,7 +226,12 @@ def _format_speaker_anchor_block(relationships: dict) -> str:
 
 
 def _per_segment_anchor(seg: dict, relationships: dict) -> str:
-    """Anchor inline cho 1 segment."""
+    """Anchor inline cho 1 segment — format explicit 我/你/他 mapping.
+
+    Định dạng:
+      我→"em" | 你→{SPK_01="anh", SPK_02="con"} | 他/她→tùy ngữ cảnh
+    LLM thấy ngay: 我 trong câu → self_pronoun, 你 → addresses[X].
+    """
     if not relationships or not relationships.get("speakers"):
         return ""
     spk = seg.get("speaker")
@@ -239,10 +244,15 @@ def _per_segment_anchor(seg: dict, relationships: dict) -> str:
     addr = info.get("addresses") or {}
     if not self_p:
         return ""
+    parts = [f'我→"{self_p}"']
     if addr:
-        addr_str = "/".join(f"{k.replace('SPEAKER_', 'SPK')}={v}" for k, v in addr.items())
-        return f'xưng "{self_p}", gọi {addr_str}'
-    return f'xưng "{self_p}"'
+        if len(addr) == 1:
+            v = next(iter(addr.values()))
+            parts.append(f'你→"{v}"')
+        else:
+            addr_str = ", ".join(f'{k.replace("SPEAKER_", "SPK_")}="{v}"' for k, v in addr.items())
+            parts.append(f'你→{{{addr_str}}}')
+    return " | ".join(parts)
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -311,20 +321,47 @@ NHIỆM VỤ DUY NHẤT của Pass này:
 
 KHÔNG cần lo style cinematic — Editor pass sẽ polish.
 {anchor_block}
-🚨 3 LỖI XƯNG HÔ — TUYỆT ĐỐI TRÁNH:
+🚨 RULE MAPPING ĐẠI TỪ (CỰC QUAN TRỌNG — đọc kỹ trước khi dịch):
 
-LỖI #1: VOCATIVE-TAIL literal (老公→"chồng"). PHẢI: 老公→"anh" (theo MAP) hoặc bỏ.
+Mỗi line có anchor `[SPEAKER_XX: 我→"X" | 你→"Y"]`. Ý nghĩa:
+   • 我/我们 trong gốc → DÙNG "X" (self_pronoun của speaker đang nói)
+   • 你/你们 trong gốc → DÙNG "Y" (addresses, từ speaker dùng để gọi addressee)
+   • 他/她/它 trong gốc → DÙNG third_person_label của người được nhắc tới
+
+❌ SAI HAY GẶP NHẤT — ĐẢO 我/你:
+   Speaker là vợ (xưng "em"). Vợ nói "你今天又加班吗 老公" với chồng.
+   你 trong câu này CHỈ CHỒNG (không phải vợ).
+   → 你 phải dịch "anh" (addresses[chồng]), KHÔNG phải "em".
+
+   ❌ "Hôm nay EM lại tăng ca à?"  ← SAI: dùng self_pronoun cho 你
+   ✅ "Hôm nay ANH lại tăng ca à?" ← ĐÚNG: 你 → addresses
+
+   Ghi nhớ: 我 = NGƯỜI ĐANG NÓI, 你 = NGƯỜI ĐƯỢC HỎI/GỌI. KHÔNG ĐƯỢC ĐẢO.
+
+📝 VÍ DỤ CỤ THỂ:
+
+Speaker SPEAKER_00 (vợ, anchor 我→"em" | 你→"anh"):
+   "我也想你"     → "Em cũng nhớ anh"          ← 我=em, 你=anh
+   "你回来了"     → "Anh về rồi"                ← 你=anh
+   "他想你"       → "Con nhớ anh"               ← 他=con, 你=anh
+
+Speaker SPEAKER_01 (chồng, anchor 我→"anh" | 你→"em"):
+   "我也想小宝"   → "Anh cũng nhớ Tiểu Bảo"     ← 我=anh
+   "你别担心"     → "Em đừng lo"                ← 你=em
+   "我带他去"     → "Anh đưa con đi"            ← 我=anh, 他=con
+
+🚨 3 LỖI XƯNG HÔ KHÁC — TUYỆT ĐỐI TRÁNH:
+
+LỖI A: VOCATIVE-TAIL literal (老公→"chồng"). PHẢI: 老公→"anh" (theo MAP) hoặc bỏ.
    ❌ "Hôm nay anh tăng ca à, anh?" (lặp anh)
    ✅ "Hôm nay anh lại tăng ca à?" (1 chỗ)
    Mapping: 老公→anh, 老婆→em, 宝贝(con)→con, 哥→anh, 姐→chị, 妈→mẹ, 爸→ba
 
-LỖI #2: 他/她 (NGÔI 3) ≠ 你 (NGÔI 2).
-   • 你 → addresses[X] (vocative)
-   • 他/她 → third_person_label (khi nhắc về speaker)
-   ❌ "他想你" → "bé nhớ anh" (vocative cho 3rd-person)
-   ✅ "他想你" → "con nhớ anh" (3rd-person dùng role)
+LỖI B: 他/她 (NGÔI 3) ≠ 你 (NGÔI 2). KHÔNG dùng vocative cho 3rd-person.
+   ❌ "他想你" → "bé nhớ anh" (vocative "bé" cho 3rd-person)
+   ✅ "他想你" → "con nhớ anh" (3rd-person dùng role/third_person_label)
 
-LỖI #3: 小X/阿X/大X = TÊN THÂN MẬT → Tiểu X/A X/Đại X (Hán-Việt).
+LỖI C: 小X/阿X/大X = TÊN THÂN MẬT → Tiểu X/A X/Đại X (Hán-Việt).
    ❌ 小宝 → "nhóc"/"con yêu"; ✅ 小宝 → "Tiểu Bảo"
    RULE: gốc có 小X → output PHẢI có Tiểu X (override SPEAKER MAP addresses).
    NGOẠI LỆ: 小孩/小姐/小心/小时/老板/老婆/老公 = từ chung, KHÔNG apply.
