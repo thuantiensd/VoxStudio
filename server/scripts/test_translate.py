@@ -22,9 +22,18 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import os
 import sys
+import time
 from pathlib import Path
+
+# Enable INFO logging → thấy progress Gemini retry/timeout
+logging.basicConfig(
+    level=logging.INFO,
+    format="[%(asctime)s] %(name)s: %(message)s",
+    datefmt="%H:%M:%S",
+)
 
 
 # Inject server/ vào path để import app.services
@@ -172,6 +181,8 @@ def main():
         os.environ["GEMINI_API_KEY"] = api_key
 
     # ── Run Pass-1 trực tiếp để in result ──
+    print("\n⏱️  Running Pass-1 (speaker analysis)...")
+    t0 = time.time()
     from app.services.llm import analyze_speakers
     rels = analyze_speakers(
         engine=args.engine,
@@ -180,9 +191,12 @@ def main():
         api_key=api_key,
         film_genre=None,
     )
+    print(f"   ↳ Pass-1 done in {time.time()-t0:.1f}s")
     print_pass1(rels)
 
     # ── Run Pass-2 ──
+    print(f"⏱️  Running Pass-2 (translation, {len(segments)} segs)...")
+    t1 = time.time()
     if args.engine == "gemini":
         from app.services.gemini_translate_svc import translate_segments
         results = translate_segments(
@@ -205,6 +219,7 @@ def main():
             speaker_genders=None,
             film_genre=None,
         )
+    print(f"   ↳ Pass-2 done in {time.time()-t1:.1f}s")
 
     print_pass2_table(segments, results)
 

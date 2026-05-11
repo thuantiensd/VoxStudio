@@ -347,7 +347,14 @@ def _call_gemini_with_timeout(model, prompt: str, timeout_s: int = 90):
 
     def _worker():
         try:
-            r = model.generate_content(prompt)
+            # response_mime_type: JSON → Gemini trả JSON thuần (không markdown
+            # fence), ổn định hơn cho parse. temperature thấp để output deterministic.
+            import google.generativeai as genai_mod
+            cfg = genai_mod.types.GenerationConfig(
+                temperature=0.2,
+                response_mime_type="application/json",
+            )
+            r = model.generate_content(prompt, generation_config=cfg)
             result_q.put(("ok", r))
         except Exception as e:
             result_q.put(("err", e))
