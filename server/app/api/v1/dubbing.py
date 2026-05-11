@@ -299,8 +299,13 @@ async def delete_project(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_session),
 ):
-    """Soft delete: mark deleted_at trong DB, file giữ 30 ngày trước khi cleanup."""
+    """Soft delete: mark deleted_at trong DB, file giữ 30 ngày trước khi cleanup.
+
+    Nếu pipeline đang chạy → request_cancel trước để worker dừng sớm thay vì
+    tiếp tục đốt GPU sau khi user đã xoá project.
+    """
     p = await dubbing_project_svc.require_owned(db, project_id, user)
+    dubbing_svc.request_cancel(project_id)
     await dubbing_project_svc.soft_delete(db, p)
     await audit_svc.log(
         db, user_id=user.id, action="dubbing.delete_project",

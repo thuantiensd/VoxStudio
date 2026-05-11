@@ -37,6 +37,7 @@ import {
   Upload,
   FileUp,
   Trash2,
+  StopCircle,
   Save,
   PauseCircle,
   RotateCcw,
@@ -62,6 +63,7 @@ import {
   updateDubbingSettings,
   updateSubtitleStyle,
   deleteDubbingProject,
+  cancelDubbingProject,
   startDubbingAutoDub,
   getDubbingResourceUrl,
   downloadToProject,
@@ -3648,10 +3650,12 @@ function DubProjectCard({
   project,
   onOpen,
   onDelete,
+  onCancel,
 }: {
   project: DubbingListProject;
   onOpen: () => void;
   onDelete: () => void;
+  onCancel: () => void;
 }) {
   const st = getDubStatus(project);
   const tone = st.tone;
@@ -3721,6 +3725,27 @@ function DubProjectCard({
             <StatusIcon className={`h-3 w-3 ${isRunning ? "animate-spin" : ""}`} />
             {st.label}
           </span>
+          {isRunning && (
+            <span
+              role="button"
+              tabIndex={0}
+              onClick={(e) => {
+                e.stopPropagation();
+                onCancel();
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  onCancel();
+                }
+              }}
+              className="grid h-6 w-6 shrink-0 cursor-pointer place-items-center rounded bg-background/60 text-amber-500/80 transition hover:bg-amber-500/15 hover:text-amber-500"
+              title="Huỷ pipeline đang chạy"
+            >
+              <StopCircle className="h-3 w-3" />
+            </span>
+          )}
           <span
             role="button"
             tabIndex={0}
@@ -4185,14 +4210,30 @@ function DubbingTab({ setActiveTab }: { setActiveTab: (t: Tab) => void }) {
   const translateKeyMissing = translateNeedsKey && !translateApiKey.trim();
 
   async function removeProject(id: string) {
-    if (typeof window !== "undefined" && !window.confirm("Xoá dự án này? Hành động không thể hoàn tác.")) return;
+    const proj = projects.find((p) => p.id === id);
+    const running = proj && getDubStatus(proj).running;
+    const msg = running
+      ? "Dự án đang chạy. Xoá sẽ huỷ pipeline ngay. Tiếp tục?"
+      : "Xoá dự án này? Hành động không thể hoàn tác.";
+    if (typeof window !== "undefined" && !window.confirm(msg)) return;
     try {
       await deleteDubbingProject(id);
       setProjects((prev) => prev.filter((p) => p.id !== id));
-      toast.success("Đã xoá dự án");
+      toast.success(running ? "Đã huỷ và xoá dự án" : "Đã xoá dự án");
     } catch (e) {
-      const msg = e instanceof Error ? e.message : "Không xoá được dự án.";
-      toast.error("Xoá thất bại", { description: msg });
+      const errMsg = e instanceof Error ? e.message : "Không xoá được dự án.";
+      toast.error("Xoá thất bại", { description: errMsg });
+    }
+  }
+
+  async function cancelProject(id: string) {
+    if (typeof window !== "undefined" && !window.confirm("Huỷ pipeline đang chạy?")) return;
+    try {
+      await cancelDubbingProject(id);
+      toast.success("Đã yêu cầu huỷ — pipeline sẽ dừng ở bước kế tiếp");
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Không huỷ được.";
+      toast.error("Huỷ thất bại", { description: msg });
     }
   }
 
@@ -4924,6 +4965,7 @@ function DubbingTab({ setActiveTab }: { setActiveTab: (t: Tab) => void }) {
               project={p}
               onOpen={() => setViewerProjectId(p.id)}
               onDelete={() => void removeProject(p.id)}
+              onCancel={() => void cancelProject(p.id)}
             />
           ))}
         </div>

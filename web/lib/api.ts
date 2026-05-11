@@ -546,6 +546,12 @@ export async function deleteDubbingProject(id: string) {
   return api<{ ok: boolean }>(`/dubbing/projects/${id}`, { method: "DELETE" });
 }
 
+export async function cancelDubbingProject(id: string) {
+  return api<{ ok: boolean; project_id: string }>(`/dubbing/projects/${id}/cancel`, {
+    method: "POST",
+  });
+}
+
 export async function updateDubbingSettings(
   id: string,
   settings: Record<string, unknown>,
