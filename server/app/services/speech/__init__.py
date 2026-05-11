@@ -12,5 +12,6 @@ Public API:
 """
 from . import whisperx_engine
 from . import post_process
+from . import punctuation
 
-__all__ = ["whisperx_engine", "post_process"]
+__all__ = ["whisperx_engine", "post_process", "punctuation"]

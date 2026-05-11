@@ -1366,6 +1366,29 @@ def transcribe_project(project_id: str) -> dict:
     # Phải làm TRƯỚC music filter + post-process để tránh nhân lên các bug.
     raw_segs = _dedup_repeated_text(raw_segs)
 
+    # ── Punctuation + sentence-aware split (CapCut-style) ──
+    # Whisper Chinese không có dấu chấm rõ → text chạy 1 dòng dài, post-process
+    # merge/split sau đó cắt giữa câu → sub vụn.
+    # Phase mới: thêm dấu câu (neural model) → split theo dấu câu → mỗi sub
+    # là 1 câu hoàn chỉnh, timestamp chính xác từ word-level.
+    if project.get("punctuate_split", True):
+        try:
+            from app.services.speech.punctuation import punctuate_and_split_segments
+            detected_lang = result.get("language") or src_lang_norm
+            before = len(raw_segs)
+            raw_segs = punctuate_and_split_segments(
+                raw_segs,
+                language=detected_lang,
+                max_chars_per_sub=50,
+                min_chars_per_sub=8,
+            )
+            logger.info(
+                "Punctuate+split: %d → %d sentences (lang=%s)",
+                before, len(raw_segs), detected_lang,
+            )
+        except Exception as e:
+            logger.warning("Punctuate+split failed (%s) — giữ raw segments", e)
+
     # ── Music/singing filter ──
     # Lọc ra segment hát hoặc nhạc trước khi post-process. Trên video có
     # BGM với lời hát (movie OST, drama opening), Whisper sẽ transcribe
