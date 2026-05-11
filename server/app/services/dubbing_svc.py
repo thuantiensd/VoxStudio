@@ -1483,10 +1483,23 @@ def transcribe_project(project_id: str) -> dict:
     voice_count_meta = int(project_for_count.get("voice_count") or 1)
     speaker_genders: dict[str, str] = {}
 
-    # Skip speaker pipeline CHỈ khi user explicit muốn (env var DEBUG)
-    skip_speaker = os.environ.get("VOX_SKIP_SPEAKER_PIPELINE", "").lower() == "true"
+    # Skip speaker pipeline khi:
+    # 1. User explicit skip qua env (VOX_SKIP_SPEAKER_PIPELINE=true)
+    # 2. voice_count = 1 (single voice) → KHÔNG cần phân biệt speaker.
+    #    Tiết kiệm 60-180s phim ngắn (skip diarize + embedding + transcribe).
+    # 3. WhisperX path đã chạy + có speakers → speaker_pipeline trùng việc.
+    skip_speaker = (
+        os.environ.get("VOX_SKIP_SPEAKER_PIPELINE", "").lower() == "true"
+        or voice_count_meta == 1
+        or (used_whisperx and len(whisperx_speakers) > 0)
+    )
     if skip_speaker:
-        logger.info("VOX_SKIP_SPEAKER_PIPELINE=true → skip speaker analysis")
+        reason = (
+            "env" if os.environ.get("VOX_SKIP_SPEAKER_PIPELINE", "").lower() == "true"
+            else "voice_count=1" if voice_count_meta == 1
+            else "whisperx_already_has_speakers"
+        )
+        logger.info("Skip speaker_pipeline (reason=%s) — saves 60-180s", reason)
     else:
         try:
             from app.services.speaker_pipeline import (
