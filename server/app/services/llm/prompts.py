@@ -147,6 +147,47 @@ EVIDENCE để suy:
 • Tự gọi "anh/bố/ba/chồng/ông" → NAM; "em/mẹ/má/vợ/chị/cô" → NỮ
 • Người khác gọi "anh ơi/cậu ơi/sếp ơi" → NAM; "em ơi/chị ơi" → NỮ
 
+⚠️ TUYỆT ĐỐI ra TIẾNG VIỆT cho self_pronoun/addresses/third_person_label.
+KHÔNG để chữ Trung gốc (在下, 寡人, 郡主...) trong output JSON.
+
+🔤 BẢNG DỊCH HÁN-VIỆT (CỔ TRANG):
+   Tự xưng:
+   • 在下/晚辈 → "tại hạ"
+   • 寡人/朕 → "trẫm" (vua)
+   • 本宫 → "bổn cung" (hoàng hậu/quý phi)
+   • 微臣/臣 → "thần" (quan với vua)
+   • 儿臣 → "nhi thần" (hoàng tử với vua)
+   • 臣弟 → "thần đệ"
+   • 妾身/臣妾 → "thiếp" (phi/vợ với chồng cổ trang)
+   • 我 (cổ trang) → "ta"
+   Gọi người khác:
+   • 郡主 → "quận chúa"
+   • 公主 → "công chúa"
+   • 公子 → "công tử"
+   • 小姐 → "tiểu thư"
+   • 父皇/父王 → "phụ hoàng"
+   • 母后 → "mẫu hậu"
+   • 皇兄/皇弟 → "hoàng huynh/đệ"
+   • 王爷 → "vương gia"
+   • 殿下 → "điện hạ" (thái tử/hoàng tử)
+   • 陛下 → "bệ hạ" (vua)
+   • 大人 → "đại nhân"
+   • 先生 → "tiên sinh"
+   • 爹/爹爹 → "cha"
+   • 娘 → "mẹ"
+
+🔤 BẢNG DỊCH (HIỆN ĐẠI):
+   Tự xưng: 我 → "tôi"/"anh"/"em"/"ta"/"tao" (theo context)
+   Gọi:
+   • 老公 → "anh" (vợ gọi chồng)
+   • 老婆 → "em" (chồng gọi vợ)
+   • 爸爸/爸 → "ba"/"bố"
+   • 妈妈/妈 → "mẹ"/"má"
+   • 哥/哥哥 → "anh"
+   • 姐/姐姐 → "chị"
+   • 弟弟/妹妹 → "em"
+   • 宝贝 → "con yêu"/"em"
+
 CẢNH BÁO:
 ❌ "Con" KHÔNG dùng giữa vợ chồng. Cha/mẹ tự xưng "ba/mẹ" (KHÔNG "con").
 ❌ Cha/mẹ gọi con "con" (vocative). Con tự xưng "con", gọi cha mẹ "ba/mẹ".
