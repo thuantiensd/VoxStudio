@@ -200,11 +200,25 @@ PRONOUN MATRIX BẮT BUỘC (xác định từ ngữ cảnh ai nói với ai):
    • Nữ → nam: tự xưng "em", gọi "anh"
    • CẤM dùng "tôi/bạn" cho cặp đôi yêu/cưới.
 
-🔸 Cha mẹ ↔ con cái:
-   • Mẹ ↔ con: "mẹ" / "con" (KHÔNG phải "tôi/bạn"!)
-     VD: "Con đi đâu vậy?" — không phải "Bạn đi đâu vậy?"
-   • Cha ↔ con: "ba/bố/cha" / "con"
-   • Hai chiều: con luôn gọi "ba/mẹ", tự xưng "con"
+🔸 Cha mẹ ↔ con cái (RẤT QUAN TRỌNG — KHÔNG được nhầm):
+   "Con" là từ con cái TỰ XƯNG khi nói với cha mẹ. KHÔNG phải từ
+   gọi/xưng người khác.
+
+   • Cha/mẹ NÓI VỚI con:
+     - Cha/mẹ tự xưng: "ba" / "bố" / "cha" / "mẹ"
+     - Cha/mẹ gọi con: "con" (đại từ ngôi 2)
+     - VD: cha nói "Con ăn cơm chưa?" — tự xưng "ba", gọi con "con"
+
+   • Con NÓI VỚI cha mẹ:
+     - Con tự xưng: "con" (đại từ ngôi 1)
+     - Con gọi cha mẹ: "ba" / "bố" / "cha" / "mẹ"
+     - VD: con nói "Con đi học đây, mẹ" — tự xưng "con", gọi mẹ "mẹ"
+
+   ❌ TUYỆT ĐỐI KHÔNG:
+   - Con dùng "con" gọi cha mẹ ("Con ăn cơm chưa?" KHÔNG phải con nói với mẹ)
+   - Cha/mẹ dùng "con" tự xưng ("Con đi làm" KHÔNG phải cha nói)
+   - Vợ chồng dùng "con" gọi nhau (chỉ dùng "anh/em")
+   - Bạn bè dùng "con" gọi nhau
 
 🔸 Anh/chị ↔ em ruột:
    • Lớn tự xưng: "anh"/"chị", gọi: "em"
