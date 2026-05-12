@@ -134,6 +134,40 @@ def _hanviet_post_fix(text: str) -> str:
     return pattern.sub(_replace_token, text)
 
 
+# Phrase Trung → Việt LLM hay dịch sai. Patterns ở đây sửa pattern-level
+# (regex) chứ không từ đơn — tránh false positive.
+_PHRASE_FIXES: list[tuple[str, str, str]] = [
+    # (pattern_regex, replacement, description)
+    # "Dừng lại nhiều hơn" → "Dừng tay!" (LLM dịch 住手/别再打了 sai)
+    (r"\bDừng lại nhiều hơn\b\.?", "Dừng tay!", "停手/住手"),
+    (r"\bĐừng làm nhiều hơn\b\.?", "Đừng làm nữa!", "别再做了"),
+    (r"\bĐừng đánh nhiều hơn\b\.?", "Đừng đánh nữa!", "别再打了"),
+    (r"\bĐừng nói nhiều hơn\b\.?", "Đừng nói nữa!", "别再说了"),
+    (r"\bĐừng khóc nhiều hơn\b\.?", "Đừng khóc nữa!", "别再哭了"),
+    # 老天爷 thường sai thành "Tổ sư Mặt trời" / "Trời cha"
+    (r"\bTổ sư Mặt trời\b", "Trời ơi", "老天爷"),
+    (r"\bTổ tiên trời đất\b", "Trời ơi", "老天爷"),
+    # 班长 = lớp/tổ trưởng, không phải "Ca trưởng" (đó là ca khúc trưởng)
+    (r"\bCa trưởng\b", "Tổ trưởng", "班长 (lớp/tổ trưởng)"),
+    # "theo nghĩa đen" thường là LLM dịch 真的/真是 sai
+    (r"\bTheo nghĩa đen, ", "", "真的 → theo nghĩa đen (bỏ filler)"),
+    (r"\btheo nghĩa đen ", "", "真的 inline"),
+    # Misc phổ biến
+    (r"\bĐồng chí ", "", "同志 trong cổ trang/drama không phải đồng chí CM"),
+]
+
+
+def _phrase_post_fix(text: str) -> str:
+    """Sửa các phrase mistranslation LLM hay mắc (Trung → Việt drama)."""
+    if not text:
+        return text
+    import re
+    out = text
+    for pat, repl, _desc in _PHRASE_FIXES:
+        out = re.sub(pat, repl, out)
+    return out
+
+
 def _default_edge_voice(target_lang: str | None, gender: str | None) -> str | None:
     """Trả Edge voice default cho ngôn ngữ + giới tính. None nếu không match."""
     if not gender or not target_lang:
@@ -1957,14 +1991,18 @@ def translate_project(
     chars_meta = project.get("speaker_characters") or {}
     missing_indices: list[int] = []
     pinyin_fixed_count = 0
+    phrase_fixed_count = 0
     for idx, (seg, trans) in enumerate(zip(project["segments"], translated)):
         if trans and trans.strip():
-            # Post-fix pinyin còn sót → Hán-Việt (Lao Wang → Lão Vương, ...)
+            # Post-fix 2 layer: pinyin → Hán-Việt + phrase Trung→Việt drama
             fixed = _hanviet_post_fix(trans)
             if fixed != trans:
                 pinyin_fixed_count += 1
-            seg["translated_text"] = fixed
-            seg["speech_text"] = fixed
+            after_phrase = _phrase_post_fix(fixed)
+            if after_phrase != fixed:
+                phrase_fixed_count += 1
+            seg["translated_text"] = after_phrase
+            seg["speech_text"] = after_phrase
         else:
             # Translation rỗng cho segment này → tránh mất sub + voice bằng
             # cách fallback về original_text. User sẽ thấy/nghe nguyên gốc cho
@@ -1984,6 +2022,11 @@ def translate_project(
         logger.info(
             "Post-fix pinyin → Hán-Việt cho %d segments (LLM còn slip)",
             pinyin_fixed_count,
+        )
+    if phrase_fixed_count:
+        logger.info(
+            "Post-fix phrase Trung→Việt drama cho %d segments",
+            phrase_fixed_count,
         )
         spk = seg.get("speaker")
         if spk and spk in chars_meta:
