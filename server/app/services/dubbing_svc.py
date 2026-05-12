@@ -74,6 +74,66 @@ DEFAULT_EDGE_VOICES_BY_LANG: dict[str, dict[str, str]] = {
 }
 
 
+# ── Pinyin → Hán-Việt post-fixer ─────────────────────────────────────────
+# LLM (cả flagship) đôi khi vẫn slip pinyin vào output Việt — đặc biệt cho
+# tên Trung trong phim Nhật/Hàn. Bảng này map deterministic 100+ pinyin
+# phổ biến → Hán-Việt. Apply post-translation, trước TTS.
+_PINYIN_TO_HANVIET: dict[str, str] = {
+    # Họ phổ biến nhất (60+)
+    "Wang": "Vương", "Li": "Lý", "Zhang": "Trương", "Liu": "Lưu",
+    "Chen": "Trần", "Yang": "Dương", "Huang": "Hoàng", "Zhao": "Triệu",
+    "Wu": "Ngô", "Zhou": "Chu", "Xu": "Từ", "Sun": "Tôn", "Zhu": "Chu",
+    "Ma": "Mã", "Hu": "Hồ", "Guo": "Quách", "Lin": "Lâm", "He": "Hà",
+    "Gao": "Cao", "Liang": "Lương", "Zheng": "Trịnh", "Luo": "La",
+    "Song": "Tống", "Xie": "Tạ", "Tang": "Đường", "Han": "Hàn",
+    "Feng": "Phùng", "Deng": "Đặng", "Cao": "Tào", "Peng": "Bành",
+    "Zeng": "Tăng", "Xiao": "Tiêu", "Tian": "Điền", "Dong": "Đổng",
+    "Yuan": "Viên", "Pan": "Phan", "Cai": "Thái", "Jiang": "Tưởng",
+    "Yu": "Dư", "Du": "Đỗ", "Ye": "Diệp", "Cheng": "Trình", "Wei": "Vĩ",
+    "Su": "Tô", "Lv": "Lữ", "Ding": "Đinh", "Ren": "Nhâm", "Shen": "Thẩm",
+    "Yao": "Diêu", "Lu": "Lư", "Cui": "Thôi", "Zhong": "Chung",
+    "Tan": "Đàm", "Wang2": "Uông", "Fan": "Phạm", "Jin": "Kim",
+    "Shi": "Thạch", "Dai": "Đới", "Jia": "Giả", "Fang": "Phương",
+    "Mou": "Mưu", "Qin": "Tần", "Mu": "Mộ", "Murong": "Mộ Dung",
+    "Sima": "Tư Mã", "Ouyang": "Âu Dương", "Zhuge": "Gia Cát",
+    # Tên đệm phổ biến / khiêm xưng cổ trang
+    "Lao": "Lão", "Xiaolao": "Tiểu Lão",
+    "Ah": "A", "A": "A",
+    "Da": "Đại", "Er": "Nhị", "San": "Tam", "Si": "Tứ",
+    # Tước vị / vocative cổ trang
+    "Dage": "Đại ca", "Dajie": "Đại tỷ", "Erge": "Nhị ca",
+    "Shifu": "Sư phụ", "Shixiong": "Sư huynh", "Shijie": "Sư tỷ",
+    "Shidi": "Sư đệ", "Shimei": "Sư muội",
+    "Gongzi": "Công tử", "Xiaojie": "Tiểu thư", "Guniang": "Cô nương",
+    "Daren": "Đại nhân", "Xiansheng": "Tiên sinh",
+    "Bixia": "Bệ hạ", "Dianxia": "Điện hạ", "Wangye": "Vương gia",
+    "Niangniang": "Nương nương", "Furen": "Phu nhân",
+    "Niangzi": "Nương tử", "Xianggong": "Tướng công",
+}
+
+
+def _hanviet_post_fix(text: str) -> str:
+    """Replace common pinyin tokens with Hán-Việt equivalents.
+
+    LLM hay slip "Lao Wang" / "Chen Yu" / "Xiao Ming" → bản dịch Việt
+    nhưng tên còn pinyin. Hàm này quét word-boundary, replace từng từ
+    pinyin → Hán-Việt theo bảng _PINYIN_TO_HANVIET.
+
+    Word-boundary preserves chữ Việt + dấu (không match phần giữa từ).
+    """
+    if not text:
+        return text
+    import re
+    # Pattern: word boundary + chữ HOA đầu + chữ thường còn lại
+    # KHÔNG match chữ Việt có dấu (\b chỉ kích hoạt cho [A-Za-z])
+    def _replace_token(m: "re.Match") -> str:
+        tok = m.group(0)
+        return _PINYIN_TO_HANVIET.get(tok, tok)
+    # Match từ bắt đầu bằng HOA + 1-7 chữ thường, dài tổng 2-8 char
+    pattern = re.compile(r"\b([A-Z][a-z]{1,7})\b")
+    return pattern.sub(_replace_token, text)
+
+
 def _default_edge_voice(target_lang: str | None, gender: str | None) -> str | None:
     """Trả Edge voice default cho ngôn ngữ + giới tính. None nếu không match."""
     if not gender or not target_lang:
@@ -1896,10 +1956,15 @@ def translate_project(
     # (theo format kịch bản: id/character/gender/age/text).
     chars_meta = project.get("speaker_characters") or {}
     missing_indices: list[int] = []
+    pinyin_fixed_count = 0
     for idx, (seg, trans) in enumerate(zip(project["segments"], translated)):
         if trans and trans.strip():
-            seg["translated_text"] = trans
-            seg["speech_text"] = trans
+            # Post-fix pinyin còn sót → Hán-Việt (Lao Wang → Lão Vương, ...)
+            fixed = _hanviet_post_fix(trans)
+            if fixed != trans:
+                pinyin_fixed_count += 1
+            seg["translated_text"] = fixed
+            seg["speech_text"] = fixed
         else:
             # Translation rỗng cho segment này → tránh mất sub + voice bằng
             # cách fallback về original_text. User sẽ thấy/nghe nguyên gốc cho
@@ -1914,6 +1979,11 @@ def translate_project(
             "Translation rỗng %d/%d segments (idx=%s) — fallback nguyên gốc.",
             len(missing_indices), len(project["segments"]),
             ",".join(str(i) for i in missing_indices[:20]),
+        )
+    if pinyin_fixed_count:
+        logger.info(
+            "Post-fix pinyin → Hán-Việt cho %d segments (LLM còn slip)",
+            pinyin_fixed_count,
         )
         spk = seg.get("speaker")
         if spk and spk in chars_meta:
