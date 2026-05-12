@@ -3792,11 +3792,16 @@ _cancel_lock = threading.Lock()
 
 
 def request_cancel(project_id: str) -> bool:
+    """Báo cho pipeline đang chạy biết user muốn huỷ.
+
+    No-op nếu không có pipeline đang chạy (auto_dub chưa register listener).
+    Tránh tạo ghost Event tồn đọng trong _cancel_flags khi DELETE/cancel
+    được gọi cho project không chạy.
+    """
     with _cancel_lock:
         ev = _cancel_flags.get(project_id)
         if ev is None:
-            ev = threading.Event()
-            _cancel_flags[project_id] = ev
+            return False
         ev.set()
     return True
 
@@ -3805,6 +3810,13 @@ def is_canceled(project_id: str) -> bool:
     with _cancel_lock:
         ev = _cancel_flags.get(project_id)
     return bool(ev and ev.is_set())
+
+
+def _register_cancel(project_id: str):
+    """Auto_dub gọi ở startup để register listener. Replace event cũ nếu có
+    để không carry-over cancel từ run trước."""
+    with _cancel_lock:
+        _cancel_flags[project_id] = threading.Event()
 
 
 def _reset_cancel(project_id: str):
@@ -3873,8 +3885,8 @@ def auto_dub(
         yield {"step": "error", "label": msg, "progress": -1}
         return
 
-    # Reset cờ huỷ cho lần chạy mới
-    _reset_cancel(project_id)
+    # Register listener huỷ — fresh Event, không carry-over từ run trước
+    _register_cancel(project_id)
 
     def _check_cancel():
         if is_canceled(project_id):
