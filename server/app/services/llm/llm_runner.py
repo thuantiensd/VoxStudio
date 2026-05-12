@@ -33,20 +33,28 @@ VISION_TIMEOUT_S = 120  # VLM với images chậm hơn
 MIN_SPEAKERS_FOR_ANALYZE = 1
 
 
-# Vision-capable models per engine — backend list cho FE dropdown
+# Vision-capable models per engine — backend list cho FE dropdown.
+# Mặc định = flagship tier (instruction-following mạnh nhất, ít hallucination,
+# tốt cho phim cổ trang + name fidelity).
 VISION_MODELS = {
     "gemini": [
         {"id": "gemini-2.5-flash", "label": "Gemini 2.5 Flash (nhanh, rẻ)"},
-        {"id": "gemini-2.5-pro",   "label": "Gemini 2.5 Pro (chuẩn nhất)", "default": True},
+        {"id": "gemini-2.5-pro",   "label": "Gemini 2.5 Pro (flagship)", "default": True},
     ],
     "openai": [
-        {"id": "gpt-4o-mini", "label": "GPT-4o mini (rẻ)"},
-        {"id": "gpt-4o",      "label": "GPT-4o (chuẩn nhất)", "default": True},
+        {"id": "gpt-4o-mini",     "label": "GPT-4o mini (rẻ, cũ)"},
+        {"id": "gpt-4o",          "label": "GPT-4o (cũ, T5/2024)"},
+        {"id": "gpt-4.1-mini",    "label": "GPT-4.1 mini (rẻ, instruction-tuned)"},
+        {"id": "gpt-4.1",         "label": "GPT-4.1 (instruction-tuned)"},
+        {"id": "gpt-5-mini",      "label": "GPT-5 mini (cân đối)"},
+        {"id": "gpt-5",           "label": "GPT-5 (flagship, chuẩn nhất)", "default": True},
     ],
     "claude": [
-        {"id": "claude-3-5-haiku-20241022",  "label": "Claude 3.5 Haiku (rẻ)"},
-        {"id": "claude-3-5-sonnet-20241022", "label": "Claude 3.5 Sonnet (chuẩn)"},
-        {"id": "claude-sonnet-4-6",          "label": "Claude Sonnet 4.6 (mạnh nhất)", "default": True},
+        {"id": "claude-3-5-haiku-20241022",  "label": "Claude 3.5 Haiku (rẻ, cũ)"},
+        {"id": "claude-3-5-sonnet-20241022", "label": "Claude 3.5 Sonnet (cũ)"},
+        {"id": "claude-sonnet-4-5",          "label": "Claude Sonnet 4.5 (cân đối)"},
+        {"id": "claude-sonnet-4-6",          "label": "Claude Sonnet 4.6 (mid-flagship)"},
+        {"id": "claude-opus-4-5",            "label": "Claude Opus 4.5 (flagship)", "default": True},
     ],
 }
 
@@ -271,7 +279,7 @@ def _call_openai_http(prompt: dict, api_key: Optional[str], model: Optional[str]
     if not api_key:
         raise ValueError("api_key required cho openai")
     import httpx
-    m = model or "gpt-4o"
+    m = model or "gpt-5"
     payload = {
         "model": m,
         "temperature": 0.2,
@@ -293,7 +301,7 @@ def _call_claude_http(prompt: dict, api_key: Optional[str], model: Optional[str]
     if not api_key:
         raise ValueError("api_key required cho claude")
     import httpx
-    m = model or "claude-sonnet-4-6"
+    m = model or "claude-opus-4-5"
     payload = {
         "model": m,
         "max_tokens": 4096,
@@ -359,7 +367,7 @@ def _call_openai_vision(prompt_text: str, frame_paths: list,
     if not api_key:
         raise ValueError("api_key required cho openai vision")
     import httpx
-    m = model or "gpt-4o"
+    m = model or "gpt-5"
 
     content = [{"type": "text", "text": prompt_text}]
     for fp in frame_paths:
@@ -389,7 +397,7 @@ def _call_claude_vision(prompt_text: str, frame_paths: list,
     if not api_key:
         raise ValueError("api_key required cho claude vision")
     import httpx
-    m = model or "claude-sonnet-4-6"
+    m = model or "claude-opus-4-5"
 
     content = []
     for fp in frame_paths:

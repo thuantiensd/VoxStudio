@@ -147,13 +147,14 @@ def _post_with_retry(engine: str, url: str, *, params=None, json_body=None, data
         raise FatalAuthError(msg)
     raise ValueError(msg)
 
-# Default model mỗi engine — có thể override qua body request nếu cần.
-# Đã bump lên pro tier (2026-05) vì translate phim cần khả năng theo dõi
-# context dài + pronoun nhất quán — tier rẻ hay slip ở cuối batch.
+# Default model mỗi engine — flagship tier 2026 (bump 2026-05-13).
+# Dịch phim cổ trang/drama cần instruction-following cực mạnh để tuân
+# thủ FORBIDDEN list + name fidelity + register-aware. Flagship tier
+# theo context dài + giữ rule xuyên suốt batch tốt hơn rõ rệt.
 DEFAULT_MODELS = {
-    "openai": "gpt-4o",
-    "claude": "claude-sonnet-4-6",
-    "gemini": "gemini-2.5-pro",
+    "openai": "gpt-5",                # flagship OpenAI (T7/2025)
+    "claude": "claude-opus-4-5",       # flagship Anthropic (T9/2025)
+    "gemini": "gemini-2.5-pro",        # flagship Google
 }
 
 TIMEOUT = 60.0
