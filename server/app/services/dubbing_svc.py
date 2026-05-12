@@ -115,23 +115,54 @@ _PINYIN_TO_HANVIET: dict[str, str] = {
 def _hanviet_post_fix(text: str) -> str:
     """Replace common pinyin tokens with Hán-Việt equivalents.
 
-    LLM hay slip "Lao Wang" / "Chen Yu" / "Xiao Ming" → bản dịch Việt
-    nhưng tên còn pinyin. Hàm này quét word-boundary, replace từng từ
-    pinyin → Hán-Việt theo bảng _PINYIN_TO_HANVIET.
+    SAFE MODE — chỉ replace khi có context rõ ràng là tên Trung:
+      1. Bigram "Capital Capital" (2 từ HOA cạnh nhau) — vd "Chen Yu",
+         "Lao Wang", "Xiao Ming". Replace cả 2.
+      2. Prefix khiêm xưng cổ trang đặc biệt: "Lao X" → "Lão X",
+         "Xiao X" → "Tiểu X" (X bắt đầu HOA).
+      3. Compound họ đặc biệt: "Murong", "Sima", "Ouyang", "Zhuge".
+      4. Vocative đứng đơn KHÔNG match (Wang/Li/Cao... có thể là từ
+         tiếng Việt vô tình trùng pinyin) — tránh false positive.
 
-    Word-boundary preserves chữ Việt + dấu (không match phần giữa từ).
+    Cao/Tan/Da/Ma trong câu Việt KHÔNG bị replace nữa.
     """
     if not text:
         return text
     import re
-    # Pattern: word boundary + chữ HOA đầu + chữ thường còn lại
-    # KHÔNG match chữ Việt có dấu (\b chỉ kích hoạt cho [A-Za-z])
-    def _replace_token(m: "re.Match") -> str:
-        tok = m.group(0)
-        return _PINYIN_TO_HANVIET.get(tok, tok)
-    # Match từ bắt đầu bằng HOA + 1-7 chữ thường, dài tổng 2-8 char
-    pattern = re.compile(r"\b([A-Z][a-z]{1,7})\b")
-    return pattern.sub(_replace_token, text)
+
+    # Compound họ — replace nguyên cụm
+    for compound in ("Murong", "Sima", "Ouyang", "Zhuge", "Shangguan"):
+        if compound in text:
+            text = text.replace(compound, _PINYIN_TO_HANVIET.get(compound, compound))
+
+    # Bigram pinyin: 2 từ HOA cạnh nhau (cách bằng space)
+    def _bigram_repl(m: "re.Match") -> str:
+        w1, w2 = m.group(1), m.group(2)
+        f1 = _PINYIN_TO_HANVIET.get(w1, w1)
+        f2 = _PINYIN_TO_HANVIET.get(w2, w2)
+        # Chỉ áp dụng nếu ÍT NHẤT 1 trong 2 token có trong bảng
+        if f1 == w1 and f2 == w2:
+            return m.group(0)  # cả 2 đều không phải pinyin → giữ nguyên
+        return f"{f1} {f2}"
+
+    text = re.sub(
+        r"\b([A-Z][a-z]{1,7})\s+([A-Z][a-z]{1,7})\b",
+        _bigram_repl, text,
+    )
+
+    # Prefix patterns: "Lao/Xiao/Da/Er + [A-Z]xxx" → Lão/Tiểu/Đại/Nhị + replaced
+    def _prefix_repl(m: "re.Match") -> str:
+        prefix, name = m.group(1), m.group(2)
+        vn_prefix = _PINYIN_TO_HANVIET.get(prefix, prefix)
+        vn_name = _PINYIN_TO_HANVIET.get(name, name)
+        return f"{vn_prefix} {vn_name}"
+
+    text = re.sub(
+        r"\b(Lao|Xiao|Da|Er|San|Si|Ah)\s+([A-Z][a-z]{1,7})\b",
+        _prefix_repl, text,
+    )
+
+    return text
 
 
 # Phrase Trung → Việt LLM hay dịch sai. Patterns ở đây sửa pattern-level
