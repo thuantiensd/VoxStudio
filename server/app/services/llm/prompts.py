@@ -995,10 +995,29 @@ register typical for the genre, not the formal one.
     if is_vn:
         system = f"""Bạn là TRANSLATOR phim chuyên nghiệp. Dịch lời thoại {src_name} → {tgt_name}.
 
-NHIỆM VỤ DUY NHẤT của Pass này:
+🚨🚨🚨 QUY TRÌNH BẮT BUỘC — ĐỌC TRƯỚC, DỊCH SAU:
+
+BƯỚC 1 — ĐỌC TOÀN BỘ DIALOGUE TRƯỚC TIÊN (tất cả N lines bên dưới):
+   • Hiểu SCENE: đang ở đâu, ai vs ai, tâm trạng chung
+   • Xác định DANH SÁCH NHÂN VẬT (tên + vai trò)
+   • Xác định REGISTER: cổ trang / modern / business
+   • Nhận diện CONFLICT / TƯƠNG TÁC giữa nhân vật
+   • Tìm CÁC TÊN RIÊNG xuất hiện — quyết định Hán-Việt cho từng tên
+
+BƯỚC 2 — TRƯỚC KHI DỊCH, GHI NHỚ:
+   • Tên người = 1 cách viết DUY NHẤT xuyên suốt (Tâm Mi không thành Tâm Mỹ ở line khác)
+   • Pronoun mỗi speaker = 1 cách xưng DUY NHẤT (đầu "anh" thì cuối cũng "anh")
+   • Register chọn 1 lần → áp cho TẤT CẢ line
+
+BƯỚC 3 — DỊCH TỪNG LINE theo thứ tự, dùng context từ BƯỚC 1+2.
+
+BƯỚC 4 — TRƯỚC KHI XUẤT JSON: scan lại TẤT CẢ "translated" — đảm bảo
+   tên + pronoun + register nhất quán. Nếu thấy slip → SỬA NGAY.
+
+NHIỆM VỤ Pass này:
 1. Nghĩa ĐÚNG (không paraphrase quá xa, không bịa)
 2. Pronoun ĐÚNG (theo SPEAKER MAP nếu có)
-3. Tên riêng ĐÚNG (Hán-Việt)
+3. Tên riêng ĐÚNG (Hán-Việt — KHÔNG pinyin)
 4. KHÔNG vượt max_chars
 
 KHÔNG cần lo style cinematic — Editor pass sẽ polish.
@@ -1220,6 +1239,25 @@ OUTPUT JSON DUY NHẤT (không markdown):
         # Generic professional translator path — any target language.
         system = f"""You are a PROFESSIONAL film dialogue translator. Translate
 {src_name} → {tgt_name}.
+
+🚨🚨🚨 MANDATORY PROCESS — READ FIRST, TRANSLATE SECOND:
+
+STEP 1 — READ THE ENTIRE DIALOGUE FIRST (all N lines below):
+   • Understand SCENE: where, who's interacting, overall mood
+   • Identify CHARACTER ROSTER (names + roles)
+   • Determine REGISTER: historical / modern / formal / casual
+   • Identify CONFLICTS and INTERACTIONS between characters
+   • Spot all PROPER NOUNS — decide target-language spelling per name
+
+STEP 2 — LOCK IN consistency choices BEFORE translating:
+   • Each proper noun = ONE spelling for the whole batch
+   • Each speaker = ONE pronoun/register choice for the whole batch
+   • Pick the register once and apply to every line
+
+STEP 3 — TRANSLATE line by line using context from Steps 1+2.
+
+STEP 4 — BEFORE EMITTING JSON, scan ALL "translated" lines. If any name
+   or pronoun drifted across the batch → FIX before output.
 
 PASS GOAL (literal accuracy + register consistency, NOT polish):
 1. Meaning ACCURATE — no paraphrase drift, no invented content.
