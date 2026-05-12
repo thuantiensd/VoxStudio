@@ -341,6 +341,44 @@
     0%   { transform: translateX(-100%); }
     100% { transform: translateX(200%); }
   }
+
+  /* Rainbow animated gradient border — dùng cho textarea TTS, voice card
+     active, progress bar, modal CTA. Class này được tham chiếu nhiều chỗ
+     trong account/page.tsx. Padding của element tạo ra độ dày viền. */
+  @keyframes rainbow-shift {
+    0%   { background-position: 0% 50%; }
+    50%  { background-position: 100% 50%; }
+    100% { background-position: 0% 50%; }
+  }
+  .rainbow-frame {
+    position: relative;
+    border-radius: 12px;
+    background: linear-gradient(
+      135deg,
+      #7C5CFF 0%,
+      #B66BFF 25%,
+      #FF6BCB 50%,
+      #B66BFF 75%,
+      #7C5CFF 100%
+    );
+    background-size: 300% 300%;
+    animation: rainbow-shift 4s ease-in-out infinite;
+  }
+  .rainbow-frame > * {
+    background-color: var(--background);
+    border-radius: 10px;
+  }
+  .rainbow-progress {
+    background: linear-gradient(
+      90deg,
+      #7C5CFF 0%,
+      #B66BFF 33%,
+      #FF6BCB 66%,
+      #7C5CFF 100%
+    );
+    background-size: 200% 100%;
+    animation: rainbow-shift 2.5s linear infinite;
+  }
   .marquee-track {
     animation: marquee-x 40s linear infinite;
     will-change: transform;
