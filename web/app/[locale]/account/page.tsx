@@ -1373,6 +1373,7 @@ function TtsTab({ setActiveTab }: { setActiveTab: (t: Tab) => void }) {
   const [tab, setTab] = useState<"text" | "file">("text");
   const [text, setText] = useState("");
   const [srtCues, setSrtCues] = useState<SrtTtsCue[] | null>(null);
+  const [srtRealtime, setSrtRealtime] = useState(true);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const [engine, setEngine] = useState<"premium" | "cloud">(() => {
     if (typeof window === "undefined") return "premium";
@@ -1609,7 +1610,7 @@ function TtsTab({ setActiveTab }: { setActiveTab: (t: Tab) => void }) {
 
     try {
       const next =
-        srtCues && srtCues.length > 0
+        srtCues && srtCues.length > 0 && srtRealtime
           ? await generateSrtTts({
               cues: srtCues,
               voice: edgeVoice || null,
@@ -1776,6 +1777,7 @@ function TtsTab({ setActiveTab }: { setActiveTab: (t: Tab) => void }) {
   function clearText() {
     setText("");
     setSrtCues(null);
+    setSrtRealtime(true);
     setError("");
   }
 
@@ -1843,16 +1845,16 @@ function TtsTab({ setActiveTab }: { setActiveTab: (t: Tab) => void }) {
     let raw = await file.text();
 
     if (SUBTITLE_EXTS.has(ext)) {
-      // SRT/VTT: parse cues → kích hoạt chế độ "SRT realtime" (Edge TTS sẽ
-      // đọc + sắp xếp theo timestamp). User vẫn thấy preview text trong
-      // textarea nhưng generate sẽ chạy theo cue.
+      // SRT/VTT: parse cues. User chọn giữa 2 mode qua toggle trên banner:
+      //   - Real-time ON: dùng srtCues + timestamp (audio khớp giờ)
+      //   - Real-time OFF: dùng text trong textarea (đọc liên tục, không timing)
+      // Textarea chỉ chứa text thuần — KHÔNG include timestamp để tránh
+      // TTS đọc ra "không hai số không số một" ở normal mode.
       const parsedCues = parseSrtFE(raw);
       if (parsedCues.length > 0) {
         setSrtCues(parsedCues);
-        const preview = parsedCues
-          .map((c) => `[${formatSrtTime(c.start)} → ${formatSrtTime(c.end)}]\n${c.text}`)
-          .join("\n\n");
-        setText(preview);
+        setSrtRealtime(true);
+        setText(parsedCues.map((c) => c.text).join("\n"));
         setTab("text");
         return;
       }
@@ -1904,24 +1906,47 @@ function TtsTab({ setActiveTab }: { setActiveTab: (t: Tab) => void }) {
           </div>
 
           {srtCues && srtCues.length > 0 && (
-            <div className="mb-3 flex items-center justify-between gap-3 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-xs">
-              <div className="flex items-center gap-2 text-emerald-600 dark:text-emerald-400">
-                <span className="rounded-md bg-emerald-500/20 px-1.5 py-0.5 font-black uppercase tracking-wider">
+            <div
+              className={`mb-3 flex flex-wrap items-center justify-between gap-3 rounded-lg border px-3 py-2 text-xs ${
+                srtRealtime
+                  ? "border-emerald-500/40 bg-emerald-500/10"
+                  : "border-border/60 bg-muted/30"
+              }`}
+            >
+              <div className={`flex items-center gap-2 ${srtRealtime ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground"}`}>
+                <span className={`rounded-md px-1.5 py-0.5 font-black uppercase tracking-wider ${
+                  srtRealtime ? "bg-emerald-500/20" : "bg-muted/60"
+                }`}>
                   SRT
                 </span>
                 <span className="font-semibold">
-                  Chế độ real-time — {srtCues.length} cue · {formatSrtTime(srtCues[srtCues.length - 1].end)}
+                  {srtCues.length} cue · {formatSrtTime(srtCues[srtCues.length - 1].end)}
                 </span>
                 <span className="text-muted-foreground">
-                  · audio sẽ khớp đúng timestamp
+                  · {srtRealtime ? "audio khớp đúng timestamp" : "đọc liên tục, không timing"}
                 </span>
               </div>
-              <button
-                onClick={() => { setSrtCues(null); setText(""); }}
-                className="rounded-md border border-border/60 px-2 py-1 text-[11px] font-semibold text-muted-foreground hover:bg-muted/40 hover:text-foreground"
-              >
-                Xoá SRT
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setSrtRealtime((v) => !v)}
+                  className={`inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-[11px] font-semibold transition ${
+                    srtRealtime
+                      ? "border-emerald-500/40 bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/25"
+                      : "border-border/60 bg-background/60 text-muted-foreground hover:bg-muted/40 hover:text-foreground"
+                  }`}
+                  title="Bật để đọc theo timestamp, tắt để đọc text liên tục"
+                >
+                  ⏱ Real-time: {srtRealtime ? "BẬT" : "TẮT"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setSrtCues(null); setText(""); setSrtRealtime(true); }}
+                  className="rounded-md border border-border/60 px-2 py-1 text-[11px] font-semibold text-muted-foreground hover:bg-muted/40 hover:text-foreground"
+                >
+                  Xoá SRT
+                </button>
+              </div>
             </div>
           )}
 
