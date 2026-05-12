@@ -1117,6 +1117,33 @@ LỖI C: 小X/阿X/大X = TÊN THÂN MẬT → Tiểu X/A X/Đại X (Hán-Việ
 📏 BUDGET: mỗi line có [max N chars] = số char TỐI ĐA. Cắt filler, từ ngắn.
    Việt dài hơn Trung ~30% nếu literal → phải rút gọn.
 
+🚨🚨🚨 KHÔNG ĐƯỢC BỎ SÓT (CRITICAL CHO LỒNG TIẾNG):
+
+Mỗi line trong DIALOGUE có 1 timing slot trong video — nếu bạn để
+"translated" RỖNG, slot đó sẽ MẤT TIẾNG (silent). User sẽ thấy nhân vật
+mở miệng nhưng không có âm. RẤT XẤU.
+
+→ MỌI line PHẢI có "translated" ≥ 1 ký tự.
+
+KỂ CẢ interjection / filler 1-2 char gốc → PHẢI dịch, KHÔNG drop:
+   嗯       → "Ừ" (thân) / "Vâng" (lễ phép)
+   啊       → "À" / "Ơ" / "Ơ kìa"
+   哦       → "Ồ" / "Ô" / "Vâng"
+   哎       → "Ấy" / "Ôi" / "Ơ kìa"
+   呃       → "Ờ" / "Ờm" / "Ừm"
+   对       → "Ừ" / "Phải" / "Đúng"
+   好       → "Được" / "Ờ" / "Tốt"
+   嗯嗯    → "Ừ ừ" / "Vâng vâng"
+   哈       → "Ha" / "Hả?" / "Ha ha"
+   唉       → "Ai chao" / "Ôi" / "Hỡi"
+   行        → "Được" / "Ổn"
+   走        → "Đi nào" / "Đi thôi"
+   咦       → "Ơ?" / "Ủa?"
+   啧       → "Tch" / "Hứ"
+
+NẾU source 1-2 char không trong list trên → tự dịch sang interjection
+hoặc từ ngắn tương đương — TUYỆT ĐỐI KHÔNG để rỗng.
+
 🔤 {_name_translation_rule(source_lang)}
 
 🚨 NAME-CHARACTER FIDELITY (lỗi LLM hay mắc nhất với phim Trung):
@@ -1400,6 +1427,16 @@ Editor TASK: polish style (thêm tiểu từ, đảo từ, cảm xúc) + SỬA p
 sai về DEFAULT "anh/em" cho vợ chồng + "con/bố/mẹ" cho gia đình.
 GIỮ pronoun NHẤT QUÁN xuyên suốt cho mỗi speaker.
 
+
+🚨 KHÔNG BỎ SÓT INTERJECTION (CRITICAL — mất audio = mất tiếng cảnh):
+   • Mỗi line trong INPUT phải có "translated" ≥ 1 ký tự ở OUTPUT.
+   • KHÔNG được drop "Ừ/À/Ờ/Vâng/Hả?" dù chúng có vẻ "thừa" — chúng có
+     timing slot trong video. Drop = silent gap khi dub.
+   • Nếu literal là interjection ngắn → POLISH thành interjection Việt
+     tự nhiên hơn, KHÔNG xoá:
+       "Đúng vậy" → "Ừ" / "Phải rồi"
+       "Vâng" → "Ừ" (thân) / "Vâng ạ" (lễ phép)
+       "Không" (đơn) → "Không" / "Đâu có" / "Hổng phải"
 
 🎬 PATTERNS CẤM (literal hay gặp):
 ❌ "Đúng vậy"/"Đúng rồi" cho 对啊 → DÙNG: "Ừ"/"Phải rồi"/"Ờ"
