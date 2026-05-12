@@ -1765,12 +1765,31 @@ function TtsTab({ setActiveTab }: { setActiveTab: (t: Tab) => void }) {
   }
 
   function normalizeText() {
-    setText((value) =>
-      value
+    let removed = 0;
+    let urlsFixed = 0;
+    setText((value) => {
+      const before = value;
+      // 1. Whitespace cleanup
+      let out = before
         .replace(/\r\n/g, "\n")
         .replace(/[ \t]+/g, " ")
         .replace(/\n{3,}/g, "\n\n")
-        .trim(),
+        .replace(/ *\n */g, "\n");
+      // 2. Chuẩn hoá URL/TLD/email cho TTS đọc đúng (".vn" → "chấm vê en")
+      const beforeUrlFix = out;
+      out = normalizeForTts(out).trim();
+      if (out !== beforeUrlFix) urlsFixed = 1;
+      // 3. Bỏ filler không cần thiết
+      out = out
+        .replace(/[ \t]{2,}/g, " ")
+        .replace(/([!?,.…])\1{2,}/g, "$1$1")  // !!! → !!, ??? → ??
+        .trim();
+      removed = before.length - out.length;
+      return out;
+    });
+    toast.success(
+      `Đã chuẩn hoá${removed > 0 ? ` · gọn ${removed} ký tự` : ""}`,
+      { description: urlsFixed ? "URL/email chuyển sang dạng đọc được (vd: .vn → chấm vê en)" : undefined },
     );
   }
 
@@ -1782,10 +1801,14 @@ function TtsTab({ setActiveTab }: { setActiveTab: (t: Tab) => void }) {
   }
 
   function insertPause() {
-    const token = ' <break time="0.5s" /> ';
+    // Edge TTS không parse SSML `<break/>` (đọc literal). Dùng ellipsis "…"
+    // là cách an toàn — Edge TTS interpret như pause ~0.8s, đa số engine khác
+    // (OpenAI, Vox Premium) cũng tôn trọng.
+    const token = "… ";
     const target = textareaRef.current;
     if (!target) {
       setText((value) => `${value}${token}`);
+      toast.success("Đã chèn khoảng dừng (~0.8s)");
       return;
     }
     const start = target.selectionStart;
@@ -1796,6 +1819,7 @@ function TtsTab({ setActiveTab }: { setActiveTab: (t: Tab) => void }) {
       const next = start + token.length;
       target.setSelectionRange(next, next);
     }, 0);
+    toast.success("Đã chèn khoảng dừng (~0.8s)");
   }
 
   function resetSettings() {
