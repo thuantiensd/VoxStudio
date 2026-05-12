@@ -6,20 +6,37 @@ import edge_tts
 
 logger = logging.getLogger(__name__)
 
-# Default voices per language
+# Default voices per language. Hỗ trợ cả ISO code (vi, en, zh...) và full
+# name (vietnamese, english...) — FE đôi khi gửi 1 trong 2 dạng.
 DEFAULT_VOICES = {
     "vietnamese": "vi-VN-NamMinhNeural",
-    "english": "en-US-BrianNeural",
-    "chinese": "zh-CN-YunxiNeural",
-    "japanese": "ja-JP-KeitaNeural",
-    "korean": "ko-KR-InJoonNeural",
-    "french": "fr-FR-HenriNeural",
-    "spanish": "es-ES-AlvaroNeural",
-    "german": "de-DE-ConradNeural",
+    "vi":         "vi-VN-NamMinhNeural",
+    "english":    "en-US-BrianNeural",
+    "en":         "en-US-BrianNeural",
+    "chinese":    "zh-CN-YunxiNeural",
+    "zh":         "zh-CN-YunxiNeural",
+    "japanese":   "ja-JP-KeitaNeural",
+    "ja":         "ja-JP-KeitaNeural",
+    "korean":     "ko-KR-InJoonNeural",
+    "ko":         "ko-KR-InJoonNeural",
+    "french":     "fr-FR-HenriNeural",
+    "fr":         "fr-FR-HenriNeural",
+    "spanish":    "es-ES-AlvaroNeural",
+    "es":         "es-ES-AlvaroNeural",
+    "german":     "de-DE-ConradNeural",
+    "de":         "de-DE-ConradNeural",
     "portuguese": "pt-BR-AntonioNeural",
-    "russian": "ru-RU-DmitryNeural",
-    "thai": "th-TH-PremwadeeNeural",
-    "hindi": "hi-IN-MadhurNeural",
+    "pt":         "pt-BR-AntonioNeural",
+    "russian":    "ru-RU-DmitryNeural",
+    "ru":         "ru-RU-DmitryNeural",
+    "thai":       "th-TH-PremwadeeNeural",
+    "th":         "th-TH-PremwadeeNeural",
+    "hindi":      "hi-IN-MadhurNeural",
+    "hi":         "hi-IN-MadhurNeural",
+    "indonesian": "id-ID-ArdiNeural",
+    "id":         "id-ID-ArdiNeural",
+    "italian":    "it-IT-DiegoNeural",
+    "it":         "it-IT-DiegoNeural",
 }
 
 
@@ -27,7 +44,11 @@ async def generate(text: str, out_path: str, language: str = "vietnamese",
                    voice: str = None, speed: float = 1.0):
     """Generate TTS audio file using Edge TTS."""
     if not voice:
-        voice = DEFAULT_VOICES.get(language, "en-US-BrianNeural")
+        lang_key = (language or "").strip().lower()
+        voice = DEFAULT_VOICES.get(lang_key, "en-US-BrianNeural")
+        if voice == "en-US-BrianNeural" and lang_key not in ("english", "en", ""):
+            logger.warning("Edge TTS: không có mapping cho language=%r → fallback English. "
+                           "Thêm vào DEFAULT_VOICES nếu cần.", language)
 
     rate_pct = round((speed - 1.0) * 100)
     rate = f"{rate_pct:+d}%"
