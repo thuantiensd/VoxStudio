@@ -3869,46 +3869,27 @@ function DubProjectCard({
             <StatusIcon className={`h-3 w-3 ${isRunning ? "animate-spin" : ""}`} />
             {st.label}
           </span>
-          {isRunning && (
+          {!isRunning && (
             <span
               role="button"
               tabIndex={0}
               onClick={(e) => {
                 e.stopPropagation();
-                onCancel();
+                onDelete();
               }}
               onKeyDown={(e) => {
                 if (e.key === "Enter" || e.key === " ") {
                   e.preventDefault();
                   e.stopPropagation();
-                  onCancel();
+                  onDelete();
                 }
               }}
-              className="grid h-6 w-6 shrink-0 cursor-pointer place-items-center rounded bg-background/60 text-amber-500/80 transition hover:bg-amber-500/15 hover:text-amber-500"
-              title="Huỷ pipeline đang chạy"
+              className="grid h-6 w-6 shrink-0 cursor-pointer place-items-center rounded bg-background/60 text-muted-foreground/80 transition hover:bg-red-500/15 hover:text-red-500"
+              title="Xoá dự án"
             >
-              <StopCircle className="h-3 w-3" />
+              <Trash2 className="h-3 w-3" />
             </span>
           )}
-          <span
-            role="button"
-            tabIndex={0}
-            onClick={(e) => {
-              e.stopPropagation();
-              onDelete();
-            }}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" || e.key === " ") {
-                e.preventDefault();
-                e.stopPropagation();
-                onDelete();
-              }
-            }}
-            className="grid h-6 w-6 shrink-0 cursor-pointer place-items-center rounded bg-background/60 text-muted-foreground/80 transition hover:bg-red-500/15 hover:text-red-500"
-            title="Xoá dự án"
-          >
-            <Trash2 className="h-3 w-3" />
-          </span>
         </div>
       </div>
 
@@ -3932,6 +3913,34 @@ function DubProjectCard({
             />
             {isRunning && <div className="dub-progress-shimmer" />}
           </div>
+        </div>
+      )}
+
+      {/* Hành động khi đang chạy — nút Huỷ rõ ràng có label, không chỉ icon */}
+      {isRunning && (
+        <div className="mt-2.5 flex gap-1.5">
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onCancel();
+            }}
+            className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-md border border-amber-500/40 bg-amber-500/10 px-2 py-1.5 text-[11px] font-bold text-amber-600 transition hover:bg-amber-500/20 dark:text-amber-400"
+          >
+            <StopCircle className="h-3.5 w-3.5" />
+            Huỷ
+          </button>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onDelete();
+            }}
+            className="inline-flex items-center justify-center gap-1.5 rounded-md border border-border/60 bg-background/60 px-2 py-1.5 text-[11px] font-bold text-muted-foreground transition hover:border-red-500/40 hover:bg-red-500/10 hover:text-red-500"
+            title="Xoá luôn (sẽ tự huỷ trước)"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </button>
         </div>
       )}
 
@@ -4378,6 +4387,27 @@ function DubbingTab({ setActiveTab }: { setActiveTab: (t: Tab) => void }) {
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Không huỷ được.";
       toast.error("Huỷ thất bại", { description: msg });
+    }
+  }
+
+  async function removeAllProjects() {
+    if (projects.length === 0) return;
+    if (typeof window !== "undefined") {
+      const ok = window.confirm(
+        `Xoá TẤT CẢ ${projects.length} dự án? Dự án đang chạy sẽ bị huỷ luôn. ` +
+        `Hành động không thể hoàn tác.`,
+      );
+      if (!ok) return;
+    }
+    const ids = projects.map((p) => p.id);
+    setProjects([]);
+    const results = await Promise.allSettled(ids.map((id) => deleteDubbingProject(id)));
+    const failed = results.filter((r) => r.status === "rejected").length;
+    if (failed === 0) {
+      toast.success(`Đã xoá ${ids.length} dự án`);
+    } else {
+      toast.error(`Xoá xong ${ids.length - failed}/${ids.length} — ${failed} lỗi`);
+      void reloadProjects();
     }
   }
 
@@ -5079,15 +5109,26 @@ function DubbingTab({ setActiveTab }: { setActiveTab: (t: Tab) => void }) {
               <div className="text-[11px] text-muted-foreground">{projects.length} dự án</div>
             </div>
           </div>
-          <button
-            type="button"
-            onClick={() => void reloadProjects()}
-            disabled={loadingProjects}
-            className="grid h-8 w-8 place-items-center rounded-lg text-muted-foreground hover:bg-muted/40 hover:text-foreground disabled:opacity-50"
-            title="Làm mới"
-          >
-            {loadingProjects ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RotateCcw className="h-3.5 w-3.5" />}
-          </button>
+          <div className="inline-flex items-center gap-0.5">
+            <button
+              type="button"
+              onClick={() => void reloadProjects()}
+              disabled={loadingProjects}
+              className="grid h-8 w-8 place-items-center rounded-lg text-muted-foreground hover:bg-muted/40 hover:text-foreground disabled:opacity-50"
+              title="Làm mới"
+            >
+              {loadingProjects ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RotateCcw className="h-3.5 w-3.5" />}
+            </button>
+            <button
+              type="button"
+              onClick={() => void removeAllProjects()}
+              disabled={projects.length === 0}
+              className="grid h-8 w-8 place-items-center rounded-lg text-muted-foreground transition hover:bg-red-500/15 hover:text-red-500 disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-muted-foreground"
+              title={projects.length === 0 ? "Không có dự án" : `Xoá tất cả ${projects.length} dự án`}
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </button>
+          </div>
         </div>
 
         <div className="min-h-0 flex-1 space-y-2 overflow-y-auto p-3">
