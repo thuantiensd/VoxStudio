@@ -70,6 +70,8 @@ import {
   fetchCreditPacks,
   fetchDownloadInfo,
   generateCloudTts,
+  generateSrtTts,
+  type SrtTtsCue,
   generateTts,
   listEdgeVoices,
   listDubbingProjects,
@@ -1352,9 +1354,25 @@ function VideoDownloadTab() {
 }
 
 // ── TTS TAB ────────────────────────────────────────────────────────────
+function parseSrtFE(content: string): SrtTtsCue[] {
+  const text = content.replace(/^﻿/, "").replace(/^WEBVTT[^\n]*\n+/i, "").trim();
+  const re = /(?:\d+\s*\n)?(\d{1,2}):(\d{2}):(\d{2})[,.](\d{1,3})\s*-->\s*(\d{1,2}):(\d{2}):(\d{2})[,.](\d{1,3})[^\n]*\n((?:.+(?:\n|$))+?)(?=\n|$)/gm;
+  const cues: SrtTtsCue[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    const [, h1, mn1, s1, ms1, h2, mn2, s2, ms2, body] = m;
+    const start = +h1 * 3600 + +mn1 * 60 + +s1 + +ms1.padEnd(3, "0") / 1000;
+    const end = +h2 * 3600 + +mn2 * 60 + +s2 + +ms2.padEnd(3, "0") / 1000;
+    const clean = body.replace(/<[^>]+>/g, "").replace(/\{\\[^}]+\}/g, "").trim();
+    if (clean && end > start) cues.push({ start, end, text: clean });
+  }
+  return cues;
+}
+
 function TtsTab({ setActiveTab }: { setActiveTab: (t: Tab) => void }) {
   const [tab, setTab] = useState<"text" | "file">("text");
   const [text, setText] = useState("");
+  const [srtCues, setSrtCues] = useState<SrtTtsCue[] | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const [engine, setEngine] = useState<"premium" | "cloud">(() => {
     if (typeof window === "undefined") return "premium";
@@ -1591,24 +1609,30 @@ function TtsTab({ setActiveTab }: { setActiveTab: (t: Tab) => void }) {
 
     try {
       const next =
-        engine === "premium"
-          ? await generateTts({
-              text,
-              voice_id: voiceId || null,
+        srtCues && srtCues.length > 0
+          ? await generateSrtTts({
+              cues: srtCues,
+              voice: edgeVoice || null,
               language,
-              speed,
-              num_step: numStep,
-              guidance_scale: guidanceScale,
-              t_shift: tShift,
-              layer_penalty_factor: layerPenaltyFactor,
-              position_temperature: positionTemperature,
-              class_temperature: classTemperature,
-              denoise,
-              preprocess_prompt: preprocessPrompt,
-              postprocess_output: postprocessOutput,
-              audio_chunk_duration: audioChunkDuration,
             })
-          : await generateCloudTts({ text, voice: edgeVoice || null, language, speed });
+          : engine === "premium"
+            ? await generateTts({
+                text,
+                voice_id: voiceId || null,
+                language,
+                speed,
+                num_step: numStep,
+                guidance_scale: guidanceScale,
+                t_shift: tShift,
+                layer_penalty_factor: layerPenaltyFactor,
+                position_temperature: positionTemperature,
+                class_temperature: classTemperature,
+                denoise,
+                preprocess_prompt: preprocessPrompt,
+                postprocess_output: postprocessOutput,
+                audio_chunk_duration: audioChunkDuration,
+              })
+            : await generateCloudTts({ text, voice: edgeVoice || null, language, speed });
       // 2. Update item status = "done" với audio url
       writeHistory((items) =>
         items.map((it) =>
@@ -1751,6 +1775,7 @@ function TtsTab({ setActiveTab }: { setActiveTab: (t: Tab) => void }) {
 
   function clearText() {
     setText("");
+    setSrtCues(null);
     setError("");
   }
 
@@ -1818,15 +1843,27 @@ function TtsTab({ setActiveTab }: { setActiveTab: (t: Tab) => void }) {
     let raw = await file.text();
 
     if (SUBTITLE_EXTS.has(ext)) {
-      // Strip SRT/VTT: bỏ index lines (số), timestamp lines (00:00:00,000 --> ...),
-      // VTT header (WEBVTT), và các tag <i>, {\an8}, ...
+      // SRT/VTT: parse cues → kích hoạt chế độ "SRT realtime" (Edge TTS sẽ
+      // đọc + sắp xếp theo timestamp). User vẫn thấy preview text trong
+      // textarea nhưng generate sẽ chạy theo cue.
+      const parsedCues = parseSrtFE(raw);
+      if (parsedCues.length > 0) {
+        setSrtCues(parsedCues);
+        const preview = parsedCues
+          .map((c) => `[${formatSrtTime(c.start)} → ${formatSrtTime(c.end)}]\n${c.text}`)
+          .join("\n\n");
+        setText(preview);
+        setTab("text");
+        return;
+      }
+      // Fallback nếu parse fail → strip như cũ
       raw = raw
         .replace(/^WEBVTT.*$/im, "")
-        .replace(/^\d+$/gm, "")  // index lines
-        .replace(/^\d{1,2}:\d{2}:\d{2}[.,]\d{1,3}\s*-->.*$/gm, "")  // timestamp lines
-        .replace(/<\/?[^>]+>/g, "")  // HTML tags
-        .replace(/\{\\[^}]+\}/g, "")  // ASS override codes
-        .replace(/\n{3,}/g, "\n\n")  // collapse blank lines
+        .replace(/^\d+$/gm, "")
+        .replace(/^\d{1,2}:\d{2}:\d{2}[.,]\d{1,3}\s*-->.*$/gm, "")
+        .replace(/<\/?[^>]+>/g, "")
+        .replace(/\{\\[^}]+\}/g, "")
+        .replace(/\n{3,}/g, "\n\n")
         .trim();
     } else if (RTF_EXTS.has(ext)) {
       // Strip RTF: bỏ control words (\word) + groups + escapes — đủ cho RTF cơ bản.
@@ -1865,6 +1902,28 @@ function TtsTab({ setActiveTab }: { setActiveTab: (t: Tab) => void }) {
               </button>
             </div>
           </div>
+
+          {srtCues && srtCues.length > 0 && (
+            <div className="mb-3 flex items-center justify-between gap-3 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-xs">
+              <div className="flex items-center gap-2 text-emerald-600 dark:text-emerald-400">
+                <span className="rounded-md bg-emerald-500/20 px-1.5 py-0.5 font-black uppercase tracking-wider">
+                  SRT
+                </span>
+                <span className="font-semibold">
+                  Chế độ real-time — {srtCues.length} cue · {formatSrtTime(srtCues[srtCues.length - 1].end)}
+                </span>
+                <span className="text-muted-foreground">
+                  · audio sẽ khớp đúng timestamp
+                </span>
+              </div>
+              <button
+                onClick={() => { setSrtCues(null); setText(""); }}
+                className="rounded-md border border-border/60 px-2 py-1 text-[11px] font-semibold text-muted-foreground hover:bg-muted/40 hover:text-foreground"
+              >
+                Xoá SRT
+              </button>
+            </div>
+          )}
 
           {tab === "text" ? (
             // Một cây JSX duy nhất để giữ focus textarea — chỉ đổi className

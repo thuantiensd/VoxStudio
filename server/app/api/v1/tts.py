@@ -16,7 +16,7 @@ from app.core.storage import get_audio_path, get_audio_url, delete_audio
 from app.db.models import User
 from app.db.session import get_session
 from app.models.schemas import TTSRequest, TTSResponse
-from app.services import tts_svc, edge_tts_svc, job_svc
+from app.services import tts_svc, edge_tts_svc, job_svc, srt_tts_svc
 
 router = APIRouter(prefix="/tts", tags=["TTS"])
 
@@ -123,6 +123,52 @@ async def edge_generate(
             "duration": round(duration, 2),
             "sample_rate": sr,
         }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class SrtCue(BaseModel):
+    start: float
+    end: float
+    text: str
+
+
+class SrtTTSRequest(BaseModel):
+    cues: list[SrtCue]
+    voice: str | None = None
+    language: str | None = "vietnamese"
+
+
+@router.post("/srt-generate")
+async def srt_generate(
+    req: SrtTTSRequest,
+    user: User = Depends(get_current_user),
+):
+    """Generate audio track aligned với SRT timestamp.
+
+    Mỗi cue được Edge TTS đọc + speed-adjust để fit (start, end) window,
+    rồi mix vào 1 track wav duy nhất. Silence tự fill giữa các cue.
+    """
+    if not req.cues:
+        raise HTTPException(status_code=400, detail="Cần ít nhất 1 cue.")
+    if len(req.cues) > 2000:
+        raise HTTPException(status_code=400,
+                            detail=f"Quá nhiều cues ({len(req.cues)}). Max 2000.")
+    try:
+        file_id = uuid.uuid4().hex[:12]
+        wav_path = AUDIO_OUTPUT_DIR / f"{file_id}.wav"
+        info = srt_tts_svc.generate_from_cues(
+            [c.dict() for c in req.cues],
+            voice=req.voice,
+            language=req.language or "vietnamese",
+            out_wav=wav_path,
+        )
+        return {
+            "audio_url": _signed_audio_url(file_id, user.id),
+            **info,
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

@@ -355,6 +355,22 @@ export async function generateCloudTts(body: {
   });
 }
 
+export type SrtTtsCue = { start: number; end: number; text: string };
+
+export async function generateSrtTts(body: {
+  cues: SrtTtsCue[];
+  voice?: string | null;
+  language?: string | null;
+}) {
+  return api<TtsResult & { n_cues: number; n_errors: number }>(
+    "/tts/srt-generate",
+    {
+      method: "POST",
+      body: JSON.stringify(body),
+    },
+  );
+}
+
 export async function cloneVoice(body: {
   audio: File;
   name: string;
