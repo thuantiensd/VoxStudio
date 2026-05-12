@@ -168,6 +168,36 @@ def _phrase_post_fix(text: str) -> str:
     return out
 
 
+def _apply_translation_post_fixes(project: dict) -> None:
+    """Apply pinyin + phrase post-fixes lên TẤT CẢ segments của project.
+
+    Idempotent — gọi nhiều lần không gây hại (regex match cùng pattern).
+    Phải gọi sau MỌI path translate (Gemini env / Qwen / BYOK / Google Free)
+    để sub + dub đều dùng text đã clean.
+    """
+    n_pin = 0
+    n_phrase = 0
+    for seg in project.get("segments", []):
+        t = (seg.get("translated_text") or "").strip()
+        if not t:
+            continue
+        fixed = _hanviet_post_fix(t)
+        if fixed != t:
+            n_pin += 1
+        after_phrase = _phrase_post_fix(fixed)
+        if after_phrase != fixed:
+            n_phrase += 1
+        seg["translated_text"] = after_phrase
+        if seg.get("speech_text"):
+            seg["speech_text"] = _phrase_post_fix(_hanviet_post_fix(seg["speech_text"]))
+        else:
+            seg["speech_text"] = after_phrase
+    if n_pin:
+        logger.info("Post-fix pinyin → Hán-Việt: %d segments", n_pin)
+    if n_phrase:
+        logger.info("Post-fix phrase Trung→Việt drama: %d segments", n_phrase)
+
+
 def _default_edge_voice(target_lang: str | None, gender: str | None) -> str | None:
     """Trả Edge voice default cho ngôn ngữ + giới tính. None nếu không match."""
     if not gender or not target_lang:
@@ -1873,6 +1903,7 @@ def translate_project(
                 seg["translated_text"] = result["translated_text"]
                 seg["speech_text"] = result["speech_text"] or result["translated_text"]
                 seg["emotion"] = result.get("emotion", "neutral")
+        _apply_translation_post_fixes(project)
         method = "Gemini (env)"
         _save_meta(project)
         logger.info("Translated %d segs → %s (%s)",
@@ -1894,6 +1925,7 @@ def translate_project(
                 seg["translated_text"] = result["translated_text"]
                 seg["speech_text"] = result["speech_text"] or result["translated_text"]
                 seg["emotion"] = result.get("emotion", "neutral")
+        _apply_translation_post_fixes(project)
         method = "Qwen"
         _save_meta(project)
         logger.info("Translated %d segs → %s (%s)",
@@ -1990,19 +2022,10 @@ def translate_project(
     # (theo format kịch bản: id/character/gender/age/text).
     chars_meta = project.get("speaker_characters") or {}
     missing_indices: list[int] = []
-    pinyin_fixed_count = 0
-    phrase_fixed_count = 0
     for idx, (seg, trans) in enumerate(zip(project["segments"], translated)):
         if trans and trans.strip():
-            # Post-fix 2 layer: pinyin → Hán-Việt + phrase Trung→Việt drama
-            fixed = _hanviet_post_fix(trans)
-            if fixed != trans:
-                pinyin_fixed_count += 1
-            after_phrase = _phrase_post_fix(fixed)
-            if after_phrase != fixed:
-                phrase_fixed_count += 1
-            seg["translated_text"] = after_phrase
-            seg["speech_text"] = after_phrase
+            seg["translated_text"] = trans
+            seg["speech_text"] = trans
         else:
             # Translation rỗng cho segment này → tránh mất sub + voice bằng
             # cách fallback về original_text. User sẽ thấy/nghe nguyên gốc cho
@@ -2012,22 +2035,7 @@ def translate_project(
                 seg["translated_text"] = orig
                 seg["speech_text"] = orig
                 missing_indices.append(idx)
-    if missing_indices:
-        logger.warning(
-            "Translation rỗng %d/%d segments (idx=%s) — fallback nguyên gốc.",
-            len(missing_indices), len(project["segments"]),
-            ",".join(str(i) for i in missing_indices[:20]),
-        )
-    if pinyin_fixed_count:
-        logger.info(
-            "Post-fix pinyin → Hán-Việt cho %d segments (LLM còn slip)",
-            pinyin_fixed_count,
-        )
-    if phrase_fixed_count:
-        logger.info(
-            "Post-fix phrase Trung→Việt drama cho %d segments",
-            phrase_fixed_count,
-        )
+        # Tag character_name + age + gender per-segment
         spk = seg.get("speaker")
         if spk and spk in chars_meta:
             ci = chars_meta[spk]
@@ -2036,6 +2044,16 @@ def translate_project(
             if ci.get("gender"):
                 seg["speaker_gender"] = ci["gender"]
             seg["emotion"] = "neutral"
+    if missing_indices:
+        logger.warning(
+            "Translation rỗng %d/%d segments (idx=%s) — fallback nguyên gốc.",
+            len(missing_indices), len(project["segments"]),
+            ",".join(str(i) for i in missing_indices[:20]),
+        )
+    # Apply post-fix sau khi đã set translated_text cho tất cả segments
+    # (gồm cả fallback nguyên gốc). Chạy 1 lần cuối → sub + dub đều dùng
+    # text đã clean.
+    _apply_translation_post_fixes(project)
 
     # ── LLM Self-verify gender (Option A) ──
     # LLM trả speaker_genders cuối output → so sánh với pipeline detect →
