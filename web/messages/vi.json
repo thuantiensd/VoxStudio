@@ -303,7 +303,7 @@
         },
         "stt": {
           "title": "Speech-to-Text chính xác",
-          "desc": "Whisper-based STT, nhận diện đa ngôn ngữ với độ chính xác cao. Tự sửa thuật ngữ riêng theo từ điển bạn cấu hình."
+          "desc": "Bộ nhận diện giọng nói chính xác cao, hỗ trợ đa ngôn ngữ. Tự sửa thuật ngữ riêng theo từ điển bạn cấu hình."
         },
         "byok": {
           "title": "BYOK — dùng API riêng",

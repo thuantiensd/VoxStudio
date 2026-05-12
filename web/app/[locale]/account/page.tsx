@@ -5873,7 +5873,7 @@ function DubAdvancedModal(p: DubAdvancedModalProps) {
                     <div>
                       <div className="text-sm font-bold text-foreground">Lọc nhạc trước khi nhận diện <span className="text-[10px] font-semibold text-emerald-500">(chuẩn hơn)</span></div>
                       <div className="mt-0.5 text-[11px] leading-relaxed text-muted-foreground">
-                        Whisper đọc track giọng đã tách → sạch nhạc nền, ít nhầm. Tắt nếu video có thì thầm/voice nhỏ dễ bị bỏ sót.
+                        Nhận diện đọc track giọng đã tách → sạch nhạc nền, ít nhầm. Tắt nếu video có thì thầm/voice nhỏ dễ bị bỏ sót.
                       </div>
                     </div>
                     <span className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition ${p.whisperUseVocals ? "bg-primary" : "bg-muted"}`}>
@@ -5985,7 +5985,7 @@ function DubAdvancedModal(p: DubAdvancedModalProps) {
                     <div className="mt-4 space-y-1.5 text-[11px] leading-5 text-muted-foreground">
                       <div className="flex items-start gap-2">
                         <CheckCircle2 className="mt-0.5 h-3 w-3 shrink-0 text-emerald-500" />
-                        <span>Whisper confidence check — bỏ qua đoạn no_speech_prob &gt; 55%</span>
+                        <span>Confidence check — bỏ qua đoạn xác suất nhạc/noise &gt; 55%</span>
                       </div>
                       <div className="flex items-start gap-2">
                         <CheckCircle2 className="mt-0.5 h-3 w-3 shrink-0 text-emerald-500" />

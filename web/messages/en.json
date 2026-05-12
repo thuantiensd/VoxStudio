@@ -303,7 +303,7 @@
         },
         "stt": {
           "title": "Accurate Speech-to-Text",
-          "desc": "Whisper-based STT with multi-language detection and high accuracy. Auto-correct domain terms via your custom glossary."
+          "desc": "High-accuracy speech recognition with multi-language detection. Auto-correct domain terms via your custom glossary."
         },
         "byok": {
           "title": "BYOK — bring your own keys",
