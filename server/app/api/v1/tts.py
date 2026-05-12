@@ -135,8 +135,20 @@ class SrtCue(BaseModel):
 
 class SrtTTSRequest(BaseModel):
     cues: list[SrtCue]
-    voice: str | None = None
+    engine: str | None = "edge"  # "edge" hoặc "premium"
+    voice: str | None = None              # Edge voice name (engine=edge)
+    voice_id: str | None = None           # Voice clone id (engine=premium)
     language: str | None = "vietnamese"
+    # Premium-only generation params (forwarded vào tts_svc.generate)
+    num_step: int | None = None
+    guidance_scale: float | None = None
+    t_shift: float | None = None
+    layer_penalty_factor: float | None = None
+    position_temperature: float | None = None
+    class_temperature: float | None = None
+    denoise: bool | None = None
+    preprocess_prompt: bool | None = None
+    postprocess_output: bool | None = None
 
 
 @router.post("/srt-generate")
@@ -146,21 +158,43 @@ async def srt_generate(
 ):
     """Generate audio track aligned với SRT timestamp.
 
-    Mỗi cue được Edge TTS đọc + speed-adjust để fit (start, end) window,
-    rồi mix vào 1 track wav duy nhất. Silence tự fill giữa các cue.
+    Engine "edge" (default): Edge TTS, parallel (4 workers), nhanh — phù hợp
+    SRT dài, không cần voice clone. Cap 2000 cues.
+
+    Engine "premium": Vox Premium GPU TTS, serial (1 GPU). Chậm hơn nhiều
+    (~5-10s/cue) nhưng chất lượng cao, hỗ trợ voice clone qua voice_id.
+    Cap 300 cues để không treo GPU quá lâu.
     """
     if not req.cues:
         raise HTTPException(status_code=400, detail="Cần ít nhất 1 cue.")
-    if len(req.cues) > 2000:
-        raise HTTPException(status_code=400,
-                            detail=f"Quá nhiều cues ({len(req.cues)}). Max 2000.")
+    engine = (req.engine or "edge").lower()
+    max_cues = 300 if engine == "premium" else 2000
+    if len(req.cues) > max_cues:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Quá nhiều cues ({len(req.cues)}). Max {max_cues} cho engine={engine}.",
+        )
     try:
         file_id = uuid.uuid4().hex[:12]
         wav_path = AUDIO_OUTPUT_DIR / f"{file_id}.wav"
+        premium_kwargs = {
+            "num_step": req.num_step,
+            "guidance_scale": req.guidance_scale,
+            "t_shift": req.t_shift,
+            "layer_penalty_factor": req.layer_penalty_factor,
+            "position_temperature": req.position_temperature,
+            "class_temperature": req.class_temperature,
+            "denoise": req.denoise,
+            "preprocess_prompt": req.preprocess_prompt,
+            "postprocess_output": req.postprocess_output,
+        }
         info = srt_tts_svc.generate_from_cues(
             [c.dict() for c in req.cues],
+            engine=engine,
             voice=req.voice,
+            voice_id=req.voice_id,
             language=req.language or "vietnamese",
+            premium_kwargs=premium_kwargs,
             out_wav=wav_path,
         )
         return {

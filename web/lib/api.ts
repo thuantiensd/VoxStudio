@@ -359,8 +359,20 @@ export type SrtTtsCue = { start: number; end: number; text: string };
 
 export async function generateSrtTts(body: {
   cues: SrtTtsCue[];
+  engine?: "edge" | "premium";
   voice?: string | null;
+  voice_id?: string | null;
   language?: string | null;
+  // Premium-only
+  num_step?: number;
+  guidance_scale?: number;
+  t_shift?: number;
+  layer_penalty_factor?: number;
+  position_temperature?: number;
+  class_temperature?: number;
+  denoise?: boolean;
+  preprocess_prompt?: boolean;
+  postprocess_output?: boolean;
 }) {
   return api<TtsResult & { n_cues: number; n_errors: number }>(
     "/tts/srt-generate",

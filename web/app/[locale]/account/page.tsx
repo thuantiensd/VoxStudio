@@ -1613,8 +1613,23 @@ function TtsTab({ setActiveTab }: { setActiveTab: (t: Tab) => void }) {
         srtCues && srtCues.length > 0 && srtRealtime
           ? await generateSrtTts({
               cues: srtCues,
-              voice: edgeVoice || null,
+              engine: engine === "premium" ? "premium" : "edge",
+              voice: engine === "premium" ? null : (edgeVoice || null),
+              voice_id: engine === "premium" ? (voiceId || null) : null,
               language,
+              ...(engine === "premium"
+                ? {
+                    num_step: numStep,
+                    guidance_scale: guidanceScale,
+                    t_shift: tShift,
+                    layer_penalty_factor: layerPenaltyFactor,
+                    position_temperature: positionTemperature,
+                    class_temperature: classTemperature,
+                    denoise,
+                    preprocess_prompt: preprocessPrompt,
+                    postprocess_output: postprocessOutput,
+                  }
+                : {}),
             })
           : engine === "premium"
             ? await generateTts({
@@ -1947,7 +1962,11 @@ function TtsTab({ setActiveTab }: { setActiveTab: (t: Tab) => void }) {
                   {srtCues.length} cue · {formatSrtTime(srtCues[srtCues.length - 1].end)}
                 </span>
                 <span className="text-muted-foreground">
-                  · {srtRealtime ? "audio khớp đúng timestamp" : "đọc liên tục, không timing"}
+                  · {srtRealtime
+                    ? engine === "premium"
+                      ? `Vox Premium · ~${Math.ceil(srtCues.length * 6 / 60)} phút GPU`
+                      : "Edge TTS · audio khớp timestamp"
+                    : "đọc liên tục, không timing"}
                 </span>
               </div>
               <div className="flex items-center gap-2">

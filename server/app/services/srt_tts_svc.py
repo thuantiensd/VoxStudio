@@ -133,16 +133,97 @@ def _process_cue(
                 "audio": np.zeros(int(duration * SR), dtype=np.float32)}
 
 
+def _process_cue_premium(
+    cue_idx: int, cue: dict, work_dir: Path, *,
+    voice_id: Optional[str], language: str,
+    premium_kwargs: dict,
+) -> dict:
+    """Premium (OmniVoice GPU) version of _process_cue. Sequential, GPU-bound.
+
+    Cũng fit cue audio vào (start, end) window qua atempo stretch (Premium
+    không có Edge native speed nên dựa atempo + truncate).
+    """
+    from app.services import tts_svc
+    from app.core.storage import get_audio_path
+
+    text = (cue.get("text") or "").strip()
+    start = float(cue.get("start", 0))
+    end = float(cue.get("end", start))
+    duration = max(0.3, end - start)
+
+    if not text:
+        return {"idx": cue_idx, "start": start,
+                "audio": np.zeros(int(duration * SR), dtype=np.float32),
+                "ok": True}
+
+    try:
+        result = tts_svc.generate(
+            text=text,
+            voice_id=voice_id,
+            language=language,
+            **{k: v for k, v in premium_kwargs.items() if v is not None},
+        )
+        # tts_svc trả audio_url dạng "/api/v1/tts/audio/{file_id}" — lấy file_id
+        file_id = result["audio_url"].rsplit("/", 1)[-1]
+        src_path = get_audio_path(file_id)
+        if not src_path or not Path(src_path).exists():
+            raise RuntimeError(f"TTS output not found: {file_id}")
+        audio, sr = sf.read(str(src_path))
+        # Resample về SR nếu khác (Premium output thường 24kHz, match SR)
+        if sr != SR:
+            ratio = SR / sr
+            audio = np.interp(
+                np.arange(int(len(audio) * ratio)),
+                np.arange(len(audio)) * ratio,
+                audio,
+            )
+        actual = len(audio) / SR
+        ratio = actual / duration if duration > 0 else 1.0
+
+        # Premium không re-gen với speed (regenerate tốn 5-10s) → atempo trực tiếp
+        if ratio > 1.0 + SPEED_TOLERANCE:
+            wav = work_dir / f"cue_{cue_idx}_pre.wav"
+            sf.write(str(wav), audio, SR)
+            stretched = work_dir / f"cue_{cue_idx}_str.wav"
+            _atempo_stretch(wav, stretched, ratio)
+            audio, _ = sf.read(str(stretched))
+            wav.unlink(missing_ok=True)
+            stretched.unlink(missing_ok=True)
+            actual = len(audio) / SR
+
+        # Hard-trim với fade-out nếu vẫn vượt
+        max_samples = int(min(actual, duration * 1.15) * SR)
+        if len(audio) > max_samples:
+            fade = min(int(0.05 * SR), max_samples // 4)
+            audio = audio[:max_samples].copy()
+            if fade > 0:
+                env = np.linspace(1.0, 0.0, fade, dtype=np.float32)
+                audio[-fade:] *= env
+        return {"idx": cue_idx, "start": start, "audio": audio, "ok": True}
+
+    except Exception as e:
+        logger.warning("Cue %d (premium) fail: %s", cue_idx, e)
+        return {"idx": cue_idx, "start": start, "ok": False, "error": str(e),
+                "audio": np.zeros(int(duration * SR), dtype=np.float32)}
+
+
 def generate_from_cues(
     cues: list[dict], *,
+    engine: str = "edge",
     voice: Optional[str] = None,
+    voice_id: Optional[str] = None,
     language: str = "vietnamese",
+    premium_kwargs: Optional[dict] = None,
     out_wav: Path,
 ) -> dict:
     """Generate audio track từ list SRT cues.
 
     Args:
         cues: list[{start: float (sec), end: float, text: str}]
+        engine: "edge" (Edge TTS, parallel) hoặc "premium" (Vox Premium / GPU, serial)
+        voice: Edge voice name (cho engine=edge)
+        voice_id: voice clone id (cho engine=premium — None = giọng mặc định)
+        premium_kwargs: extra tts_svc.generate params cho premium engine
         out_wav: path để ghi wav output
 
     Returns: {duration, sample_rate, n_cues, n_errors}
@@ -155,20 +236,33 @@ def generate_from_cues(
 
     work_dir = Path(tempfile.mkdtemp(prefix="srt_tts_"))
     n_errors = 0
+    results: list[dict] = []
     try:
-        # Parallel TTS — Edge network-bound, 4 workers concurrent giảm ~70% thời gian
-        with ThreadPoolExecutor(max_workers=min(MAX_PARALLEL, len(cues))) as ex:
-            futures = [
-                ex.submit(_process_cue, i, c, work_dir,
-                          voice=voice, language=language)
-                for i, c in enumerate(cues)
-            ]
-            results = []
-            for fut in as_completed(futures):
-                r = fut.result()
+        if engine == "premium":
+            # GPU-bound, single GPU → serial (parallel sẽ thrash GPU memory).
+            premium_kwargs = premium_kwargs or {}
+            for i, c in enumerate(cues):
+                r = _process_cue_premium(
+                    i, c, work_dir,
+                    voice_id=voice_id, language=language,
+                    premium_kwargs=premium_kwargs,
+                )
                 if not r.get("ok"):
                     n_errors += 1
                 results.append(r)
+        else:
+            # Edge network-bound, 4 workers concurrent giảm ~70% thời gian
+            with ThreadPoolExecutor(max_workers=min(MAX_PARALLEL, len(cues))) as ex:
+                futures = [
+                    ex.submit(_process_cue, i, c, work_dir,
+                              voice=voice, language=language)
+                    for i, c in enumerate(cues)
+                ]
+                for fut in as_completed(futures):
+                    r = fut.result()
+                    if not r.get("ok"):
+                        n_errors += 1
+                    results.append(r)
 
         # Sequential placement — overlap detection (cue sau đè lên cue trước nếu overlap)
         results.sort(key=lambda r: r["idx"])
