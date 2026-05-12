@@ -1264,9 +1264,11 @@ def transcribe_project(project_id: str) -> dict:
     # Step 2: Pre-amplify vocals (compressor + LUFS norm) so Whisper catches
     # quiet whispers / internal monologues that VAD would otherwise filter as silence.
     vocals_path = pdir / "vocals.wav"
-    audio_to_transcribe = str(vocals_path) if vocals_path.exists() else audio_path
-
-    if vocals_path.exists():
+    # User toggle: BẬT (default) → STT đọc vocals đã tách (sạch nhạc, chuẩn hơn)
+    # TẮT → STT đọc audio gốc (bắt được whisper / voice nhỏ Demucs cắt sót)
+    use_vocals_for_stt = bool(project.get("whisper_use_vocals", True))
+    if use_vocals_for_stt and vocals_path.exists():
+        audio_to_transcribe = str(vocals_path)
         try:
             from app.services.audio_mix_svc import normalize_for_stt
             normalized_path = pdir / "vocals_normalized.wav"
@@ -1275,6 +1277,11 @@ def transcribe_project(project_id: str) -> dict:
             logger.info("Pre-amplified vocals for STT (catches quiet speech)")
         except Exception as e:
             logger.warning("STT pre-amp failed (%s), using raw vocals", e)
+    else:
+        # User tắt toggle HOẶC chưa có vocals → STT trên audio gốc
+        audio_to_transcribe = audio_path
+        if not use_vocals_for_stt:
+            logger.info("User toggled OFF — STT on ORIGINAL audio (catches quiet/whisper)")
 
     logger.info("Transcribing: %s", audio_to_transcribe)
 
@@ -3677,6 +3684,9 @@ def update_project_settings(project_id: str, settings: dict) -> dict:
         # BYOK. enable_visual_context = toggle; visual_engine = gemini/openai/claude;
         # visual_model = optional override.
         "enable_visual_context", "visual_engine", "visual_model",
+        # STT input source: True (default) = vocals.wav đã tách (sạch nhạc,
+        # chuẩn hơn); False = audio gốc (bắt được whisper/voice nhỏ).
+        "whisper_use_vocals",
     }
     nullable = {"edge_voice", "voice_id", "default_emotion", "topic_hint", "glossary",
                  "visual_engine", "visual_model"}

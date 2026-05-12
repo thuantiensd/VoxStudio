@@ -4048,6 +4048,10 @@ function DubbingTab({ setActiveTab }: { setActiveTab: (t: Tab) => void }) {
     if (typeof window === "undefined") return 20;
     return Number(localStorage.getItem("voxstudio:dub:originalVoiceVolume") || "20") || 20;
   });
+  const [whisperUseVocals, setWhisperUseVocals] = useState(() => {
+    if (typeof window === "undefined") return true;
+    return localStorage.getItem("voxstudio:dub:whisperUseVocals") !== "false";
+  });
 
   // ── Advanced: auto features ─────────────────────────
   const [autoFontSize, setAutoFontSize] = useState(() => {
@@ -4282,6 +4286,10 @@ function DubbingTab({ setActiveTab }: { setActiveTab: (t: Tab) => void }) {
   }, [originalVoiceVolume]);
   useEffect(() => {
     if (typeof window === "undefined") return;
+    localStorage.setItem("voxstudio:dub:whisperUseVocals", String(whisperUseVocals));
+  }, [whisperUseVocals]);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
     localStorage.setItem("voxstudio:dub:autoFontSize", String(autoFontSize));
   }, [autoFontSize]);
   useEffect(() => {
@@ -4484,6 +4492,7 @@ function DubbingTab({ setActiveTab }: { setActiveTab: (t: Tab) => void }) {
       accompaniment_volume: accompVolume / 100,
       keep_original_voice: keepOriginalVoice,
       original_voice_volume: originalVoiceVolume / 100,
+      whisper_use_vocals: whisperUseVocals,
       crop_mode: cropMode,
       default_emotion: ttsEngine === "premium" ? defaultEmotion : null,
       auto_font_size: autoFontSize,
@@ -4964,6 +4973,7 @@ function DubbingTab({ setActiveTab }: { setActiveTab: (t: Tab) => void }) {
           accompVolume={accompVolume} setAccompVolume={setAccompVolume}
           keepOriginalVoice={keepOriginalVoice} setKeepOriginalVoice={setKeepOriginalVoice}
           originalVoiceVolume={originalVoiceVolume} setOriginalVoiceVolume={setOriginalVoiceVolume}
+          whisperUseVocals={whisperUseVocals} setWhisperUseVocals={setWhisperUseVocals}
           // emotion + auto + highlight
           defaultEmotion={defaultEmotion} setDefaultEmotion={setDefaultEmotion}
           autoFontSize={autoFontSize} setAutoFontSize={setAutoFontSize}
@@ -5175,6 +5185,7 @@ type DubAdvancedModalProps = {
   accompVolume: number; setAccompVolume: (v: number) => void;
   keepOriginalVoice: boolean; setKeepOriginalVoice: (v: boolean) => void;
   originalVoiceVolume: number; setOriginalVoiceVolume: (v: number) => void;
+  whisperUseVocals: boolean; setWhisperUseVocals: (v: boolean) => void;
   defaultEmotion: string; setDefaultEmotion: (v: string) => void;
   autoFontSize: boolean; setAutoFontSize: (v: boolean) => void;
   autoPace: boolean; setAutoPace: (v: boolean) => void;
@@ -5855,6 +5866,21 @@ function DubAdvancedModal(p: DubAdvancedModalProps) {
                       <input type="range" min={0} max={100} value={p.originalVoiceVolume} onChange={(e) => p.setOriginalVoiceVolume(Number(e.target.value))} className="w-full accent-primary" />
                     </div>
                   )}
+                </div>
+
+                <div className="rounded-xl border border-border/60 bg-background/40 p-4">
+                  <label className="flex cursor-pointer items-center justify-between gap-3">
+                    <div>
+                      <div className="text-sm font-bold text-foreground">Lọc nhạc trước khi nhận diện <span className="text-[10px] font-semibold text-emerald-500">(chuẩn hơn)</span></div>
+                      <div className="mt-0.5 text-[11px] leading-relaxed text-muted-foreground">
+                        Whisper đọc track giọng đã tách → sạch nhạc nền, ít nhầm. Tắt nếu video có thì thầm/voice nhỏ dễ bị bỏ sót.
+                      </div>
+                    </div>
+                    <span className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition ${p.whisperUseVocals ? "bg-primary" : "bg-muted"}`}>
+                      <input type="checkbox" className="sr-only" checked={p.whisperUseVocals} onChange={(e) => p.setWhisperUseVocals(e.target.checked)} />
+                      <span className={`inline-block h-5 w-5 transform rounded-full bg-background shadow transition ${p.whisperUseVocals ? "translate-x-5" : "translate-x-0.5"}`} />
+                    </span>
+                  </label>
                 </div>
               </div>
             )}
