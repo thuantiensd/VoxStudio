@@ -68,6 +68,53 @@ def _is_vietnamese(lang: str) -> bool:
     return (lang or "").lower().strip() in ("vietnamese", "vi", "vn")
 
 
+# Classical Chinese / cổ trang trigger markers — nếu source text chứa ≥ 2
+# marker này, hoặc ≥ 1 marker mạnh, kích hoạt classical mode trong Pass-1/2
+# bất kể register Pass-0 trả về là gì (Pass-0 đôi khi miss khi text ngắn).
+_CLASSICAL_MARKERS_STRONG = (
+    "朕", "陛下", "殿下", "皇上", "皇后", "贵妃", "本宫", "微臣", "臣妾",
+    "在下", "兒臣", "儿臣", "王爷", "王妃", "公主", "郡主", "太子", "亲王",
+    "侯爷", "丞相", "尚书", "御史",
+    "师父", "师傅", "师兄", "师姐", "师弟", "师妹", "掌门",
+    "仙门", "仙子", "修仙", "修真", "修行", "渡劫", "飞升", "灵气", "灵剑",
+    "丹药", "炼丹", "法宝", "金丹", "元婴", "化神", "渡情", "斩仙",
+    "江湖", "侠客", "武林", "剑客", "刺客",
+    "府上", "府邸", "客栈", "酒楼", "茶馆", "马车", "驿站",
+    "处斩", "处死", "斩首", "诛九族", "凌迟",
+)
+_CLASSICAL_MARKERS_WEAK = (
+    "公子", "小姐", "姑娘", "夫人", "娘子", "相公", "官人", "老爷", "夫君",
+    "大人", "先生", "拜见", "告退", "失礼",
+    "爹爹", "娘亲", "儿臣", "下官",
+    "敢问", "请问", "敢不", "不敢", "万万不可",
+)
+
+
+def _detect_classical(register: str, source_text: str) -> bool:
+    """Auto-detect classical register từ register field + source text scan.
+
+    Hai con đường:
+    1. Pass-0 đã trả về register=cổ trang/historical/wuxia/xianxia → True
+    2. Source text chứa ≥1 strong marker hoặc ≥3 weak markers → True
+    """
+    reg = (register or "").lower()
+    if any(kw in reg for kw in ("cổ trang", "co trang", "historical", "wuxia",
+                                 "xianxia", "cổ_trang", "kiếm_hiệp",
+                                 "tiên_hiệp", "kiem_hiep", "tien_hiep")):
+        return True
+
+    if not source_text:
+        return False
+
+    # Strong markers — chỉ 1 cái xuất hiện là đủ kích hoạt
+    if any(m in source_text for m in _CLASSICAL_MARKERS_STRONG):
+        return True
+
+    # Weak markers — cần ≥3 lần để tránh false-positive
+    weak_count = sum(source_text.count(m) for m in _CLASSICAL_MARKERS_WEAK)
+    return weak_count >= 3
+
+
 # Genre → register hints. Vietnamese trả về tiếng Việt chi tiết để LLM bám sát
 # style phim Việt; ngôn ngữ khác trả về English neutral để LLM tự áp dụng
 # convention của target language (politeness levels, contractions, T-V…).
@@ -802,6 +849,18 @@ def build_translator_prompt(
     genre_block = _genre_style_guide(film_genre, target_lang)
     lang_notes = "" if is_vn else _target_language_notes(target_lang)
 
+    # Auto-detect classical register từ register field hoặc scan source text.
+    # Khi True → Pass-1 chỉ inject classical block (không show modern) để LLM
+    # không bị phân vân giữa 2 register.
+    reg_str = (speaker_relationships or {}).get("register", "") if speaker_relationships else ""
+    src_text_concat = " ".join((s.get("original_text") or "") for s in segments[:50])
+    is_classical = _detect_classical(reg_str, src_text_concat) or \
+                   (film_genre or "").lower() in (
+                       "historical", "wuxia", "xianxia", "cổ_trang",
+                       "co_trang", "kiếm_hiệp", "kiem_hiep",
+                       "tiên_hiệp", "tien_hiep",
+                   )
+
     # Build seg lines với anchor
     has_rels = bool(speaker_relationships and speaker_relationships.get("speakers"))
     seg_lines = []
@@ -903,82 +962,65 @@ NHIỆM VỤ DUY NHẤT của Pass này:
 
 KHÔNG cần lo style cinematic — Editor pass sẽ polish.
 {genre_block}{anchor_block}
-🏯🏯🏯 KIỂM TRA REGISTER TRƯỚC TIÊN (PHẢI ĐỌC):
-
-NHÌN VÀO 📌 Register: trong SPEAKER MAP ở trên (nếu có). HOẶC SCAN text gốc
-xem có dấu hiệu CỔ TRANG không (từ Hán-Việt sẵn trong source, bối cảnh
-xưa, không có tiếng anh/wifi/xe/máy bay/etc):
-   • Dấu hiệu cổ trang: 朕/陛下/殿下/公子/小姐/在下/本宫/王爷/娘娘/师父/师兄/
-     仙门/修仙/沙场/将军/江湖/江山/天下/法术/灵气/修行/丹/灵剑/府邸/府上/
-     太子/亲王/侯爷/老爷/夫人/相公/官人/姑娘/小娃/姑娘家/客栈/酒楼/茶馆…
-   • Dấu hiệu modern: 手机/电脑/公司/老板/咖啡/工作/微信/上班/老婆/老公…
-   • Cả hai → MIXED (có thể xuyên không / xuyên thư / mượn thân) — pick
-     theo nhân vật đang nói (cổ trang nói cổ trang, modern nói modern).
-
-══════════════════════════════════════════════════════════════════
-🏯 NẾU REGISTER = CỔ TRANG / HISTORICAL / WUXIA / XIANXIA:
-══════════════════════════════════════════════════════════════════
-
-   ❌ TUYỆT ĐỐI KHÔNG dùng: "anh/em" (cho cặp đôi), "kết hôn", "tù nhân",
-      "giao dịch", "phù hợp", "cảm ơn", "ok", "bây giờ", "đẹp trai"…
-   ✅ THAY BẰNG (tra SPEAKER MAP self_pronoun trước, fallback default):
-
-   TỰ XƯNG (我):
-   • Vua → "trẫm"            • Hoàng hậu/quý phi → "bổn cung"
-   • Quan/thần dân với vua → "thần"
-   • Phụ nữ nói với chồng / người trên → "thiếp" / "tiện thiếp"
-   • Đàn ông khiêm tốn → "tại hạ" / "thảo dân" (dân thường)
-   • Người tu hành → "bần đạo" / "tại hạ"
-   • Tù phạm → "thảo dân" / "tội nhân"
-   • Default → "ta" (KHÔNG phải "tôi")
-
-   GỌI NGƯỜI KHÁC (你/敬称):
-   • Vua → "bệ hạ"           • Thái tử/hoàng tử → "điện hạ"
-   • Vương → "vương gia"     • Tướng → "tướng quân"
-   • Quan → "đại nhân"       • Tiên sinh học giả → "tiên sinh"
-   • Phụ nữ tu hành → "tiên tử" / "đạo cô" / "cô nương"
-   • Phụ nữ trẻ → "tiểu thư" / "cô nương"
-   • Đàn ông trẻ → "công tử"
-   • Vợ gọi chồng → "phu quân" / "chàng" / "tướng công"
-   • Chồng gọi vợ → "phu nhân" / "nương tử" / "nàng"
-   • Cha/mẹ → "cha"/"mẹ" (KHÔNG "bố"/"má"); thân hơn → "cha cha"/"nương"
-   • Sư phụ → "sư phụ" / "thầy"; sư huynh → "sư huynh"
-   • Quan trên → "đại nhân" / "lão gia"
-
-   TỪ VỰNG THAY THẾ (BUỘC):
-   ❌ kết hôn      → ✅ thành thân / kết hôn ước / se duyên / nên duyên
-   ❌ tù nhân      → ✅ tử tù / phạm nhân / tội nhân
-   ❌ xử tử         → ✅ xử trảm / hành hình / pháp trường
-   ❌ giao dịch    → ✅ giao ước / thoả thuận
-   ❌ phù hợp     → ✅ hợp ý / xứng đôi
-   ❌ cảm ơn       → ✅ đa tạ / cảm tạ
-   ❌ ok / được   → ✅ được rồi / khá lắm
-   ❌ bây giờ     → ✅ giờ đây / lúc này
-   ❌ tại sao      → ✅ vì sao / cớ sao / sao lại
-   ❌ về nhà       → ✅ hồi gia / trở về phủ
-   ❌ nhà         → ✅ phủ / đệ / gia (theo cấp bậc nhân vật)
-   ❌ bạn         → ✅ huynh đệ / tỷ muội / bằng hữu
-   ❌ chết         → ✅ qua đời / tạ thế / quy thiên / vong (formal)
-   ❌ con (tự xưng) → ✅ "nhi" / "tại hạ" / "tiểu nữ" tuỳ ngữ cảnh
-   ❌ tu hành     → giữ "tu hành" / "tu đạo" / "luyện đạo"
-   ❌ pháp thuật → giữ "pháp thuật" / "tiên thuật" / "đạo pháp"
-
-   PARTICLES & FILLER:
-   ❌ nhỉ/ha/à/ơi (modern) → ✅ "ư?" / "vậy?" / "thưa…" / "kính bẩm"
-   ✅ "Bẩm…", "Vâng, đa tạ…", "Khẩn khoản…", "Xin…"
-
-   VÍ DỤ DỊCH ĐÚNG:
-   ❌ "Em trông rất trẻ"          ✅ "Tiên tử trông rất trẻ"
-   ❌ "Anh có người trong lòng"   ✅ "Đại nhân đã có người trong lòng"
-   ❌ "Tôi cảm ơn đại ca"         ✅ "Đa tạ đại ca"
-   ❌ "Anh muốn kết hôn"          ✅ "Đại nhân muốn thành thân"
-   ❌ "Sắp bị xử tử"              ✅ "Sắp bị xử trảm"
-
-══════════════════════════════════════════════════════════════════
-🏠 NẾU REGISTER = MODERN (mặc định) — RULE VỢ CHỒNG anh/em DƯỚI ĐÂY:
-══════════════════════════════════════════════════════════════════
-
-🚨🚨🚨 PRONOUN VỢ CHỒNG (MODERN) — RULE CỨNG BẮT BUỘC 🚨🚨🚨
+{
+   "🏯🏯🏯 REGISTER = CỔ TRANG (auto-detected) — RULE BẮT BUỘC, "
+   "KHÔNG ĐƯỢC SLIP VỀ MODERN GIỮA CHỪNG 🏯🏯🏯\\n\\n"
+   "❌ FORBIDDEN — TUYỆT ĐỐI KHÔNG xuất hiện trong output:\\n"
+   "   anh / em (cho non-vợ-chồng); cảm ơn; tù nhân; giao dịch;\\n"
+   "   thầy bói; ok; bây giờ; tại sao; bạn (đại từ); tôi (khi formal);\\n"
+   "   xử tử (dùng \"xử trảm\"); đẹp trai; kết hôn (dùng \"thành thân\").\\n"
+   "→ Nếu bạn vừa định viết các từ trên, DỪNG LẠI → tra bảng substitution.\\n\\n"
+   "✅ TỰ XƯNG (我):\\n"
+   "• Vua → \"trẫm\"            • Hoàng hậu/quý phi → \"bổn cung\"\\n"
+   "• Quan với vua → \"thần\"   • Phụ nữ với chồng/người trên → \"thiếp\"\\n"
+   "• Đàn ông khiêm tốn → \"tại hạ\" / \"thảo dân\"\\n"
+   "• Người tu hành → \"bần đạo\" / \"tại hạ\"\\n"
+   "• Tù phạm → \"thảo dân\" / \"tội nhân\"\\n"
+   "• Default → \"ta\" (KHÔNG \"tôi\")\\n\\n"
+   "✅ GỌI NGƯỜI KHÁC (你/敬称):\\n"
+   "• Vua → \"bệ hạ\"           • Thái tử/hoàng tử → \"điện hạ\"\\n"
+   "• Vương → \"vương gia\"     • Tướng → \"tướng quân\"\\n"
+   "• Quan → \"đại nhân\"        • Học giả → \"tiên sinh\"\\n"
+   "• Phụ nữ tu hành → \"tiên tử\" / \"đạo cô\" / \"cô nương\"\\n"
+   "• Phụ nữ trẻ → \"tiểu thư\" / \"cô nương\"\\n"
+   "• Đàn ông trẻ → \"công tử\"\\n"
+   "• Vợ gọi chồng → \"phu quân\" / \"chàng\" / \"tướng công\"\\n"
+   "• Chồng gọi vợ → \"phu nhân\" / \"nương tử\" / \"nàng\"\\n"
+   "• Cha/mẹ → \"cha\"/\"mẹ\" (KHÔNG \"bố\"/\"má\")\\n"
+   "• Sư phụ / sư huynh → giữ nguyên\\n\\n"
+   "✅ BẢNG SUBSTITUTION (BUỘC — mỗi từ phải dịch theo):\\n"
+   "   kết hôn      → thành thân / kết hôn ước / se duyên\\n"
+   "   tù nhân      → tử tù / phạm nhân / tội nhân\\n"
+   "   xử tử         → xử trảm / hành hình / pháp trường\\n"
+   "   giao dịch    → giao ước / thoả thuận\\n"
+   "   phù hợp     → hợp ý / xứng đôi\\n"
+   "   cảm ơn       → đa tạ / cảm tạ\\n"
+   "   ok / được   → được rồi / khá lắm\\n"
+   "   bây giờ     → giờ đây / lúc này\\n"
+   "   tại sao      → vì sao / cớ sao\\n"
+   "   về nhà       → hồi gia / trở về phủ\\n"
+   "   nhà (dinh) → phủ / đệ / gia\\n"
+   "   bạn         → huynh đệ / tỷ muội / bằng hữu\\n"
+   "   chết         → tạ thế / quy thiên / qua đời\\n"
+   "   thầy bói    → thầy tướng / đạo sĩ tướng số\\n\\n"
+   "✅ PARTICLES: bỏ \"nhỉ/ha/à/ơi\" modern. Dùng \"ư?\" / \"vậy?\" / "
+   "\"Bẩm…\" / \"Xin…\" / câu trần thuật ngắn.\\n\\n"
+   "📝 FEW-SHOT (BEFORE → AFTER):\\n"
+   "❌ \"Cảm ơn đại ca\"             ✅ \"Đa tạ đại ca\"\\n"
+   "❌ \"Em trông rất trẻ\"          ✅ \"Tiên tử trông rất trẻ\"\\n"
+   "❌ \"Anh có người trong lòng\"   ✅ \"Đại nhân đã có người trong lòng\"\\n"
+   "❌ \"Anh muốn kết hôn\"          ✅ \"Đại nhân muốn thành thân\"\\n"
+   "❌ \"Sắp bị xử tử\"              ✅ \"Sắp bị xử trảm\"\\n"
+   "❌ \"Tôi rất phù hợp\"           ✅ \"Tại hạ rất hợp ý\"\\n"
+   "❌ \"Đây là giao dịch\"          ✅ \"Đây là giao ước\"\\n"
+   "❌ \"Anh ấy phạm tội gì?\"       ✅ \"Y phạm tội gì?\" / \"Người ấy phạm tội gì?\"\\n"
+   "❌ \"Vì sao bị xử tử gấp?\"      ✅ \"Cớ sao phải xử trảm gấp?\"\\n\\n"
+   "⚠️ TRƯỚC KHI XUẤT JSON, SCAN output: nếu thấy bất kỳ FORBIDDEN word\\n"
+   "nào → SỬA NGAY. Đặc biệt check: cảm ơn / tù nhân / kết hôn / xử tử / giao dịch.\\n"
+   if is_classical else
+   "🏠 REGISTER = MODERN — pronoun anh/em rule áp dụng dưới đây:\\n\\n"
+   "🚨🚨🚨 PRONOUN VỢ CHỒNG (MODERN) — RULE CỨNG BẮT BUỘC 🚨🚨🚨"
+}
 
 Vợ chồng / cặp đôi yêu nhau / mới cưới / đính hôn TUYỆT ĐỐI DÙNG "anh/em".
 KHÔNG bao giờ "tôi/cô" cho vợ chồng trừ trường hợp SIÊU HIẾM dưới đây.
