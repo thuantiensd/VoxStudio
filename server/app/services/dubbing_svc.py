@@ -1032,16 +1032,16 @@ def create_project(video_data: bytes, video_filename: str,
             if not has_audio:
                 shutil.rmtree(pdir, ignore_errors=True)
                 raise ValueError(
-                    "Video không có âm thanh (audio stream). Hãy kiểm tra "
-                    "file gốc hoặc dùng video khác có tiếng.",
+                    "Video không có tiếng. Hãy chọn video có âm thanh để có thể lồng tiếng.",
                 )
         except ffmpeg.Error as probe_err:
-            # Probe fail = file corrupt / format lạ
+            # Probe fail = file corrupt / format lạ — log technical, báo user simple
             stderr = (probe_err.stderr or b"").decode("utf-8", errors="ignore")[-500:]
+            logger.error("ffprobe fail. stderr:\n%s", stderr)
             shutil.rmtree(pdir, ignore_errors=True)
             raise ValueError(
-                f"Không đọc được file video (có thể bị hỏng / format không "
-                f"hỗ trợ).\nDetail: {stderr or str(probe_err)}",
+                "Không đọc được file video. File có thể bị hỏng hoặc định dạng "
+                "không hỗ trợ. Hãy thử upload lại hoặc dùng video MP4 chuẩn.",
             )
 
         (
@@ -1055,15 +1055,14 @@ def create_project(video_data: bytes, video_filename: str,
         stderr = (e.stderr or b"").decode("utf-8", errors="ignore")[-800:]
         shutil.rmtree(pdir, ignore_errors=True)
         logger.error("ffmpeg extract audio fail. stderr:\n%s", stderr)
-        # Phân loại lỗi phổ biến để báo user-friendly
+        # User-facing message luôn tiếng Việt, KHÔNG kèm stderr kỹ thuật.
+        # Stderr đầy đủ đã log server-side để dev/admin debug.
         if "Invalid data found" in stderr or "moov atom not found" in stderr:
-            msg = "File video bị hỏng hoặc tải lên không trọn vẹn — thử upload lại."
-        elif "No such file" in stderr:
-            msg = "File video không tìm thấy trên server."
-        elif "Permission denied" in stderr:
-            msg = "Lỗi quyền ghi file trên server."
+            msg = "File video bị hỏng hoặc tải lên chưa trọn vẹn. Hãy thử upload lại."
+        elif "No such file" in stderr or "Permission denied" in stderr:
+            msg = "Lỗi hệ thống khi xử lý file. Vui lòng thử lại sau ít phút."
         else:
-            msg = f"ffmpeg lỗi khi tách audio.\n{stderr[-300:] if stderr else str(e)}"
+            msg = "Không xử lý được video này. Hãy thử file khác (định dạng MP4 chuẩn, có âm thanh)."
         raise ValueError(msg)
 
     # Get video duration
