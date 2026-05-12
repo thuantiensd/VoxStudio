@@ -113,16 +113,6 @@ export type CreditPack = {
   is_popular: boolean;
 };
 
-export type CreditTransaction = {
-  id: number;
-  kind: string;
-  delta: number;
-  balance_after: number;
-  ref_id: string | null;
-  note: string | null;
-  created_at: string | null;
-};
-
 export type Bank = {
   name: string;
   bin: string;
@@ -306,10 +296,6 @@ export async function fetchCreditPacks() {
 
 export async function fetchCreditBalance() {
   return api<{ balance: number }>("/credits/balance");
-}
-
-export async function listMyCreditTransactions() {
-  return api<{ transactions: CreditTransaction[] }>("/credits/transactions");
 }
 
 export async function topupCredits(packId: string) {

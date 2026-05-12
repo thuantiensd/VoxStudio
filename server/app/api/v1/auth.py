@@ -14,7 +14,6 @@ from app.auth.passwords import hash_password, verify_password
 from app.auth.jwt_tokens import create_token
 from app.auth.deps import get_current_user
 from app.services import audit_svc, plan_svc, usage_svc, feature_flag_svc, email_svc
-import os
 import secrets
 
 logger = logging.getLogger(__name__)

@@ -41,10 +41,8 @@ if _sentry_dsn:
                 FastApiIntegration(),
                 SqlalchemyIntegration(),
             ],
-            before_send=lambda event, hint: (
-                # Xoá body request khỏi event để tránh leak content/API key
-                event.pop("request", None) or event
-            ) if False else event,
+            # Xoá body request khỏi event để tránh leak content/API key
+            before_send=lambda event, hint: (event.pop("request", None) or event),
         )
     except Exception as _e:
         print(f"[sentry] init failed: {_e}")
