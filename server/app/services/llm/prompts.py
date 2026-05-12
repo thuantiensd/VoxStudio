@@ -344,12 +344,53 @@ def _name_translation_rule(source_lang: Optional[str]) -> str:
     """Tên riêng convention theo source language."""
     src = (source_lang or "").lower().strip()
     if src in ("zh", "chinese", "zh-cn", "zh-tw", "mandarin"):
-        return """TÊN RIÊNG (zh → vi): PHIÊN ÂM HÁN-VIỆT.
-   • 文汐 → Văn Tịch, 商奕 → Thương Dịch, 慕容 → Mộ Dung
-   • Họ: 张→Trương, 王→Vương, 李→Lý, 林→Lâm, 陈→Trần
-   • Tên thân mật: 小X→Tiểu X (小宝→Tiểu Bảo), 阿X→A X, 大X→Đại X
-   • Tước vị: 陛下→Bệ hạ, 殿下→Điện hạ, 公子→Công tử, 小姐→Tiểu thư
-   • TUYỆT ĐỐI KHÔNG để pinyin ra output."""
+        return """TÊN RIÊNG (zh → vi): BẮT BUỘC PHIÊN ÂM HÁN-VIỆT — TUYỆT ĐỐI KHÔNG PINYIN.
+
+   ❌ KHÔNG bao giờ: "Chen Yu Yan" / "Wang Xiao Ming" / "Li Wei" / "Xin Mei"
+   ❌ KHÔNG bao giờ giữ pinyin raw — đọc dub sẽ ra "ven y yan" rất tệ.
+   ✅ LUÔN phiên Hán-Việt mỗi character của tên.
+
+   📖 BẢNG HỌ Trung→Việt (30 họ phổ biến nhất — DÙNG TRỰC TIẾP):
+   王→Vương, 李→Lý, 张→Trương, 刘→Lưu, 陈→Trần, 杨→Dương, 黄→Hoàng,
+   赵→Triệu, 周→Chu, 吴→Ngô, 徐→Từ, 孙→Tôn, 朱→Chu, 马→Mã, 胡→Hồ,
+   郭→Quách, 林→Lâm, 何→Hà, 高→Cao, 梁→Lương, 郑→Trịnh, 罗→La,
+   宋→Tống, 谢→Tạ, 唐→Đường, 韩→Hàn, 冯→Phùng, 邓→Đặng, 曹→Tào,
+   彭→Bành, 曾→Tăng, 萧→Tiêu, 田→Điền, 董→Đổng, 袁→Viên, 潘→Phan,
+   蔡→Thái, 蒋→Tưởng, 余→Dư, 于→Vu, 杜→Đỗ, 叶→Diệp, 程→Trình, 魏→Nguỵ,
+   苏→Tô, 吕→Lữ, 丁→Đinh, 任→Nhâm, 沈→Thẩm, 姚→Diêu, 卢→Lư, 姜→Khương,
+   崔→Thôi, 钟→Chung, 谭→Đàm, 陆→Lục, 汪→Uông, 范→Phạm, 金→Kim,
+   石→Thạch, 戴→Đới, 贾→Giả, 韦→Vi, 夏→Hạ, 付→Phó, 方→Phương,
+   慕容→Mộ Dung, 司马→Tư Mã, 欧阳→Âu Dương, 上官→Thượng Quan, 诸葛→Gia Cát
+
+   📖 VÍ DỤ TÊN ĐẦY ĐỦ:
+   陈奕迅 → Trần Dịch Tấn (KHÔNG "Chen Yi Xun")
+   王小明 → Vương Tiểu Minh (KHÔNG "Wang Xiao Ming")
+   李雪 → Lý Tuyết (KHÔNG "Li Xue")
+   叶辰 → Diệp Thần
+   林从安 → Lâm Tòng An
+   秦夏 → Tần Hạ
+   慕容紫英 → Mộ Dung Tử Anh
+
+   📖 TÊN THÂN MẬT / VOCATIVE:
+   小X → Tiểu X (小宝→Tiểu Bảo, 小雪→Tiểu Tuyết)
+   阿X → A X (阿明→A Minh)
+   大X → Đại X (大哥→Đại ca)
+   老X → Lão X (老王→Lão Vương)
+
+   📖 TƯỚC VỊ:
+   陛下→Bệ hạ, 殿下→Điện hạ, 公子→Công tử, 小姐→Tiểu thư,
+   大人→Đại nhân, 先生→Tiên sinh, 师父→Sư phụ, 师兄→Sư huynh
+
+   🚨 NẾU GẶP HÁN TỰ KHÔNG TRONG BẢNG TRÊN:
+   Tự suy Hán-Việt theo phép phiên âm (KHÔNG dùng pinyin). Ví dụ
+   các âm phổ biến:
+   伟→Vĩ, 强→Cường, 涛→Đào, 杰→Kiệt, 鑫→Hâm, 宇→Vũ, 浩→Hạo,
+   俊→Tuấn, 凯→Khải, 健→Kiện, 翔→Tường, 鹏→Bằng, 飞→Phi, 龙→Long,
+   华→Hoa, 国→Quốc, 民→Dân, 平→Bình, 安→An, 文→Văn, 武→Vũ,
+   宁→Ninh, 玲→Linh, 娟→Quyên, 芳→Phương, 静→Tĩnh, 敏→Mẫn,
+   惠→Huệ, 莉→Lị, 燕→Yến, 娜→Na, 婷→Đình, 慧→Tuệ, 晶→Tinh,
+   梦→Mộng, 雪→Tuyết, 月→Nguyệt, 星→Tinh/Tinh, 灵→Linh, 玉→Ngọc,
+   美→Mỹ, 心→Tâm, 眉→Mi, 雅→Nhã, 兰→Lan, 菊→Cúc, 梅→Mai, 莲→Liên"""
     if src in ("ko", "korean", "kor"):
         return """TÊN RIÊNG (ko → vi): PHIÊN ÂM HÁN-VIỆT.
    VD: 이민호 → Lý Mẫn Hạo, 김태희 → Kim Thái Hi."""
@@ -1153,7 +1194,9 @@ hoặc từ ngắn tương đương — TUYỆT ĐỐI KHÔNG để rỗng.
      - 美 (Mỹ) / 梅 (Mai) / 妹 (Muội) / 梦 (Mộng) — 4 char khác nhau
      - 然 = "Nhiên" (không phải Nhan = 颜)
      - 莉 = "Lị" / 丽 = "Lệ" / 莉 ≠ 丽
-   • Nếu không chắc Hán-Việt → GIỮ pinyin (Xin Mei) còn hơn dịch SAI.
+   • TUYỆT ĐỐI KHÔNG dùng pinyin (Chen Yu / Wang Xiao / Xin Mei) ở output.
+     Pinyin đọc dub ra âm tiếng Anh-Việt lai rất tệ. Luôn phiên Hán-Việt
+     mỗi character (tra BẢNG HỌ + ÂM PHỔ BIẾN ở trên).
 
 🚨 NAME-STABILITY XUYÊN SUỐT BATCH (BẮT BUỘC SCAN LẠI):
    • 1 nhân vật = 1 cách viết DUY NHẤT. Đầu batch "Tâm Mi" thì cuối batch
@@ -1222,8 +1265,10 @@ per line.
      - 眉 = "Mi" (eyebrow) — NEVER "Mai/Mộng/Mỹ"
      - 心 = "Tâm" — NEVER "Tân"
      - 美 = "Mỹ" / 梅 = "Mai" / 妹 = "Muội" / 梦 = "Mộng" — DIFFERENT chars
-   • If unsure how to transliterate, keep the source characters or use pinyin
-     romanization — better than a wrong Hán-Việt.
+   • When target = Vietnamese: ALWAYS use Hán-Việt transliteration of every
+     character. NEVER output raw pinyin (e.g. "Chen Yu", "Wang Xiao") —
+     it produces broken TTS audio. See the surname + common-character tables
+     in the name handling section above.
 
 🚨 NAME-STABILITY ACROSS BATCH (DO NOT LET NAMES DRIFT):
    • Once you render a name (e.g. "Tâm Mi"), use the IDENTICAL spelling
