@@ -1867,13 +1867,13 @@ function TtsTab({ setActiveTab }: { setActiveTab: (t: Tab) => void }) {
           </div>
 
           {tab === "text" ? (
-            // Phải giữ MỘT cây JSX duy nhất cho textarea — đổi class chứ
-            // không đổi cấu trúc — nếu không React unmount + mount lại sau
-            // mỗi keystroke đầu tiên → mất focus, gõ 1 chữ là khựng.
+            // Một cây JSX duy nhất để giữ focus textarea — chỉ đổi className
+            // theo state, không đổi cấu trúc. Padding của wrapper tạo dày
+            // viền rainbow khi có text.
             <div
               className={
                 text.length > 0 || busy
-                  ? "rainbow-frame flex min-h-[58vh] flex-1"
+                  ? "rainbow-frame flex min-h-[58vh] flex-1 p-[3px]"
                   : "flex min-h-[58vh] flex-1 rounded-xl border-2 border-primary/40 bg-background"
               }
             >
@@ -1885,7 +1885,7 @@ function TtsTab({ setActiveTab }: { setActiveTab: (t: Tab) => void }) {
                 placeholder={busy ? "Đang xử lý — vui lòng chờ..." : "Nhập hoặc dán văn bản cần chuyển thành giọng nói..."}
                 className={
                   text.length > 0 || busy
-                    ? "relative z-[2] min-h-[58vh] flex-1 resize-none rounded-[10px] bg-transparent px-5 py-5 text-[15px] font-semibold leading-7 text-foreground outline-none placeholder:text-muted-foreground/55 disabled:cursor-not-allowed disabled:opacity-60 sm:px-6"
+                    ? "relative z-[2] min-h-[58vh] flex-1 resize-none rounded-[10px] bg-background px-5 py-5 text-[15px] font-semibold leading-7 text-foreground outline-none placeholder:text-muted-foreground/55 disabled:cursor-not-allowed disabled:opacity-60 sm:px-6"
                     : "min-h-[58vh] flex-1 resize-none rounded-xl bg-transparent px-5 py-5 text-[15px] font-semibold leading-7 text-foreground outline-none placeholder:text-muted-foreground/55 sm:px-6"
                 }
               />

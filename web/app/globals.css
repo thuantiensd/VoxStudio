@@ -364,10 +364,6 @@
     background-size: 300% 300%;
     animation: rainbow-shift 4s ease-in-out infinite;
   }
-  .rainbow-frame > * {
-    background-color: var(--background);
-    border-radius: 10px;
-  }
   .rainbow-progress {
     background: linear-gradient(
       90deg,
