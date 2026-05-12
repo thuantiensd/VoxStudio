@@ -133,15 +133,35 @@ def _process_cue(
                 "audio": np.zeros(int(duration * SR), dtype=np.float32)}
 
 
+def _ffmpeg_resample_stretch(src: Path, dst: Path, *, target_sr: int = SR,
+                              tempo: float = 1.0) -> None:
+    """Resample về target_sr + (tuỳ chọn) atempo trong 1 lệnh ffmpeg.
+
+    Đáng tin hơn nhiều so với np.interp tự build — đặc biệt khi sr nguồn
+    khác target (gây silent/garbled nếu interp sai cách).
+    """
+    tempo = max(0.5, min(MAX_ATEMPO, tempo))
+    filters = [f"aresample={target_sr}"]
+    if abs(tempo - 1.0) > 0.01:
+        filters.append(f"atempo={tempo}")
+    subprocess.run(
+        ["ffmpeg", "-y", "-i", str(src),
+         "-filter:a", ",".join(filters),
+         "-acodec", "pcm_s16le", "-ar", str(target_sr), "-ac", "1", str(dst)],
+        check=True, capture_output=True,
+    )
+
+
 def _process_cue_premium(
     cue_idx: int, cue: dict, work_dir: Path, *,
     voice_id: Optional[str], language: str,
     premium_kwargs: dict,
 ) -> dict:
-    """Premium (OmniVoice GPU) version of _process_cue. Sequential, GPU-bound.
+    """Premium (OmniVoice GPU) version. Sequential, GPU-bound.
 
-    Cũng fit cue audio vào (start, end) window qua atempo stretch (Premium
-    không có Edge native speed nên dựa atempo + truncate).
+    Pipeline: tts_svc.generate → ffmpeg resample+atempo → read back → trim.
+    Dùng ffmpeg thay vì np.interp để tránh silent/garbled output khi OmniVoice
+    sr khác SR=24000.
     """
     from app.services import tts_svc
     from app.core.storage import get_audio_path
@@ -163,35 +183,25 @@ def _process_cue_premium(
             language=language,
             **{k: v for k, v in premium_kwargs.items() if v is not None},
         )
-        # tts_svc trả audio_url dạng "/api/v1/tts/audio/{file_id}" — lấy file_id
         file_id = result["audio_url"].rsplit("/", 1)[-1]
         src_path = get_audio_path(file_id)
         if not src_path or not Path(src_path).exists():
             raise RuntimeError(f"TTS output not found: {file_id}")
-        audio, sr = sf.read(str(src_path))
-        # Resample về SR nếu khác (Premium output thường 24kHz, match SR)
-        if sr != SR:
-            ratio = SR / sr
-            audio = np.interp(
-                np.arange(int(len(audio) * ratio)),
-                np.arange(len(audio)) * ratio,
-                audio,
-            )
+
+        # Probe duration trước để biết có cần atempo không
+        info_audio, info_sr = sf.read(str(src_path))
+        raw_duration = len(info_audio) / info_sr
+        ratio = raw_duration / duration if duration > 0 else 1.0
+        tempo = ratio if ratio > 1.0 + SPEED_TOLERANCE else 1.0
+
+        # ffmpeg làm cả 2: resample sr→SR + atempo (nếu cần). 1 pass, ít bug.
+        normalized = work_dir / f"cue_{cue_idx}_norm.wav"
+        _ffmpeg_resample_stretch(src_path, normalized, target_sr=SR, tempo=tempo)
+        audio, _ = sf.read(str(normalized))
+        normalized.unlink(missing_ok=True)
         actual = len(audio) / SR
-        ratio = actual / duration if duration > 0 else 1.0
 
-        # Premium không re-gen với speed (regenerate tốn 5-10s) → atempo trực tiếp
-        if ratio > 1.0 + SPEED_TOLERANCE:
-            wav = work_dir / f"cue_{cue_idx}_pre.wav"
-            sf.write(str(wav), audio, SR)
-            stretched = work_dir / f"cue_{cue_idx}_str.wav"
-            _atempo_stretch(wav, stretched, ratio)
-            audio, _ = sf.read(str(stretched))
-            wav.unlink(missing_ok=True)
-            stretched.unlink(missing_ok=True)
-            actual = len(audio) / SR
-
-        # Hard-trim với fade-out nếu vẫn vượt
+        # Hard-trim với fade-out nếu vẫn vượt budget
         max_samples = int(min(actual, duration * 1.15) * SR)
         if len(audio) > max_samples:
             fade = min(int(0.05 * SR), max_samples // 4)
@@ -199,6 +209,13 @@ def _process_cue_premium(
             if fade > 0:
                 env = np.linspace(1.0, 0.0, fade, dtype=np.float32)
                 audio[-fade:] *= env
+
+        # Sanity check — nếu audio peak gần 0 thì có gì đó sai (silent)
+        peak = float(np.max(np.abs(audio))) if len(audio) > 0 else 0.0
+        if peak < 1e-4:
+            logger.warning("Cue %d premium peak=%.6f → output silent. text=%r sr=%d",
+                           cue_idx, peak, text[:40], info_sr)
+
         return {"idx": cue_idx, "start": start, "audio": audio, "ok": True}
 
     except Exception as e:
