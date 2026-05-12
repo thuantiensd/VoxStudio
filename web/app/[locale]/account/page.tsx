@@ -1867,27 +1867,29 @@ function TtsTab({ setActiveTab }: { setActiveTab: (t: Tab) => void }) {
           </div>
 
           {tab === "text" ? (
-            text.length > 0 || busy ? (
-              <div className="rainbow-frame flex min-h-[58vh] flex-1">
-                <textarea
-                  ref={textareaRef}
-                  value={text}
-                  onChange={(e) => setText(e.target.value)}
-                  disabled={busy}
-                  placeholder={busy ? "Đang xử lý — vui lòng chờ..." : "Nhập hoặc dán văn bản cần chuyển thành giọng nói..."}
-                  className="relative z-[2] min-h-[58vh] flex-1 resize-none rounded-[10px] bg-transparent px-5 py-5 text-[15px] font-semibold leading-7 text-foreground outline-none placeholder:text-muted-foreground/55 disabled:cursor-not-allowed disabled:opacity-60 sm:px-6"
-                />
-              </div>
-            ) : (
+            // Phải giữ MỘT cây JSX duy nhất cho textarea — đổi class chứ
+            // không đổi cấu trúc — nếu không React unmount + mount lại sau
+            // mỗi keystroke đầu tiên → mất focus, gõ 1 chữ là khựng.
+            <div
+              className={
+                text.length > 0 || busy
+                  ? "rainbow-frame flex min-h-[58vh] flex-1"
+                  : "flex min-h-[58vh] flex-1 rounded-xl border-2 border-primary/40 bg-background"
+              }
+            >
               <textarea
                 ref={textareaRef}
                 value={text}
                 onChange={(e) => setText(e.target.value)}
                 disabled={busy}
-                placeholder="Nhập hoặc dán văn bản cần chuyển thành giọng nói..."
-                className="min-h-[58vh] flex-1 resize-none rounded-xl border-2 border-primary/40 bg-background px-5 py-5 text-[15px] font-semibold leading-7 text-foreground outline-none placeholder:text-muted-foreground/55 sm:px-6"
+                placeholder={busy ? "Đang xử lý — vui lòng chờ..." : "Nhập hoặc dán văn bản cần chuyển thành giọng nói..."}
+                className={
+                  text.length > 0 || busy
+                    ? "relative z-[2] min-h-[58vh] flex-1 resize-none rounded-[10px] bg-transparent px-5 py-5 text-[15px] font-semibold leading-7 text-foreground outline-none placeholder:text-muted-foreground/55 disabled:cursor-not-allowed disabled:opacity-60 sm:px-6"
+                    : "min-h-[58vh] flex-1 resize-none rounded-xl bg-transparent px-5 py-5 text-[15px] font-semibold leading-7 text-foreground outline-none placeholder:text-muted-foreground/55 sm:px-6"
+                }
               />
-            )
+            </div>
           ) : (
             <label className="flex min-h-[58vh] flex-1 cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-border/70 bg-background/40 py-16 text-sm text-muted-foreground hover:border-primary/40">
               <FileUp className="h-8 w-8" />
