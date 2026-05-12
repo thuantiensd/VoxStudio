@@ -1859,10 +1859,26 @@ def translate_project(
     # Tag character_name + age + gender vào mỗi segment để output JSON sạch
     # (theo format kịch bản: id/character/gender/age/text).
     chars_meta = project.get("speaker_characters") or {}
-    for seg, trans in zip(project["segments"], translated):
-        if trans:
+    missing_indices: list[int] = []
+    for idx, (seg, trans) in enumerate(zip(project["segments"], translated)):
+        if trans and trans.strip():
             seg["translated_text"] = trans
             seg["speech_text"] = trans
+        else:
+            # Translation rỗng cho segment này → tránh mất sub + voice bằng
+            # cách fallback về original_text. User sẽ thấy/nghe nguyên gốc cho
+            # segment đó (Edge TTS thường vẫn đọc được nhiều ngôn ngữ).
+            orig = (seg.get("original_text") or "").strip()
+            if orig:
+                seg["translated_text"] = orig
+                seg["speech_text"] = orig
+                missing_indices.append(idx)
+    if missing_indices:
+        logger.warning(
+            "Translation rỗng %d/%d segments (idx=%s) — fallback nguyên gốc.",
+            len(missing_indices), len(project["segments"]),
+            ",".join(str(i) for i in missing_indices[:20]),
+        )
         spk = seg.get("speaker")
         if spk and spk in chars_meta:
             ci = chars_meta[spk]
@@ -3273,14 +3289,64 @@ def generate_vtt(project_id: str, use_translated: bool = True) -> str:
     return content
 
 
-def _split_text_for_subtitle(text: str, max_chars: int = 84) -> list[str]:
+def _is_name_word(w: str) -> bool:
+    """Word khởi đầu bằng chữ hoa = ứng viên 1 phần của tên riêng.
+    Hán-Việt names: "Diệp", "Thần", "Tiểu", "Bảo", "Lâm", "Tòng", "An"…
+    Vietnamese capitalization: chỉ trigger với từ thuần chữ cái."""
+    if not w:
+        return False
+    first = w[0]
+    return first.isupper() and first.isalpha() and w.isalpha()
+
+
+def _split_at_safe_space(cue: str, max_chars: int) -> tuple[str, str]:
+    """Chia 1 chuỗi tại space, ưu tiên:
+    1. Space gần max_chars nhất (không vượt)
+    2. Tránh chia giữa 2 từ chữ hoa liên tiếp (= tên riêng kiểu "Diệp Thần")
+
+    Trả về (left, rest). Nếu không có space nào an toàn → vượt budget
+    để giữ tên nguyên vẹn.
+    """
+    spaces = [i for i, ch in enumerate(cue) if ch == " "]
+    if not spaces:
+        return cue, ""
+
+    def is_name_split(pos: int) -> bool:
+        """True nếu chia tại pos sẽ cắt giữa 2 từ tạo thành tên riêng."""
+        left = cue[:pos].rstrip()
+        right = cue[pos + 1:].lstrip()
+        if not left or not right:
+            return False
+        left_tail = left.rsplit(None, 1)[-1] if " " in left else left
+        right_head = right.split(None, 1)[0]
+        return _is_name_word(left_tail) and _is_name_word(right_head)
+
+    safe_within = [sp for sp in spaces if sp <= max_chars and not is_name_split(sp)]
+    if safe_within:
+        best = safe_within[-1]
+        return cue[:best].strip(), cue[best + 1:].strip()
+
+    # Không có space an toàn trong budget — chấp nhận vượt budget để bảo vệ tên.
+    safe_after = [sp for sp in spaces if not is_name_split(sp)]
+    if safe_after:
+        best = safe_after[0]
+        return cue[:best].strip(), cue[best + 1:].strip()
+
+    # Toàn space đều cắt tên → fallback chia gần max_chars nhất (cuối cùng đành chịu)
+    best = max(spaces, key=lambda sp: -abs(sp - max_chars))
+    return cue[:best].strip(), cue[best + 1:].strip()
+
+
+def _split_text_for_subtitle(text: str, max_chars: int = 50) -> list[str]:
     """Chia 1 đoạn text dài thành nhiều subtitle cues ≤ max_chars.
 
-    Ưu tiên chia tại sentence-end (.!?…) trước. Nếu vẫn còn dài → chia tại
-    comma/semicolon. Cuối cùng mới chia tại space gần giữa nhất.
+    Mục tiêu: hiển thị 1 dòng (~50 chars). Ưu tiên chia tại:
+    1. Sentence-end (.!?…)
+    2. Comma/semicolon
+    3. Space gần max_chars nhất — KHÔNG cắt giữa tên riêng kiểu "Diệp Thần"
 
-    Lý do: segments được merge cho TTS naturalness (vd 213 chars/10s) nhưng
-    subtitle hiển thị max 2 dòng × 42 chars = 84 chars là dễ đọc nhất.
+    Nếu cue vẫn vượt max_chars vì có tên dài → chấp nhận vượt budget,
+    không cắt ngang tên.
     """
     text = text.strip()
     if len(text) <= max_chars:
@@ -3290,7 +3356,6 @@ def _split_text_for_subtitle(text: str, max_chars: int = 84) -> list[str]:
     # Split tại sentence-end punctuation, giữ punctuation đi với phần trước
     sent_pattern = re.compile(r'([.!?…。！？]+["\')\]]?)\s+')
     parts = sent_pattern.split(text)
-    # parts: [seg1, sep1, seg2, sep2, ...] OR [whole_text] nếu không có match
     sentences: list[str] = []
     if len(parts) > 1:
         i = 0
@@ -3311,7 +3376,6 @@ def _split_text_for_subtitle(text: str, max_chars: int = 84) -> list[str]:
         if not cur:
             cur = sent
             continue
-        # Thêm sent vào cur nếu vẫn ≤ max_chars
         candidate = cur + " " + sent
         if len(candidate) <= max_chars:
             cur = candidate
@@ -3321,7 +3385,7 @@ def _split_text_for_subtitle(text: str, max_chars: int = 84) -> list[str]:
     if cur:
         cues.append(cur)
 
-    # Pass 2: nếu còn cue > max_chars → chia tại comma/space
+    # Pass 2: nếu còn cue > max_chars → chia tại comma/semicolon trước, space sau
     final: list[str] = []
     for cue in cues:
         if len(cue) <= max_chars:
@@ -3345,24 +3409,34 @@ def _split_text_for_subtitle(text: str, max_chars: int = 84) -> list[str]:
                     buf = seg_w_sep
                 i += 2
             if buf:
-                final.append(buf)
+                # buf có thể vẫn > max_chars → tiếp tục split bằng space-safe
+                if len(buf) > max_chars:
+                    while len(buf) > max_chars:
+                        left, rest = _split_at_safe_space(buf, max_chars)
+                        if not left or left == buf:
+                            break
+                        final.append(left)
+                        buf = rest
+                    if buf:
+                        final.append(buf)
+                else:
+                    final.append(buf)
         else:
-            # Last resort: chia tại space gần giữa nhất
-            mid = len(cue) // 2
-            # Tìm space gần mid nhất
-            left = cue.rfind(" ", 0, mid)
-            right = cue.find(" ", mid)
-            split_at = left if (mid - left) <= (right - mid) and left > 0 else (right if right > 0 else mid)
-            final.append(cue[:split_at].strip())
-            rest = cue[split_at:].strip()
-            if rest:
-                # Tiếp tục split phần rest nếu vẫn dài
-                final.extend(_split_text_for_subtitle(rest, max_chars))
+            # Không có comma → chia tại space-safe (không cắt tên)
+            buf = cue
+            while len(buf) > max_chars:
+                left, rest = _split_at_safe_space(buf, max_chars)
+                if not left or left == buf:
+                    break
+                final.append(left)
+                buf = rest
+            if buf:
+                final.append(buf)
 
     return [c for c in final if c.strip()]
 
 
-def _split_segment_for_subtitle(seg: dict, max_chars: int = 84) -> list[dict]:
+def _split_segment_for_subtitle(seg: dict, max_chars: int = 50) -> list[dict]:
     """Split 1 segment thành nhiều subtitle cues, phân bổ timing theo char count."""
     text = (seg.get("translated_text") or seg.get("original_text") or "").strip()
     if not text:
@@ -3510,16 +3584,15 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             out = pattern.sub(lambda m: f"{{\\c{hl_color}}}{m.group(0)}{{\\r}}", out)
         return out
 
-    # Pre-split long merged segments thành cues subtitle ≤ 84 chars
-    # (~2 dòng × 42 chars). Segments merged dài cho TTS naturalness, nhưng
-    # subtitle hiển thị cần ngắn để dễ đọc.
+    # Pre-split long merged segments thành cues subtitle ≤ 50 chars (1 dòng).
+    # _split_at_safe_space sẽ bảo vệ tên riêng đa từ ("Diệp Thần"…) khỏi bị
+    # cắt giữa, kể cả khi phải vượt budget vài chars.
     sub_cues: list[dict] = []
     for seg in project["segments"]:
-        # Skip nếu segment không có text
         s_text = (seg.get("translated_text") if use_translated else "") or seg.get("original_text") or ""
         if not s_text.strip():
             continue
-        sub_cues.extend(_split_segment_for_subtitle(seg, max_chars=84))
+        sub_cues.extend(_split_segment_for_subtitle(seg, max_chars=50))
 
     for seg in sub_cues:
         text = seg["translated_text"] if use_translated and seg["translated_text"].strip() else seg["original_text"]
