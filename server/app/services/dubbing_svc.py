@@ -1025,16 +1025,46 @@ def create_project(video_data: bytes, video_filename: str,
     # Extract audio with ffmpeg
     audio_path = pdir / "original_audio.wav"
     try:
+        # Pre-check: video có audio stream không?
+        try:
+            probe = ffmpeg.probe(str(video_path))
+            has_audio = any(s.get("codec_type") == "audio" for s in probe.get("streams", []))
+            if not has_audio:
+                shutil.rmtree(pdir, ignore_errors=True)
+                raise ValueError(
+                    "Video không có âm thanh (audio stream). Hãy kiểm tra "
+                    "file gốc hoặc dùng video khác có tiếng.",
+                )
+        except ffmpeg.Error as probe_err:
+            # Probe fail = file corrupt / format lạ
+            stderr = (probe_err.stderr or b"").decode("utf-8", errors="ignore")[-500:]
+            shutil.rmtree(pdir, ignore_errors=True)
+            raise ValueError(
+                f"Không đọc được file video (có thể bị hỏng / format không "
+                f"hỗ trợ).\nDetail: {stderr or str(probe_err)}",
+            )
+
         (
             ffmpeg
             .input(str(video_path))
             .output(str(audio_path), acodec="pcm_s16le", ac=1, ar=16000)
             .overwrite_output()
-            .run(quiet=True)
+            .run(quiet=True, capture_stderr=True)
         )
     except ffmpeg.Error as e:
+        stderr = (e.stderr or b"").decode("utf-8", errors="ignore")[-800:]
         shutil.rmtree(pdir, ignore_errors=True)
-        raise ValueError(f"Failed to extract audio: {e}")
+        logger.error("ffmpeg extract audio fail. stderr:\n%s", stderr)
+        # Phân loại lỗi phổ biến để báo user-friendly
+        if "Invalid data found" in stderr or "moov atom not found" in stderr:
+            msg = "File video bị hỏng hoặc tải lên không trọn vẹn — thử upload lại."
+        elif "No such file" in stderr:
+            msg = "File video không tìm thấy trên server."
+        elif "Permission denied" in stderr:
+            msg = "Lỗi quyền ghi file trên server."
+        else:
+            msg = f"ffmpeg lỗi khi tách audio.\n{stderr[-300:] if stderr else str(e)}"
+        raise ValueError(msg)
 
     # Get video duration
     try:
