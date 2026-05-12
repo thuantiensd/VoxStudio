@@ -26,6 +26,57 @@ from app.config import (
 logger = logging.getLogger(__name__)
 
 
+# ── TTS text preprocessing ────────────────────────────────────────────
+# OmniVoice tokenizer hay miss / silent với chữ IN HOA (đặc biệt acronym).
+# Expand "AI/CEO/USA/FBI..." → đọc letter-by-letter bằng tên chữ tiếng Việt.
+_VN_LETTER_NAME = {
+    "A": "a", "B": "bê", "C": "xê", "D": "đê", "E": "e", "F": "ép",
+    "G": "giê", "H": "hát", "I": "i", "J": "gi", "K": "ca", "L": "lờ",
+    "M": "em", "N": "en", "O": "ô", "P": "pê", "Q": "qui", "R": "rờ",
+    "S": "ét", "T": "tê", "U": "u", "V": "vê", "W": "đáp vê",
+    "X": "ích", "Y": "y", "Z": "giét",
+}
+
+
+def _expand_acronyms_for_tts(text: str) -> str:
+    """Expand consecutive uppercase letters → tên chữ tiếng Việt.
+
+    Áp dụng cho acronym 2-6 chữ IN HOA liên tiếp (đứng riêng giữa word
+    boundary). Bỏ qua các từ có chữ thường lẫn (iPhone, MacBook).
+
+    Examples:
+      AI       → "a i"
+      USA      → "u ét a"
+      CEO      → "xê i ô"
+      Hello AI → "Hello a i"
+      iPhone   → "iPhone" (giữ nguyên, không phải acronym)
+    """
+    if not text:
+        return text
+    import re
+
+    def _repl(m: re.Match) -> str:
+        chars = m.group(0)
+        return " ".join(_VN_LETTER_NAME.get(c, c) for c in chars)
+
+    # \b[A-Z]{2,6}\b — match cụm 2-6 chữ HOA giữa word boundary
+    return re.sub(r"\b[A-Z]{2,6}\b", _repl, text)
+
+
+def preprocess_tts_text(text: str) -> str:
+    """Pre-process text trước khi đưa vào OmniVoice TTS.
+
+    1. Expand acronym IN HOA → tên chữ tiếng Việt (AI → "a i")
+    2. Trim whitespace dư thừa
+    """
+    if not text:
+        return text
+    out = _expand_acronyms_for_tts(text)
+    # Collapse multiple spaces / newlines
+    out = " ".join(out.split())
+    return out
+
+
 class GPUManager:
     def __init__(self):
         self._lock = threading.Lock()        # TTS + Whisper
@@ -338,7 +389,13 @@ class GPUManager:
             return prompt
 
     def generate_tts(self, text: str, voice_prompt=None, **kwargs):
-        """Generate audio from text. Returns waveform tensor."""
+        """Generate audio from text. Returns waveform tensor.
+
+        Text được normalize qua preprocess_tts_text() để expand acronym
+        IN HOA — OmniVoice tokenizer hay miss/silent chữ HOA, đặc biệt
+        acronym (AI/USA/CEO) → đọc letter-by-letter bằng tên chữ Việt.
+        """
+        text = preprocess_tts_text(text)
         with self._lock:
             self._ensure_tts()
             self._clear_cache()
