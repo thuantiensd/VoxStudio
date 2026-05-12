@@ -391,6 +391,32 @@ EVIDENCE để suy:
 • Tự gọi "anh/bố/ba/chồng/ông" → NAM; "em/mẹ/má/vợ/chị/cô" → NỮ
 • Người khác gọi "anh ơi/cậu ơi/sếp ơi" → NAM; "em ơi/chị ơi" → NỮ
 
+🏯 REGISTER DETECTION (TRƯỚC TIÊN — output field "register"):
+
+SCAN TEXT GỐC cho keyword chỉ ra setting:
+
+→ COẢ TRANG / HISTORICAL / WUXIA / XIANXIA:
+   Dấu hiệu: 朕/陛下/殿下/公子/小姐/在下/本宫/王爷/娘娘/师父/师兄/师妹/
+   仙门/修仙/沙场/将军/江湖/江山/天下/法术/灵气/修行/丹/灵剑/府邸/府上/
+   太子/亲王/侯爷/老爷/夫人/相公/官人/姑娘/客栈/酒楼/茶馆/侠/剑/刀/
+   秦楼/盖头/喜服/合卺/拜堂/三跪九叩/处死/处斩/牢狱/官府/朝廷/天命/
+   仙子/道长/真人/书生/秀才/状元/书院/书塾/进士/举人/科举/挑灯夜读
+   → register = "cổ trang"
+
+→ MODERN / DRAMA / OFFICE:
+   手机/电脑/公司/老板/咖啡/工作/微信/上班/老婆/老公/老师/学生/学校/医院
+   → register = "modern"
+
+→ BUSINESS / KICH BẢN VĂN PHÒNG:
+   会议/合同/项目/客户/部门/总裁/经理/股票/财务
+   → register = "business"
+
+→ Mixed: pick theo speaker chính (nhân vật cổ trang nói cổ trang dù xung
+   quanh có modern).
+
+⚠️ Output register FIELD chính xác — đây là input cho Pass-1/Pass-2 quyết
+định toàn bộ vocab. Sai register = toàn bộ dịch sai phong cách.
+
 ⚠️ scene_context — RELATIONSHIP STATUS của cặp đôi (CỰC QUAN TRỌNG):
 
 🚨 VỢ CHỒNG / CẶP ĐÔI YÊU NHAU: MẶC ĐỊNH "anh/em" (KHÔNG "tôi/cô"):
@@ -877,7 +903,82 @@ NHIỆM VỤ DUY NHẤT của Pass này:
 
 KHÔNG cần lo style cinematic — Editor pass sẽ polish.
 {genre_block}{anchor_block}
-🚨🚨🚨 PRONOUN VỢ CHỒNG — RULE CỨNG BẮT BUỘC 🚨🚨🚨
+🏯🏯🏯 KIỂM TRA REGISTER TRƯỚC TIÊN (PHẢI ĐỌC):
+
+NHÌN VÀO 📌 Register: trong SPEAKER MAP ở trên (nếu có). HOẶC SCAN text gốc
+xem có dấu hiệu CỔ TRANG không (từ Hán-Việt sẵn trong source, bối cảnh
+xưa, không có tiếng anh/wifi/xe/máy bay/etc):
+   • Dấu hiệu cổ trang: 朕/陛下/殿下/公子/小姐/在下/本宫/王爷/娘娘/师父/师兄/
+     仙门/修仙/沙场/将军/江湖/江山/天下/法术/灵气/修行/丹/灵剑/府邸/府上/
+     太子/亲王/侯爷/老爷/夫人/相公/官人/姑娘/小娃/姑娘家/客栈/酒楼/茶馆…
+   • Dấu hiệu modern: 手机/电脑/公司/老板/咖啡/工作/微信/上班/老婆/老公…
+   • Cả hai → MIXED (có thể xuyên không / xuyên thư / mượn thân) — pick
+     theo nhân vật đang nói (cổ trang nói cổ trang, modern nói modern).
+
+══════════════════════════════════════════════════════════════════
+🏯 NẾU REGISTER = CỔ TRANG / HISTORICAL / WUXIA / XIANXIA:
+══════════════════════════════════════════════════════════════════
+
+   ❌ TUYỆT ĐỐI KHÔNG dùng: "anh/em" (cho cặp đôi), "kết hôn", "tù nhân",
+      "giao dịch", "phù hợp", "cảm ơn", "ok", "bây giờ", "đẹp trai"…
+   ✅ THAY BẰNG (tra SPEAKER MAP self_pronoun trước, fallback default):
+
+   TỰ XƯNG (我):
+   • Vua → "trẫm"            • Hoàng hậu/quý phi → "bổn cung"
+   • Quan/thần dân với vua → "thần"
+   • Phụ nữ nói với chồng / người trên → "thiếp" / "tiện thiếp"
+   • Đàn ông khiêm tốn → "tại hạ" / "thảo dân" (dân thường)
+   • Người tu hành → "bần đạo" / "tại hạ"
+   • Tù phạm → "thảo dân" / "tội nhân"
+   • Default → "ta" (KHÔNG phải "tôi")
+
+   GỌI NGƯỜI KHÁC (你/敬称):
+   • Vua → "bệ hạ"           • Thái tử/hoàng tử → "điện hạ"
+   • Vương → "vương gia"     • Tướng → "tướng quân"
+   • Quan → "đại nhân"       • Tiên sinh học giả → "tiên sinh"
+   • Phụ nữ tu hành → "tiên tử" / "đạo cô" / "cô nương"
+   • Phụ nữ trẻ → "tiểu thư" / "cô nương"
+   • Đàn ông trẻ → "công tử"
+   • Vợ gọi chồng → "phu quân" / "chàng" / "tướng công"
+   • Chồng gọi vợ → "phu nhân" / "nương tử" / "nàng"
+   • Cha/mẹ → "cha"/"mẹ" (KHÔNG "bố"/"má"); thân hơn → "cha cha"/"nương"
+   • Sư phụ → "sư phụ" / "thầy"; sư huynh → "sư huynh"
+   • Quan trên → "đại nhân" / "lão gia"
+
+   TỪ VỰNG THAY THẾ (BUỘC):
+   ❌ kết hôn      → ✅ thành thân / kết hôn ước / se duyên / nên duyên
+   ❌ tù nhân      → ✅ tử tù / phạm nhân / tội nhân
+   ❌ xử tử         → ✅ xử trảm / hành hình / pháp trường
+   ❌ giao dịch    → ✅ giao ước / thoả thuận
+   ❌ phù hợp     → ✅ hợp ý / xứng đôi
+   ❌ cảm ơn       → ✅ đa tạ / cảm tạ
+   ❌ ok / được   → ✅ được rồi / khá lắm
+   ❌ bây giờ     → ✅ giờ đây / lúc này
+   ❌ tại sao      → ✅ vì sao / cớ sao / sao lại
+   ❌ về nhà       → ✅ hồi gia / trở về phủ
+   ❌ nhà         → ✅ phủ / đệ / gia (theo cấp bậc nhân vật)
+   ❌ bạn         → ✅ huynh đệ / tỷ muội / bằng hữu
+   ❌ chết         → ✅ qua đời / tạ thế / quy thiên / vong (formal)
+   ❌ con (tự xưng) → ✅ "nhi" / "tại hạ" / "tiểu nữ" tuỳ ngữ cảnh
+   ❌ tu hành     → giữ "tu hành" / "tu đạo" / "luyện đạo"
+   ❌ pháp thuật → giữ "pháp thuật" / "tiên thuật" / "đạo pháp"
+
+   PARTICLES & FILLER:
+   ❌ nhỉ/ha/à/ơi (modern) → ✅ "ư?" / "vậy?" / "thưa…" / "kính bẩm"
+   ✅ "Bẩm…", "Vâng, đa tạ…", "Khẩn khoản…", "Xin…"
+
+   VÍ DỤ DỊCH ĐÚNG:
+   ❌ "Em trông rất trẻ"          ✅ "Tiên tử trông rất trẻ"
+   ❌ "Anh có người trong lòng"   ✅ "Đại nhân đã có người trong lòng"
+   ❌ "Tôi cảm ơn đại ca"         ✅ "Đa tạ đại ca"
+   ❌ "Anh muốn kết hôn"          ✅ "Đại nhân muốn thành thân"
+   ❌ "Sắp bị xử tử"              ✅ "Sắp bị xử trảm"
+
+══════════════════════════════════════════════════════════════════
+🏠 NẾU REGISTER = MODERN (mặc định) — RULE VỢ CHỒNG anh/em DƯỚI ĐÂY:
+══════════════════════════════════════════════════════════════════
+
+🚨🚨🚨 PRONOUN VỢ CHỒNG (MODERN) — RULE CỨNG BẮT BUỘC 🚨🚨🚨
 
 Vợ chồng / cặp đôi yêu nhau / mới cưới / đính hôn TUYỆT ĐỐI DÙNG "anh/em".
 KHÔNG bao giờ "tôi/cô" cho vợ chồng trừ trường hợp SIÊU HIẾM dưới đây.
@@ -975,6 +1076,23 @@ LỖI C: 小X/阿X/大X = TÊN THÂN MẬT → Tiểu X/A X/Đại X (Hán-Việ
    Việt dài hơn Trung ~30% nếu literal → phải rút gọn.
 
 🔤 {_name_translation_rule(source_lang)}
+
+🚨 NAME-CHARACTER FIDELITY (lỗi LLM hay mắc nhất với phim Trung):
+   • DỊCH ĐÚNG character — đừng đoán nhầm sang char khác trông giống:
+     - 眉 = "Mi" (lông mày) — KHÔNG phải Mai / Mộng / Mỹ
+     - 心 = "Tâm" — KHÔNG phải Tân (心 ≠ 新)
+     - 美 (Mỹ) / 梅 (Mai) / 妹 (Muội) / 梦 (Mộng) — 4 char khác nhau
+     - 然 = "Nhiên" (không phải Nhan = 颜)
+     - 莉 = "Lị" / 丽 = "Lệ" / 莉 ≠ 丽
+   • Nếu không chắc Hán-Việt → GIỮ pinyin (Xin Mei) còn hơn dịch SAI.
+
+🚨 NAME-STABILITY XUYÊN SUỐT BATCH (BẮT BUỘC SCAN LẠI):
+   • 1 nhân vật = 1 cách viết DUY NHẤT. Đầu batch "Tâm Mi" thì cuối batch
+     CŨNG phải "Tâm Mi" (không slip thành "Tâm Mỹ" / "Tân Mai").
+   • TRƯỚC KHI XUẤT JSON: scan tất cả translated lines — collect tên riêng
+     đã render — nếu cùng source char sequence (vd 心眉) mà có 2+ Việt
+     name → CHỌN MỘT (cách đầu tiên) → SỬA TẤT CẢ về một spelling.
+   • Áp dụng cho cả tên riêng lẫn vocative ("Tiểu Bảo" / "Tiểu Bão" → chọn 1).
 {extra_block}{context_section}
 OUTPUT JSON DUY NHẤT (không markdown):
 {{
@@ -1027,8 +1145,24 @@ NEVER swap I and you. The most common mistake is mapping the speaker's "I"
 pronoun onto a "you" in the source (or vice versa). Read each anchor fresh
 per line.
 
-✏️ NAME HANDLING:
+✏️ NAME HANDLING — CRITICAL FIDELITY RULES:
 {_name_translation_rule(source_lang)}
+
+🚨 NAME-CHARACTER FIDELITY (top mistake LLMs make):
+   • Match the EXACT character. Don't substitute look-alike characters:
+     - 眉 = "Mi" (eyebrow) — NEVER "Mai/Mộng/Mỹ"
+     - 心 = "Tâm" — NEVER "Tân"
+     - 美 = "Mỹ" / 梅 = "Mai" / 妹 = "Muội" / 梦 = "Mộng" — DIFFERENT chars
+   • If unsure how to transliterate, keep the source characters or use pinyin
+     romanization — better than a wrong Hán-Việt.
+
+🚨 NAME-STABILITY ACROSS BATCH (DO NOT LET NAMES DRIFT):
+   • Once you render a name (e.g. "Tâm Mi"), use the IDENTICAL spelling
+     for ALL subsequent occurrences in this batch.
+   • Before output, SCAN your translations for the same source character
+     sequence (e.g. 心眉) and confirm they map to the SAME Vietnamese name.
+   • If you see line 3 says "Tâm Mi" and line 14 says "Tâm Mỹ" for the same
+     source 心眉 → SAI → unify to one rendering (use the first one).
 
 📏 BUDGET: each line has [max N chars] = HARD upper bound (counted in target-
 language characters). Trim fillers, particles, redundancies as needed. The
@@ -1151,7 +1285,47 @@ def build_editor_prompt(
             parts.append(f"Register: {register}")
         scene_block = "\n".join("   " + p for p in parts) + "\n"
 
+    is_classical = "cổ trang" in register.lower() or "wuxia" in register.lower() \
+        or "xianxia" in register.lower() or "historical" in register.lower() \
+        or (film_genre or "").lower() in ("historical", "wuxia", "xianxia",
+                                          "cổ_trang", "co_trang", "kiếm_hiệp",
+                                          "kiem_hiep", "tiên_hiệp", "tien_hiep")
+
     if is_vn:
+        classical_block = ""
+        if is_classical:
+            classical_block = """
+🏯 CẢNH BÁO REGISTER = CỔ TRANG / HISTORICAL — POLISH PHẢI CỔ TRANG:
+
+❌ NẾU LITERAL DÙNG TỪ MODERN → BẮT BUỘC SỬA:
+   • "anh/em" (vợ chồng cổ trang) → "chàng/thiếp" / "phu quân/nương tử"
+     hoặc "đại nhân/tiểu nữ" / "công tử/cô nương" tuỳ quan hệ
+   • "tôi" → "ta" / "tại hạ" / "thảo dân" / "thần"
+   • "bạn" → "huynh đài" / "tỷ muội" / "bằng hữu"
+   • "kết hôn" → "thành thân" / "se duyên"
+   • "tù nhân" → "tử tù" / "phạm nhân"
+   • "xử tử" → "xử trảm"
+   • "giao dịch" → "giao ước"
+   • "phù hợp" → "hợp ý" / "xứng đôi"
+   • "cảm ơn" → "đa tạ" / "cảm tạ"
+   • "bây giờ" → "giờ đây" / "lúc này"
+   • "tại sao" → "vì sao" / "cớ sao"
+   • "về nhà" → "hồi gia" / "trở về phủ"
+   • "nhà" (chỉ dinh thự) → "phủ" / "đệ"
+   • "chết" → "tạ thế" / "quy thiên" (formal) / "qua đời"
+   • "ok/được" → "được rồi" / "khá lắm"
+
+❌ PARTICLES MODERN (nhỉ/ha/à modern colloquial) → ✅ thay "ư?" / "vậy?" /
+   bỏ luôn (cổ trang ít dùng tiểu từ tail).
+
+❌ "Ba/Mẹ" cho cha mẹ trong cổ trang → ✅ "Cha/Mẹ" hoặc "Phụ thân/Mẫu thân"
+   (formal); "Cha cha/Nương" (thân).
+
+✅ Cảm thán cổ trang OK: "Ơ kìa…", "Hỡi ôi…", "Phải rồi…", "Quả vậy…"
+
+GIỮ formal/honorific xuyên suốt — đừng pha modern slang giữa câu.
+"""
+
         system = f"""Bạn là EDITOR phim chuyên dub VTV — chuyển lời dịch literal thành
 lời thoại phim CÓ HỒN, tự nhiên, biểu cảm.
 
@@ -1159,6 +1333,7 @@ INPUT: mỗi line có literal translation đã ĐÚNG nghĩa.
 NHIỆM VỤ: polish thành câu PHIM thật — TỰ NHIÊN + CÓ CẢM XÚC + match emotion
 với scene_context. CHO PHÉP đổi pronoun nếu literal sai emotion (ví dụ:
 vợ chồng đang ly hôn mà literal dùng "anh/em" thân mật → đổi sang "tôi/cô" lạnh).
+{classical_block}
 
 {scene_block}{genre_block}
 🚨🚨🚨 RULE TUYỆT ĐỐI VỀ PRONOUN — KHÔNG ĐƯỢC ĐỔI:
@@ -1232,7 +1407,9 @@ GIỮ pronoun NHẤT QUÁN xuyên suốt cho mỗi speaker.
 🎯 NGUYÊN TẮC:
 1. ĐỌC original + literal → cảm nhận emotion thực sự (vui/buồn/giận/làm nũng).
 2. GIỮ pronoun y nguyên (Pass-1 đã chọn đúng).
-3. GIỮ tên riêng y nguyên (Tiểu Bảo, Văn Tịch...).
+3. GIỮ tên riêng y nguyên (Tiểu Bảo, Văn Tịch...). KIỂM TRA tất cả lines:
+   nếu cùng 1 nhân vật mà tên khác spelling (vd "Tâm Mi" line 3, "Tâm Mỹ"
+   line 7) → SỬA về 1 cách viết duy nhất. Không đổi 眉 (Mi) thành 美 (Mỹ).
 4. KHÔNG vượt max_chars.
 5. Polished phải gọn + có hồn + tự nhiên hơn literal.
 

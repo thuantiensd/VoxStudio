@@ -28,7 +28,9 @@ logger = logging.getLogger(__name__)
 
 TIMEOUT_S = 90
 VISION_TIMEOUT_S = 120  # VLM với images chậm hơn
-MIN_SPEAKERS_FOR_ANALYZE = 2
+# Pass-0 vẫn chạy với 1 speaker để detect register/genre (cổ trang/modern…)
+# — info này critical cho Pass-1/Pass-2 quyết định vocab/honorifics.
+MIN_SPEAKERS_FOR_ANALYZE = 1
 
 
 # Vision-capable models per engine — backend list cho FE dropdown
