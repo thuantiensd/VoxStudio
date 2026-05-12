@@ -1969,19 +1969,34 @@ function TtsTab({ setActiveTab }: { setActiveTab: (t: Tab) => void }) {
                     : "đọc liên tục, không timing"}
                 </span>
               </div>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setSrtRealtime((v) => !v)}
-                  className={`inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-[11px] font-semibold transition ${
-                    srtRealtime
-                      ? "border-emerald-500/40 bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/25"
-                      : "border-border/60 bg-background/60 text-muted-foreground hover:bg-muted/40 hover:text-foreground"
-                  }`}
-                  title="Bật để đọc theo timestamp, tắt để đọc text liên tục"
+              <div className="flex items-center gap-3">
+                <label
+                  className="inline-flex cursor-pointer items-center gap-2 select-none"
+                  title="Bật: audio khớp timestamp · Tắt: đọc text liên tục"
                 >
-                  ⏱ Real-time: {srtRealtime ? "BẬT" : "TẮT"}
-                </button>
+                  <span className={`text-[11px] font-bold uppercase tracking-wide ${srtRealtime ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground"}`}>
+                    Real-time
+                  </span>
+                  {/* Toggle switch iOS-style: knob trái = TẮT, phải = BẬT */}
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={srtRealtime}
+                    onClick={() => setSrtRealtime((v) => !v)}
+                    className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
+                      srtRealtime ? "bg-emerald-500" : "bg-muted-foreground/40"
+                    }`}
+                  >
+                    <span
+                      className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
+                        srtRealtime ? "translate-x-[18px]" : "translate-x-0.5"
+                      }`}
+                    />
+                  </button>
+                  <span className={`text-[11px] font-semibold ${srtRealtime ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground"}`}>
+                    {srtRealtime ? "BẬT" : "TẮT"}
+                  </span>
+                </label>
                 <button
                   type="button"
                   onClick={() => { setSrtCues(null); setText(""); setSrtRealtime(true); }}
