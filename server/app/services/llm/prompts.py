@@ -51,9 +51,246 @@ def _lang_display_name(lang: str) -> str:
         "chinese": "Tiếng Trung", "zh": "Tiếng Trung",
         "japanese": "Tiếng Nhật", "ja": "Tiếng Nhật",
         "korean": "Tiếng Hàn", "ko": "Tiếng Hàn",
+        "spanish": "Español", "es": "Español",
+        "french": "Français", "fr": "Français",
+        "german": "Deutsch", "de": "Deutsch",
+        "portuguese": "Português", "pt": "Português",
+        "russian": "Русский", "ru": "Русский",
+        "thai": "ภาษาไทย", "th": "ภาษาไทย",
+        "indonesian": "Bahasa Indonesia", "id": "Bahasa Indonesia",
+        "italian": "Italiano", "it": "Italiano",
         "auto": "auto-detect",
     }
     return names.get((lang or "").lower(), lang or "auto")
+
+
+def _is_vietnamese(lang: str) -> bool:
+    return (lang or "").lower().strip() in ("vietnamese", "vi", "vn")
+
+
+# Genre → register hints. Vietnamese trả về tiếng Việt chi tiết để LLM bám sát
+# style phim Việt; ngôn ngữ khác trả về English neutral để LLM tự áp dụng
+# convention của target language (politeness levels, contractions, T-V…).
+_GENRE_GUIDE_VN: dict[str, str] = {
+    "romance": (
+        "🌹 NGÔN TÌNH/LÃNG MẠN: xưng hô mật thiết \"anh/em\". Tiểu từ tình tứ "
+        "\"nhỉ/à/cơ/đấy\". Tránh từ ngữ thô. Nhịp câu mềm, đôi khi ngập ngừng. "
+        "Cảm xúc thể hiện qua câu ngắn + tiểu từ, không miêu tả tâm trạng kiểu kịch."
+    ),
+    "drama": (
+        "🎭 TÂM LÝ/DRAMA: thoại tự nhiên đời thường. Ưu tiên câu ngắn-vừa, "
+        "tiểu từ giúp tone (lắm/thế/nhỉ). Conflict thể hiện qua từ ngữ chứ "
+        "không chỉ qua đại từ — pronoun GIỮ nhất quán."
+    ),
+    "comedy": (
+        "😂 HÀI: tone vui, sleng nhẹ (\"trời ơi/khổ thân/biết rồi mà\"). "
+        "Câu ngắt nhịp gấp, cảm thán mạnh (\"ha/ơ kìa/úi giời\"). "
+        "Tránh dùng từ Hán-Việt nặng nề."
+    ),
+    "action": (
+        "💥 HÀNH ĐỘNG: câu CỰC NGẮN, mệnh lệnh thức. Bỏ tiểu từ thừa. "
+        "Nhịp gấp, từ ngữ punchy (\"Đi!\"/\"Coi chừng!\"/\"Cẩn thận sau!\"). "
+        "Không có chỗ cho lời thoại văn vẻ."
+    ),
+    "thriller": (
+        "🔪 GIẬT GÂN: nhịp nén, câu cụt. Whisper/threat: voice mềm nhưng từ ngữ "
+        "lạnh. Không tiểu từ vui (\"nhỉ/cơ/đấy\"). Pause/ngắt dòng đậm."
+    ),
+    "horror": (
+        "👻 KINH DỊ: pacing chậm + ngắt nhịp ngắn xen kẽ. Câu hỏi rỗng "
+        "(\"Cái gì vậy?\"/\"Ai đó?\"). Whisper register. Tránh giải thích thừa."
+    ),
+    "historical": (
+        "🏯 CỔ TRANG: xưng hô trang trọng (\"thần/khanh/bệ hạ/điện hạ/tướng quân\"). "
+        "Từ Hán-Việt nhiều. \"Tại hạ/các hạ/đại nhân/tiểu nhân\" thay \"tôi/anh\". "
+        "Tránh từ hiện đại (\"OK/ờm/đi luôn\"). Câu dài, nhịp uyển chuyển."
+    ),
+    "wuxia": (
+        "⚔️ KIẾM HIỆP/TIÊN HIỆP: \"tại hạ/cô nương/đạo hữu/sư phụ/đệ tử\". "
+        "Từ võ thuật giữ Hán-Việt (\"nội lực/chân khí/kinh mạch\"). "
+        "Phong thái cao ngạo hoặc lễ độ tuỳ nhân vật."
+    ),
+    "scifi": (
+        "🚀 KHOA HỌC VIỄN TƯỞNG: giữ thuật ngữ kỹ thuật (\"AI/máy chủ/quark/"
+        "trọng lực\"). Tránh Việt hoá quá đà. Speech neutral, ít cảm xúc dư."
+    ),
+    "fantasy": (
+        "🧙 HUYỀN HUYỄN: thuật ngữ huyền bí giữ Hán-Việt (\"pháp thuật/linh hồn/"
+        "nguyền rủa\"). Register hơi cổ điển, nhưng không nặng như cổ trang."
+    ),
+    "documentary": (
+        "📺 TÀI LIỆU: tone narrator trung tính, trang trọng vừa phải. "
+        "Dùng \"chúng ta/quý vị\" cho khán giả. Không tiểu từ thân mật. "
+        "Câu dài có cấu trúc rõ."
+    ),
+    "news": (
+        "📰 TIN TỨC: register formal. Không slang, không tiểu từ. "
+        "Câu chủ-vị-bổ rõ. Số liệu/danh từ riêng giữ nguyên."
+    ),
+    "kids": (
+        "🧸 THIẾU NHI: từ vựng đơn giản, câu ngắn. Tiểu từ vui "
+        "(\"nè/đó/ha\"). Tránh từ phức tạp + ý niệm trừu tượng. "
+        "Cảm thán nhiều (\"ồ/ô hô/wow\")."
+    ),
+}
+
+_GENRE_GUIDE_GENERIC: dict[str, str] = {
+    "romance": (
+        "ROMANCE: tender, emotionally honest register. Use softer phrasing and "
+        "natural intimate forms of address (target language's equivalent of "
+        "terms of endearment / informal pronouns). Avoid clinical or stiff wording."
+    ),
+    "drama": (
+        "DRAMA: realistic everyday speech. Conflict shown through word choice, "
+        "not pronoun swapping. Keep each character's register consistent."
+    ),
+    "comedy": (
+        "COMEDY: light tone, use contractions and casual register where natural. "
+        "Punchy timing. Preserve jokes' rhythm — don't over-explain."
+    ),
+    "action": (
+        "ACTION: SHORT sentences. Imperative mood. Drop filler. Urgent rhythm "
+        "(\"Move!\" / \"Behind you!\"). No flowery phrasing."
+    ),
+    "thriller": (
+        "THRILLER: compressed pacing, terse lines. Threats spoken low — words "
+        "cold even when voice is calm. Heavy use of pauses."
+    ),
+    "horror": (
+        "HORROR: slow pacing with sudden short bursts. Empty/unanswered questions "
+        "(\"What was that?\"). Whisper register. Leave space for dread."
+    ),
+    "historical": (
+        "HISTORICAL/PERIOD: use period-appropriate register. Honorific forms "
+        "(target language's archaic or formal equivalents). Avoid modernisms."
+    ),
+    "wuxia": (
+        "WUXIA/XIANXIA: martial-arts setting. Preserve technical terms (qi, "
+        "meridians, sect, cultivation). Formal/archaic register for elder figures."
+    ),
+    "scifi": (
+        "SCI-FI: preserve technical jargon (AI, quantum, neural net). Speech "
+        "leans neutral and precise."
+    ),
+    "fantasy": (
+        "FANTASY: preserve world-specific terminology (spells, races, realms). "
+        "Slightly elevated register, but not as archaic as period historical."
+    ),
+    "documentary": (
+        "DOCUMENTARY: neutral narrator voice. Formal-but-accessible register. "
+        "Address the audience using target language's standard documentary form."
+    ),
+    "news": (
+        "NEWS: formal register. No slang, no contractions. Clear "
+        "subject-verb-object. Preserve proper nouns and numbers exactly."
+    ),
+    "kids": (
+        "KIDS: simple vocabulary, short sentences. Avoid abstract concepts. "
+        "Use frequent exclamations natural to target language."
+    ),
+}
+
+
+def _genre_style_guide(genre: Optional[str], target_lang: str) -> str:
+    """Return genre-specific register hints. Vietnamese gets detailed VN guide;
+    other targets get a concise English-described style guide."""
+    if not genre:
+        return ""
+    key = genre.lower().strip().replace("-", "_")
+    # Aliases
+    aliases = {
+        "romance_drama": "romance", "ngôn_tình": "romance", "ngon_tinh": "romance",
+        "tâm_lý": "drama", "tam_ly": "drama",
+        "hài": "comedy", "hai": "comedy", "sitcom": "comedy",
+        "hành_động": "action", "hanh_dong": "action",
+        "kinh_dị": "horror", "kinh_di": "horror",
+        "cổ_trang": "historical", "co_trang": "historical", "period": "historical",
+        "kiếm_hiệp": "wuxia", "kiem_hiep": "wuxia", "xianxia": "wuxia",
+        "tiên_hiệp": "wuxia", "tien_hiep": "wuxia",
+        "khoa_học": "scifi", "khoa_hoc": "scifi", "sci_fi": "scifi", "scifi": "scifi",
+        "huyền_huyễn": "fantasy", "huyen_huyen": "fantasy",
+        "tài_liệu": "documentary", "tai_lieu": "documentary",
+        "tin_tức": "news", "tin_tuc": "news",
+        "thiếu_nhi": "kids", "thieu_nhi": "kids", "children": "kids",
+    }
+    key = aliases.get(key, key)
+    if _is_vietnamese(target_lang):
+        guide = _GENRE_GUIDE_VN.get(key)
+    else:
+        guide = _GENRE_GUIDE_GENERIC.get(key)
+    return f"\n🎬 THỂ LOẠI: {guide}\n" if guide else ""
+
+
+# Per-target-language convention hints — short pro-tier notes about
+# native register conventions LLM must respect when translating dialogue.
+_TARGET_LANG_NOTES: dict[str, str] = {
+    "english": (
+        "ENGLISH dialogue: use contractions in informal scenes (\"I'm/don't/you're\"). "
+        "Drop unnecessary subject pronouns only when natural. Avoid translationese — "
+        "rewrite for natural English cadence, not word-for-word."
+    ),
+    "japanese": (
+        "JAPANESE dialogue: respect speech levels (敬語/丁寧語/タメ口). "
+        "Pick sentence-ending particles (よ/ね/わ/だ) and pronoun (私/僕/俺/あたし) "
+        "matching speaker's age, gender, status. DROP pronouns when subject is clear."
+    ),
+    "korean": (
+        "KOREAN dialogue: respect speech level (해체/해요체/하십시오체). "
+        "Drop subject when clear from context. Use 형/오빠/언니/누나 appropriately. "
+        "Match 반말/존댓말 to character relationships."
+    ),
+    "chinese": (
+        "CHINESE dialogue: use natural spoken rhythm (口语). Particles "
+        "(吗/呢/吧/啊/了) for tone. Drop redundant pronouns. Pick 你/您 by formality."
+    ),
+    "spanish": (
+        "SPANISH dialogue: choose tú/usted (or vos in regional) by formality + "
+        "relationship. Use natural ellipsis. Match regional register to setting "
+        "if specified (LatAm vs Iberian)."
+    ),
+    "french": (
+        "FRENCH dialogue: tu vs vous critical — match to relationship. "
+        "Use natural ellipsis and informal contractions (\"j'sais pas\") in casual "
+        "scenes. Avoid translationese register mix."
+    ),
+    "german": (
+        "GERMAN dialogue: du vs Sie critical. Natural word order ≠ literal. "
+        "Modal particles (doch/mal/halt/ja) add tone — use them."
+    ),
+    "thai": (
+        "THAI dialogue: choose pronouns (ผม/ฉัน/กู/หนู) + politeness particles "
+        "(ครับ/ค่ะ) by speaker gender + register. Drop pronouns when clear."
+    ),
+    "indonesian": (
+        "INDONESIAN dialogue: choose aku/saya/gue by formality + region. "
+        "Particles (sih/dong/kok/lho) carry tone — use naturally."
+    ),
+    "russian": (
+        "RUSSIAN dialogue: ты vs вы by formality. Aspect (perfective/imperfective) "
+        "matters for tone. Match diminutives to intimacy level."
+    ),
+    "portuguese": (
+        "PORTUGUESE dialogue: tu vs você (or o senhor/a senhora) by region + "
+        "register. Brazilian vs European spelling/lexicon — match setting."
+    ),
+    "italian": (
+        "ITALIAN dialogue: tu vs Lei by formality. Use natural ellipsis and "
+        "regional flavor only if setting requires."
+    ),
+}
+
+
+def _target_language_notes(target_lang: str) -> str:
+    key = (target_lang or "").lower().strip()
+    # Normalize ISO codes to full name
+    code_map = {
+        "en": "english", "ja": "japanese", "ko": "korean", "zh": "chinese",
+        "es": "spanish", "fr": "french", "de": "german", "th": "thai",
+        "id": "indonesian", "ru": "russian", "pt": "portuguese", "it": "italian",
+    }
+    key = code_map.get(key, key)
+    note = _TARGET_LANG_NOTES.get(key)
+    return f"\n📌 TARGET LANGUAGE NOTES: {note}\n" if note else ""
 
 
 def _name_translation_rule(source_lang: Optional[str]) -> str:
@@ -535,6 +772,9 @@ def build_translator_prompt(
     """
     tgt_name = _lang_display_name(target_lang)
     src_name = _lang_display_name(source_lang)
+    is_vn = _is_vietnamese(target_lang)
+    genre_block = _genre_style_guide(film_genre, target_lang)
+    lang_notes = "" if is_vn else _target_language_notes(target_lang)
 
     # Build seg lines với anchor
     has_rels = bool(speaker_relationships and speaker_relationships.get("speakers"))
@@ -555,7 +795,7 @@ def build_translator_prompt(
     anchor_block = ""
     if has_rels:
         anchor_block = "\n" + _format_speaker_anchor_block(speaker_relationships) + "\n"
-    else:
+    elif is_vn:
         anchor_block = """
 🎭 KHÔNG CÓ SPEAKER MAP — TỰ SUY LUẬN (CỰC QUAN TRỌNG):
 
@@ -586,6 +826,33 @@ BƯỚC 4 — TRƯỚC KHI XUẤT OUTPUT, đọc lại line 1 và line cuối:
    → MẶC ĐỊNH coi là vợ chồng/yêu nhau → DÙNG "anh/em".
    → KHÔNG bao giờ dùng "tôi/cô" làm default khi chưa rõ.
 """
+    else:
+        # Non-Vietnamese, no speaker map: ask LLM to self-detect & keep
+        # pronouns / forms of address consistent per inferred speaker.
+        anchor_block = """
+🎭 NO SPEAKER MAP — INFER FROM TEXT (CRITICAL):
+
+This batch has no SPEAKER_XX tags. You MUST identify who is speaking each line
+from context, then KEEP forms of address / pronouns CONSISTENT for that
+speaker across the entire batch.
+
+STEP 1 — Read the ENTIRE batch BEFORE translating any line.
+STEP 2 — Infer who speaks each line from signals:
+   • Vocatives / terms of address ("honey", "mom", "sir") tell you the listener
+   • Names in calls — the named person is NOT the speaker
+   • Question→answer patterns mean speaker change between lines
+   • Sudden tone reversal often = speaker change
+
+STEP 3 — Assign internal labels (SPEAKER A, B, C…) and lock each speaker's
+   pronoun / register choice. Do not switch a speaker mid-batch from formal
+   to casual or vice versa unless the source clearly does.
+
+STEP 4 — BEFORE producing output, re-read line 1 and the last line: if the
+   SAME speaker uses different pronoun/register → unify them.
+
+If only 1-2 lines and context is unclear, default to the warmer/more intimate
+register typical for the genre, not the formal one.
+"""
 
     extra_block = ""
     if topic_hint:
@@ -599,7 +866,8 @@ BƯỚC 4 — TRƯỚC KHI XUẤT OUTPUT, đọc lại line 1 và line cuối:
                      for c in context_before]
         context_section = "\nDIALOGUE TRƯỚC (chỉ tham khảo):\n" + "\n".join(ctx_lines)
 
-    system = f"""Bạn là TRANSLATOR phim chuyên nghiệp. Dịch lời thoại {src_name} → {tgt_name}.
+    if is_vn:
+        system = f"""Bạn là TRANSLATOR phim chuyên nghiệp. Dịch lời thoại {src_name} → {tgt_name}.
 
 NHIỆM VỤ DUY NHẤT của Pass này:
 1. Nghĩa ĐÚNG (không paraphrase quá xa, không bịa)
@@ -608,7 +876,7 @@ NHIỆM VỤ DUY NHẤT của Pass này:
 4. KHÔNG vượt max_chars
 
 KHÔNG cần lo style cinematic — Editor pass sẽ polish.
-{anchor_block}
+{genre_block}{anchor_block}
 🚨🚨🚨 PRONOUN VỢ CHỒNG — RULE CỨNG BẮT BUỘC 🚨🚨🚨
 
 Vợ chồng / cặp đôi yêu nhau / mới cưới / đính hôn TUYỆT ĐỐI DÙNG "anh/em".
@@ -718,6 +986,64 @@ OUTPUT JSON DUY NHẤT (không markdown):
 • "translated": câu Việt đúng pronoun + ≤ max_chars
 • "emotion": neutral/happy/sad/angry/whisper/surprised/fearful
 """
+    else:
+        # Generic professional translator path — any target language.
+        system = f"""You are a PROFESSIONAL film dialogue translator. Translate
+{src_name} → {tgt_name}.
+
+PASS GOAL (literal accuracy + register consistency, NOT polish):
+1. Meaning ACCURATE — no paraphrase drift, no invented content.
+2. Forms of address CONSISTENT per speaker (use SPEAKER MAP if provided;
+   otherwise infer from context and lock per speaker).
+3. Proper nouns handled correctly (see name rule below).
+4. STAY within max_chars budget per line — concise wording preferred.
+
+Style polishing happens in a later Editor pass — your job here is faithful
+meaning + correct register + budget.
+{genre_block}{lang_notes}{anchor_block}
+🎯 REGISTER & PRONOUN DISCIPLINE (CRITICAL):
+
+• Each speaker keeps the SAME pronoun choice / politeness level across the
+  whole batch. Don't switch between formal and casual mid-conversation unless
+  the source clearly does (e.g. argument breaks formality on purpose).
+• Match the form of address to the relationship between speakers:
+    - Family / intimate partners → intimate/informal forms native to target
+    - Stranger / superior / public → formal forms native to target
+    - Children → simpler vocabulary, age-appropriate forms
+• Match register to the GENRE block above. Romance ≠ Action ≠ Documentary.
+
+⚠️ When the source uses pro-drop (Japanese/Korean/Chinese drop subjects), do
+NOT auto-insert pronouns in the target if the target also allows dropping.
+Add a pronoun only when grammar/clarity demands it.
+
+🚨 ANCHOR MAPPING (when SPEAKER MAP is provided):
+
+Each line has an anchor `[Role: I="X" | → Target: you="Y"]` meaning:
+   • First-person source pronouns → use "X" (the speaker's self-pronoun)
+   • Second-person source pronouns → use "Y" (the addressee form)
+   • Third-person source pronouns → use the third-person label of that person
+
+NEVER swap I and you. The most common mistake is mapping the speaker's "I"
+pronoun onto a "you" in the source (or vice versa). Read each anchor fresh
+per line.
+
+✏️ NAME HANDLING:
+{_name_translation_rule(source_lang)}
+
+📏 BUDGET: each line has [max N chars] = HARD upper bound (counted in target-
+language characters). Trim fillers, particles, redundancies as needed. The
+target text often expands ~20-30% from source — plan for that compression.
+{extra_block}{context_section}
+OUTPUT ONE JSON OBJECT (no markdown fences):
+{{
+  "translations": [
+    {{"index": 1, "translated": "...", "emotion": "neutral"}},
+    {{"index": 2, "translated": "...", "emotion": "happy"}}
+  ]
+}}
+• "translated": faithful + register-correct + ≤ max_chars (target chars)
+• "emotion": one of neutral / happy / sad / angry / whisper / surprised / fearful
+"""
 
     user_input = "DIALOGUE CẦN DỊCH:\n" + "\n".join(seg_lines)
     return {"system": system, "user": user_input, "n_segments": len(segments)}
@@ -771,16 +1097,24 @@ def build_editor_prompt(
     target_lang: str,
     source_lang: str,
     speaker_relationships: Optional[dict] = None,
+    film_genre: Optional[str] = None,
 ) -> dict:
-    """Pass-2: polish literal translation thành lời thoại phim VTV.
+    """Pass-2: polish literal translation thành lời thoại phim tự nhiên.
+
+    Vietnamese target: bám sát style VTV/phim Việt (tiểu từ + cảm xúc).
+    Ngôn ngữ khác: polish theo convention native của target language +
+    register theo genre.
 
     Args:
       items: list[{index, speaker, original, literal, max_chars, role?}]
-      Còn lại để có context cho LLM polish.
+      film_genre: optional — gắn vào để genre_style_guide kick in.
 
     Output JSON: {"polished": [{"index", "translated", "emotion"}]}
     """
     tgt_name = _lang_display_name(target_lang)
+    is_vn = _is_vietnamese(target_lang)
+    genre_block = _genre_style_guide(film_genre, target_lang)
+    lang_notes = "" if is_vn else _target_language_notes(target_lang)
 
     # Role lookup
     role_map = {}
@@ -817,7 +1151,8 @@ def build_editor_prompt(
             parts.append(f"Register: {register}")
         scene_block = "\n".join("   " + p for p in parts) + "\n"
 
-    system = f"""Bạn là EDITOR phim chuyên dub VTV — chuyển lời dịch literal thành
+    if is_vn:
+        system = f"""Bạn là EDITOR phim chuyên dub VTV — chuyển lời dịch literal thành
 lời thoại phim CÓ HỒN, tự nhiên, biểu cảm.
 
 INPUT: mỗi line có literal translation đã ĐÚNG nghĩa.
@@ -825,7 +1160,7 @@ NHIỆM VỤ: polish thành câu PHIM thật — TỰ NHIÊN + CÓ CẢM XÚC + 
 với scene_context. CHO PHÉP đổi pronoun nếu literal sai emotion (ví dụ:
 vợ chồng đang ly hôn mà literal dùng "anh/em" thân mật → đổi sang "tôi/cô" lạnh).
 
-{scene_block}
+{scene_block}{genre_block}
 🚨🚨🚨 RULE TUYỆT ĐỐI VỀ PRONOUN — KHÔNG ĐƯỢC ĐỔI:
 
 ⚡ NHẤT QUÁN XUYÊN SUỐT: pronoun của MỖI SPEAKER phải GIỐNG NHAU từ đầu
@@ -909,7 +1244,63 @@ OUTPUT JSON DUY NHẤT:
   ]
 }}
 """
-    user_input = f"DỊCH SANG {tgt_name} — LITERAL CẦN POLISH:\n\n" + "\n".join(item_lines)
+    else:
+        # Generic professional editor — any target language.
+        system = f"""You are a PROFESSIONAL film dialogue EDITOR polishing literal
+translations into {tgt_name} that sounds like real film dialogue.
+
+INPUT: each line already has correct meaning (from a literal Pass-1).
+YOUR JOB: rewrite each line so it sounds NATIVE and NATURAL in {tgt_name},
+matches the emotion of the scene, and respects the budget. You may rearrange
+words and add target-language particles/contractions to make it sound real —
+but DO NOT change the meaning.
+
+{scene_block}{genre_block}{lang_notes}
+🎯 CORE RULES:
+
+1. CONSISTENCY: each speaker keeps the same pronoun choice / politeness level
+   across the whole batch. If the literal has a slip (e.g. line 1 formal,
+   line 12 casual for the same speaker→listener pair), unify to the form
+   the speaker has been using.
+
+2. NATURAL CADENCE: written translation reads stilted; spoken dialogue is
+   different. Use the target language's:
+   - contractions / clitics (where natural)
+   - sentence-final particles / modal particles
+   - ellipsis where the audience already knows the subject
+   - rhetorical questions / interjections to carry emotion
+
+3. EMOTION-MATCHED REWRITES: the same content can sound flat or alive
+   depending on word order, exclamations, and softeners. Pick the version
+   that matches the emotion of the source — but stay faithful to meaning.
+
+4. RHYTHM > LENGTH: better to cut filler than overrun the char budget.
+   Each line ≤ max_chars (hard).
+
+5. PROPER NOUNS / SPECIAL TERMS: preserve names exactly as Pass-1 wrote
+   them. Do not re-translate or re-romanize.
+
+6. GENRE: respect the genre block above. Romance is tender, action is curt,
+   documentary is neutral. Don't apply VN-only patterns (anh/em, tiểu từ).
+
+✏️ MISTAKES TO AVOID:
+❌ Translationese: word-for-word from literal, ignoring native phrasing.
+❌ Over-formal in a casual scene, or over-casual in a formal scene.
+❌ Pronoun flip mid-batch (formal start, casual end) without scripted cause.
+❌ Padding to fill silence — short native lines beat verbose stretched ones.
+❌ Adding emotion the source doesn't have (smile-talk in a tense scene).
+
+OUTPUT ONE JSON OBJECT (no markdown fences):
+{{
+  "polished": [
+    {{"index": 1, "translated": "polished line", "emotion": "neutral"}},
+    {{"index": 2, "translated": "polished line", "emotion": "happy"}}
+  ]
+}}
+• "translated": fluent {tgt_name} ≤ max_chars (target chars)
+• "emotion": neutral / happy / sad / angry / whisper / surprised / fearful
+"""
+    user_input = f"TARGET: {tgt_name} — POLISH LITERAL LINES BELOW:\n\n" + "\n".join(item_lines)
     return {"system": system, "user": user_input, "n_items": len(items)}
 
 

@@ -154,6 +154,7 @@ def _translate_uncached(
                 engine=ENGINE, items=items,
                 target_lang=target_language, source_lang=source_language,
                 speaker_relationships=relationships,
+                film_genre=film_genre,
             )
             for i, p in enumerate(polished_raw):
                 if p.get("translated_text"):

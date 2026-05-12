@@ -175,6 +175,7 @@ def run_edit(
     target_lang: str,
     source_lang: str,
     speaker_relationships: Optional[dict] = None,
+    film_genre: Optional[str] = None,
     api_key: Optional[str] = None,
     model: Optional[str] = None,
 ) -> list[dict]:
@@ -187,6 +188,7 @@ def run_edit(
         target_lang=target_lang,
         source_lang=source_lang,
         speaker_relationships=speaker_relationships,
+        film_genre=film_genre,
     )
     raw = _call_llm(engine, prompt, api_key=api_key, model=model)
     return parse_editor_response(raw, len(items))

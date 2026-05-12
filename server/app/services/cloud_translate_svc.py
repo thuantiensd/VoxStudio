@@ -354,6 +354,7 @@ def _translate_3pass(engine: str, texts: list[str], target: str, source: str,
                 engine=engine, items=items,
                 target_lang=target, source_lang=source,
                 speaker_relationships=relationships,
+                film_genre=film_genre,
                 api_key=api_key, model=model,
             )
             for i, p in enumerate(polished_raw):
