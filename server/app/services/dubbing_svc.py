@@ -109,6 +109,29 @@ _PINYIN_TO_HANVIET: dict[str, str] = {
     "Bixia": "Bệ hạ", "Dianxia": "Điện hạ", "Wangye": "Vương gia",
     "Niangniang": "Nương nương", "Furen": "Phu nhân",
     "Niangzi": "Nương tử", "Xianggong": "Tướng công",
+    # Pinyin chars phổ biến cho tên (single-syllable). Dùng cho pattern
+    # "VN_title + pinyin" hoặc "HánViệt + pinyin" — KHÔNG dùng standalone.
+    "Kou": "Khấu", "Wen": "Văn", "Jia": "Gia", "Yi": "Nghị",
+    "Long": "Long", "Hua": "Hoa", "Ming": "Minh", "Jun": "Quân",
+    "Kai": "Khải", "Jian": "Kiện", "Wei2": "Vĩ", "Hao": "Hạo",
+    "Yu2": "Vũ", "Yu3": "Vũ", "Yan": "Yến", "Mei": "Mỹ",
+    "Lan": "Lan", "Hong": "Hồng", "Xue": "Tuyết", "Yue": "Nguyệt",
+    "Ling": "Linh", "Ying": "Anh", "Fang2": "Phương", "Yan2": "Diễm",
+    "Min": "Mẫn", "Jing": "Tĩnh", "Hui": "Huệ", "Juan": "Quyên",
+    "Na": "Na", "Ting": "Đình", "Xin": "Tâm", "Mi": "Mi",
+    "Qing": "Thanh", "Wu2": "Vũ", "Feng2": "Phong", "Lei": "Lôi",
+    "Tao": "Đào", "Bin": "Bân", "Bo": "Ba", "Bing": "Băng",
+    "Fei": "Phi", "Dan": "Đan", "Qi": "Kỳ", "Qiu": "Thu",
+    "Ru": "Như", "Rui": "Thuỵ", "Sheng": "Thắng", "Yong": "Vĩnh",
+    "Zhi": "Chí", "Chao": "Triều", "Le": "Lạc", "Ya": "Nhã",
+    # Phân biệt với surname đã có (Yu/Wei/Fang là họ — single in standalone
+    # — vẫn dùng table cũ; ở đây "Yu2/Wei2/Fang2" là tên đệm trong tên đầy đủ).
+    # Compound name pinyin phổ biến (2 syllables)
+    "Wenjia": "Văn Gia", "Yujie": "Vũ Khiết", "Xiaoming": "Tiểu Minh",
+    "Xiaoyan": "Tiểu Yến", "Xiaolong": "Tiểu Long", "Xiaohua": "Tiểu Hoa",
+    "Meili": "Mỹ Lệ", "Yanhua": "Diễm Hoa", "Yixin": "Nhất Tâm",
+    "Junjie": "Tuấn Kiệt", "Jiahao": "Gia Hạo", "Tianyu": "Thiên Vũ",
+    "Xinyu": "Hâm Vũ", "Wenhao": "Văn Hạo",
 }
 
 
@@ -160,6 +183,51 @@ def _hanviet_post_fix(text: str) -> str:
     text = re.sub(
         r"\b(Lao|Xiao|Da|Er|San|Si|Ah)\s+([A-Z][a-z]{1,7})\b",
         _prefix_repl, text,
+    )
+
+    # Pattern: VN title (Vietnamese) + pinyin surname → fix surname
+    # Vd: "Trưởng nhóm Song" → "Trưởng nhóm Tống"
+    #     "Đại nhân Wang" → "Đại nhân Vương"
+    _VN_TITLES_PRECEDING_NAME = (
+        "Trưởng nhóm", "Tổ trưởng", "Bộ trưởng", "Trưởng",
+        "Đại nhân", "Tiểu thư", "Công tử", "Phu nhân",
+        "Bệ hạ", "Điện hạ", "Vương gia", "Nương nương",
+        "Sư phụ", "Sư huynh", "Sư tỷ", "Sư đệ", "Sư muội",
+        "Tiên sinh", "Tướng quân", "Lão gia",
+        "Anh", "Chị", "Cô", "Ông", "Bà",
+        "Đồng chí", "Ngài", "Phu quân", "Nương tử",
+    )
+
+    def _title_pinyin_repl(m: "re.Match") -> str:
+        title, pinyin = m.group(1), m.group(2)
+        vn = _PINYIN_TO_HANVIET.get(pinyin)
+        if not vn:
+            return m.group(0)
+        return f"{title} {vn}"
+
+    titles_pat = "|".join(re.escape(t) for t in _VN_TITLES_PRECEDING_NAME)
+    text = re.sub(
+        rf"\b({titles_pat})\s+([A-Z][a-z]{{1,7}})\b",
+        _title_pinyin_repl, text,
+    )
+
+    # Pattern: HánViệt (có dấu Việt) + pinyin → fix pinyin
+    # Vd: "Trần Kou" → "Trần Khấu", "Vương Wenjia" → "Vương Văn Gia"
+    # Detect HánViệt qua presence of Việt diacritics OR known Hán-Việt name.
+    _VIET_DIACRITICS = "àáảãạăằắẳẵặâầấẩẫậèéẻẽẹêềếểễệìíỉĩịòóỏõọôồốổỗộơờớởỡợùúủũụưừứửữựỳýỷỹỵđÀÁẢÃẠĂẰẮẲẴẶÂẦẤẨẪẬÈÉẺẼẸÊỀẾỂỄỆÌÍỈĨỊÒÓỎÕỌÔỒỐỔỖỘƠỜỚỞỠỢÙÚỦŨỤƯỪỨỬỮỰỲÝỶỸỴĐ"
+    _VIET_DIACRITICS_RE = "[" + re.escape(_VIET_DIACRITICS) + "]"
+
+    def _hanviet_pinyin_repl(m: "re.Match") -> str:
+        hanviet, pinyin = m.group(1), m.group(2)
+        vn = _PINYIN_TO_HANVIET.get(pinyin)
+        if not vn:
+            return m.group(0)
+        return f"{hanviet} {vn}"
+
+    # Word có dấu Việt + space + word ASCII chữ HOA → có thể là compound name
+    text = re.sub(
+        rf"\b([A-Z][a-zA-Z]*{_VIET_DIACRITICS_RE}[a-zA-Z]*)\s+([A-Z][a-z]{{1,7}})\b",
+        _hanviet_pinyin_repl, text,
     )
 
     return text
