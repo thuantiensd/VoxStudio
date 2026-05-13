@@ -129,13 +129,22 @@ async def update_test_status(db: AsyncSession, user_id: int, provider: str,
 # Test key endpoint — gọi từng provider 1 request nhỏ để verify
 # ═══════════════════════════════════════════════════════════════
 
-def test_provider_key(provider: str, api_key: str) -> tuple[bool, str]:
+def test_provider_key(
+    provider: str,
+    api_key: str,
+    model: Optional[str] = None,
+) -> tuple[bool, str]:
     """Test key có valid không. Trả (ok, message).
 
+    Nếu `model` truyền vào → test luôn quyền truy cập model đó (vd
+    `gpt-5` có khả dụng với account user không). Đây là kiểm tra
+    chính xác hơn so với chỉ test key chung (GET /v1/models): catch
+    được trường hợp key đúng nhưng model bị limit / chưa có quyền.
+
     Mỗi provider gọi endpoint test riêng (cheap call):
-    - gemini: list models
-    - openai: list models
-    - claude: short messages API call
+    - gemini: nếu có model → generateContent ngắn; nếu không → list models
+    - openai: nếu có model → chat completion 1 token; nếu không → list models
+    - claude: messages API với model do user chỉ định (default haiku)
     - deepl: usage endpoint
     - google_cloud: detect language
     """
@@ -147,6 +156,29 @@ def test_provider_key(provider: str, api_key: str) -> tuple[bool, str]:
 
     try:
         if provider == "gemini":
+            if model:
+                # Test trực tiếp model có dùng được không
+                url = (
+                    f"https://generativelanguage.googleapis.com/v1beta/"
+                    f"models/{model}:generateContent"
+                )
+                with httpx.Client(timeout=15) as c:
+                    r = c.post(
+                        url, params={"key": api_key},
+                        json={
+                            "contents": [{"parts": [{"text": "hi"}]}],
+                            "generationConfig": {"temperature": 0.0, "maxOutputTokens": 1},
+                        },
+                        headers={"Content-Type": "application/json"},
+                    )
+                if r.status_code == 200:
+                    return True, f"Key Gemini hợp lệ + model {model} dùng được"
+                if r.status_code in (401, 403):
+                    return False, "Key Gemini không hợp lệ"
+                if r.status_code == 404:
+                    return False, f"Model Gemini {model} không tồn tại / chưa có quyền"
+                return False, f"Gemini trả {r.status_code}: {r.text[:200]}"
+            # Không có model → list models (key check)
             url = f"https://generativelanguage.googleapis.com/v1beta/models?key={api_key}"
             with httpx.Client(timeout=10) as c:
                 r = c.get(url)
@@ -157,6 +189,37 @@ def test_provider_key(provider: str, api_key: str) -> tuple[bool, str]:
             return False, f"Gemini trả {r.status_code}"
 
         if provider == "openai":
+            if model:
+                # Test trực tiếp model với chat completion 1 token
+                with httpx.Client(timeout=15) as c:
+                    r = c.post(
+                        "https://api.openai.com/v1/chat/completions",
+                        headers={
+                            "Authorization": f"Bearer {api_key}",
+                            "Content-Type": "application/json",
+                        },
+                        json={
+                            "model": model,
+                            "messages": [{"role": "user", "content": "hi"}],
+                            "max_tokens": 1,
+                        },
+                    )
+                if r.status_code == 200:
+                    return True, f"Key OpenAI hợp lệ + model {model} dùng được"
+                if r.status_code == 401:
+                    return False, "Key OpenAI không hợp lệ"
+                if r.status_code == 404:
+                    return False, (
+                        f"Model OpenAI {model} không tồn tại / chưa có quyền. "
+                        f"Account của bạn có thể chưa được cấp quyền dùng model này — "
+                        f"thử model khác (vd gpt-4o-mini) hoặc liên hệ OpenAI."
+                    )
+                if r.status_code == 429:
+                    return False, "OpenAI rate limit / hết quota"
+                if r.status_code == 400:
+                    return False, f"OpenAI 400: {r.text[:300]}"
+                return False, f"OpenAI trả {r.status_code}: {r.text[:200]}"
+            # Không có model → list models (key check)
             with httpx.Client(timeout=10) as c:
                 r = c.get(
                     "https://api.openai.com/v1/models",
@@ -170,6 +233,7 @@ def test_provider_key(provider: str, api_key: str) -> tuple[bool, str]:
 
         if provider == "claude":
             # Claude không có list models endpoint — gọi messages với 1 token
+            test_model = model or "claude-3-5-haiku-20241022"
             with httpx.Client(timeout=15) as c:
                 r = c.post(
                     "https://api.anthropic.com/v1/messages",
@@ -179,18 +243,25 @@ def test_provider_key(provider: str, api_key: str) -> tuple[bool, str]:
                         "Content-Type": "application/json",
                     },
                     json={
-                        "model": "claude-3-5-haiku-20241022",
+                        "model": test_model,
                         "max_tokens": 1,
                         "messages": [{"role": "user", "content": "hi"}],
                     },
                 )
             if r.status_code == 200:
-                return True, "Key Claude hợp lệ"
+                msg = f"Key Claude hợp lệ + model {test_model} dùng được" if model \
+                    else "Key Claude hợp lệ"
+                return True, msg
             if r.status_code == 401:
                 return False, "Key Claude không hợp lệ"
             if r.status_code == 402:
                 return False, "Claude hết credit"
-            return False, f"Claude trả {r.status_code}"
+            if r.status_code == 404 and model:
+                return False, (
+                    f"Model Claude {model} không tồn tại / chưa có quyền. "
+                    f"Thử model khác (vd claude-3-5-haiku-20241022)."
+                )
+            return False, f"Claude trả {r.status_code}: {r.text[:200]}"
 
         if provider == "deepl":
             base = "https://api-free.deepl.com" if api_key.endswith(":fx") \

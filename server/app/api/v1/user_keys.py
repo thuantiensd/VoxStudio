@@ -29,6 +29,11 @@ class SetKeyBody(BaseModel):
     api_key: str
 
 
+class TestKeyBody(BaseModel):
+    api_key: str | None = None
+    model: str | None = None  # optional: test luôn quyền truy cập model
+
+
 @router.get("")
 async def list_keys(
     user: User = Depends(get_current_user),
@@ -65,12 +70,15 @@ async def set_key(
 @router.post("/{provider}/test")
 async def test_key(
     provider: str,
-    body: SetKeyBody | None = Body(None),
+    body: TestKeyBody | None = Body(None),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_session),
 ):
     """Test key cho provider. Nếu body.api_key truyền → test key đó (UI chưa
     save). Nếu không → test key đã lưu trong DB.
+
+    Optional body.model: tên model để test luôn quyền truy cập (vd 'gpt-5').
+    Khi truyền → ngoài check key valid, còn check model có dùng được không.
     """
     if provider not in api_key_svc.SUPPORTED_PROVIDERS:
         raise HTTPException(400, f"Provider không support: {provider}")
@@ -85,10 +93,12 @@ async def test_key(
     if not key_to_test:
         raise HTTPException(400, "Chưa có key để test")
 
+    model = body.model.strip() if (body and body.model) else None
+
     # Test trong thread (network I/O)
     loop = asyncio.get_event_loop()
     ok, msg = await loop.run_in_executor(
-        None, api_key_svc.test_provider_key, provider, key_to_test,
+        None, api_key_svc.test_provider_key, provider, key_to_test, model,
     )
 
     # Update DB status nếu test key đã lưu (không phải key body mới)
@@ -96,7 +106,7 @@ async def test_key(
         status = "ok" if ok else "invalid"
         await api_key_svc.update_test_status(db, user.id, provider, status, msg)
 
-    return {"ok": ok, "message": msg}
+    return {"ok": ok, "message": msg, "model_tested": model}
 
 
 @router.delete("/{provider}")
