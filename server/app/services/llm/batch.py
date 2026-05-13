@@ -32,18 +32,19 @@ CONCURRENT_BATCHES = {
 def adaptive_batch_size(n_segments: int) -> int:
     """Pick batch size tối ưu theo tổng segment count.
 
-    Logic: prompt overhead ~2k chars cố định → batch nhỏ tốn nhiều API call;
-    batch quá to → timeout/context limit. Đây là điểm sweet-spot empirical.
+    Bump 2026-05: flagship LLM (gpt-5/opus-4-5/gemini-2.5-pro) có context
+    256K-1M → batch lớn hơn giúp giữ pronoun + name consistency xuyên suốt.
+    Batch quá nhỏ → LLM mất context → name drift / pronoun slip.
     """
-    if n_segments < 100:
-        return n_segments  # 1 batch
-    if n_segments < 250:
-        return 35
-    if n_segments < 600:
-        return 25
-    if n_segments < 1200:
-        return 20
-    return 15  # very long film — tránh prompt quá to
+    if n_segments < 150:
+        return n_segments  # 1 batch — full context, ideal
+    if n_segments < 400:
+        return 60
+    if n_segments < 800:
+        return 50
+    if n_segments < 1500:
+        return 40
+    return 30  # very long film — vẫn lớn hơn batch cũ
 
 
 T = TypeVar("T")

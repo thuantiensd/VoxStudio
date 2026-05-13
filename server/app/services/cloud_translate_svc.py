@@ -340,6 +340,20 @@ def _translate_3pass(engine: str, texts: list[str], target: str, source: str,
             film_genre=film_genre, api_key=api_key, model=model,
         )
         polished = list(literal)
+        # Skip Editor pass cho flagship models — Pass-1 đã polish tốt sẵn,
+        # Pass-2 có thể làm degrade do over-edit. Editor chỉ cần thiết
+        # cho mini/cheap models.
+        flagship_models = {
+            "gpt-5", "gpt-5-mini",
+            "claude-opus-4-5", "claude-opus-4-7", "claude-sonnet-4-6",
+            "gemini-2.5-pro",
+        }
+        skip_editor = (model or "").lower() in flagship_models
+        if skip_editor:
+            logger.info("%s flagship (%s) → skip Editor pass (Pass-1 đã đủ chất lượng)",
+                        engine, model)
+            return [p.get("translated_text", "") for p in literal]
+
         try:
             items = []
             for i, seg in enumerate(batch):
