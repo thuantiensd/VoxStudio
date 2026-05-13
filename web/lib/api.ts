@@ -818,14 +818,20 @@ export async function setUserApiKey(provider: string, apiKey: string) {
 export async function testUserApiKey(
   provider: string,
   apiKey?: string,
-): Promise<{ ok: boolean; message: string }> {
-  const body = apiKey ? { api_key: apiKey } : null;
-  return api<{ ok: boolean; message: string }>(
+  model?: string,
+): Promise<{ ok: boolean; message: string; model_tested?: string | null }> {
+  // Truyền model để BE test luôn quyền truy cập model đó (vd gpt-5)
+  // → catch trường hợp key valid nhưng model bị limit / chưa cấp quyền.
+  const body: Record<string, unknown> = {};
+  if (apiKey) body.api_key = apiKey;
+  if (model) body.model = model;
+  const hasBody = Object.keys(body).length > 0;
+  return api<{ ok: boolean; message: string; model_tested?: string | null }>(
     `/user/api-keys/${encodeURIComponent(provider)}/test`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      ...(body ? { body: JSON.stringify(body) } : {}),
+      ...(hasBody ? { body: JSON.stringify(body) } : {}),
     },
   );
 }

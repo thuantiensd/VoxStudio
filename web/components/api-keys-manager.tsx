@@ -155,7 +155,14 @@ export function ApiKeysManager({ open, onClose }: { open: boolean; onClose: () =
     try {
       // Nếu user đang nhập input → test key đó. Nếu không → test key đã lưu.
       const keyToTest = st.inputValue.trim() || undefined;
-      const r = await testUserApiKey(id, keyToTest);
+      // Kèm model mặc định cho LLM provider để check luôn quyền truy cập
+      // (vd key OpenAI valid nhưng account chưa được cấp quyền gpt-5).
+      const defaultModel: Record<string, string> = {
+        openai: "gpt-5",
+        claude: "claude-opus-4-5",
+        gemini: "gemini-2.5-pro",
+      };
+      const r = await testUserApiKey(id, keyToTest, defaultModel[id]);
       update(id, {
         testing: false,
         testStatus: r.ok ? "ok" : "invalid",
