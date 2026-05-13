@@ -2654,9 +2654,7 @@ def generate_segment(project_id: str, seg_id: str) -> dict:
             # 0.3s im đầu, voice sẽ delay so với mouth movement của video gốc.
             # Dubbing: trim hơi tight hơn TTS thường (-45dB / 50ms) vì cần align
             # lip-sync với video — tránh delay 0.3s so với mouth movement.
-            # Trim silence thoáng cho dubbing — user báo voice cụt/hụt hơi nếu
-            # trim quá sát. -50dB / 80ms = giữ phụ âm yếu + đệm thở.
-            waveform = trim_silence(waveform, gpu.sampling_rate, threshold_db=-50, pad_ms=80)
+            waveform = trim_silence(waveform, gpu.sampling_rate, threshold_db=-45, pad_ms=50)
             sr = gpu.sampling_rate
             audio_np = waveform.cpu().numpy()
 
@@ -2767,11 +2765,10 @@ def generate_segment(project_id: str, seg_id: str) -> dict:
                         except Exception as ts_e:
                             logger.debug("trim_silence skipped: %s", ts_e)
 
-                # Tier 2: nếu vẫn overflow → emergency atempo speedup
-                # Cap 1.28x — trên đó voice clone hụt hơi rõ. User feedback.
+                # Tier 2: nếu vẫn overflow → emergency atempo speedup (1.40x max)
                 if len(audio_np) > max_samples:
                     needed_factor = len(audio_np) / max_samples
-                    if needed_factor <= 1.28:
+                    if needed_factor <= 1.40:
                         seg_dir = _segments_dir(project_id)
                         raw_wav = seg_dir / f"{seg_id}_emergency_raw.wav"
                         out_wav = seg_dir / f"{seg_id}_emergency.wav"
@@ -2996,12 +2993,13 @@ def _atempo_stretch(in_path: Path, out_path: Path, tempo: float):
 # tối đa 1.25x. Nếu vẫn không đủ (cao trào, batch ngắn vs dài), trim
 # trailing silence + cap cứng overflow để KHÔNG overlap batch sau.
 SPEED_TOLERANCE = 0.05      # 5% — chỉ skip atempo nếu lệch < 5%
-MAX_SPEED_FACTOR = 1.20     # speedup tối đa (giảm từ 1.25 — voice clone 1.25x đã hụt hơi)
-# Slowdown rất nhẹ — voice clone slowdown 0.85x nghe muddy/lè nhè. User báo
-# "hụt hơi chán" → nới lên 0.92x (kéo dài ~9% chứ không 18%).
-MIN_SPEED_FACTOR = 0.92     # Slowdown tối đa 0.92x (nhẹ, giữ tự nhiên)
-MAX_EDGE_SPEED = 1.20       # Edge TTS rate max (giảm cùng)
-MIN_EDGE_SPEED = 0.92       # Edge TTS slowdown cùng cap
+MAX_SPEED_FACTOR = 1.25     # speedup tối đa (atempo)
+# Slowdown HẠN CHẾ — cho phép kéo dài voice đọc nhanh hơn Cô Ba về gần
+# baseline, nhưng cap 0.85x (kéo dài ~18%). Dưới 0.85x atempo bắt đầu
+# muddy giọng. User feedback: "cho phép kéo dài nhưng mức độ cho phép".
+MIN_SPEED_FACTOR = 0.85     # Slowdown tối đa 0.85x (kéo dài ~18%)
+MAX_EDGE_SPEED = 1.25       # Edge TTS rate max
+MIN_EDGE_SPEED = 0.85       # Edge TTS slowdown cùng cap
 # Sau khi đã max speed, cho phép overflow X% rồi mới hard-trim. 15% grace
 # để cuối câu không bị cụt giật khi ratio nhỏ (1.10–1.20x).
 OVERFLOW_GRACE = 1.15
