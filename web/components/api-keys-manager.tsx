@@ -208,7 +208,9 @@ export function ApiKeysManager({ open, onClose }: { open: boolean; onClose: () =
 
   return createPortal(
     <div
-      className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+      // z cao hơn parent modal (DubAdvancedModal z-200) — không thì
+      // user click "Mở quản lý" thấy không phản hồi vì child nằm sau parent.
+      className="fixed inset-0 z-[300] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
       <div className="w-full max-w-2xl max-h-[90vh] flex flex-col rounded-xl border border-border/60 bg-card overflow-hidden">
