@@ -316,6 +316,21 @@ export async function listTranslateEngines() {
   return res.json();
 }
 
+// Test API key cho provider (cheap call: list models hoặc 1-token completion).
+// Nếu truyền `model` → test luôn quyền truy cập model đó (vd gpt-5).
+// Trả: { ok, message, model_tested }.
+export async function testProviderKey(provider, apiKey, model = null) {
+  const res = await request(`/user/api-keys/${provider}/test`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      api_key: apiKey || null,
+      model: model || null,
+    }),
+  });
+  return res.json();
+}
+
 // ── STT ─────────────────────────────────────────────
 export async function transcribe(audioFile, { language } = {}) {
   const form = new FormData();

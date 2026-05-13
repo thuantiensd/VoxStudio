@@ -4,7 +4,7 @@ import {
   ExternalLink, Loader2, Trash2, Save, AlertTriangle,
 } from "lucide-react";
 import { listKeys, getKey, setKey, isSecureBackend } from "../../services/keyvault";
-import { translateTexts } from "../../services/api";
+import { testProviderKey } from "../../services/api";
 import { useToast } from "../../components/ui/Toast";
 import Modal from "../../components/ui/Modal";
 import { useT } from "../../i18n/I18nContext";
@@ -132,20 +132,24 @@ function ProviderRow({ provider, hasKey, onChanged, toast }) {
         toast.warn(t("settings.integrations.toastNoKey"), { title: t("settings.integrations.toastNoKeyTitle") });
         return;
       }
-      const res = await translateTexts({
-        texts: ["Hello world"],
-        target: "vi", source: "en",
-        engine: provider.id,
-        apiKey: key,
-      });
-      const out = (res?.translations || [])[0];
-      if (out) {
+      // Test trực tiếp qua endpoint chuyên dụng (cheap: list models / 1 token).
+      // Kèm model mặc định cho LLM provider để check luôn quyền truy cập
+      // (vd key OpenAI valid nhưng gpt-5 chưa được cấp quyền → catch luôn).
+      const defaultModel = {
+        openai: "gpt-5",
+        claude: "claude-opus-4-5",
+        gemini: "gemini-2.5-pro",
+      }[provider.id] || null;
+
+      const res = await testProviderKey(provider.id, key, defaultModel);
+      if (res?.ok) {
         setTestResult("ok");
-        toast.success(`"Hello world" → "${out}"`, { title: t("settings.integrations.toastTestOk", { name: provider.name }) });
+        toast.success(res.message || provider.name,
+                       { title: t("settings.integrations.toastTestOk", { name: provider.name }) });
       } else {
         setTestResult("fail");
-        toast.warn(t("settings.integrations.toastEmptyResult"),
-                    { title: t("settings.integrations.toastEmptyResultTitle") });
+        toast.error(res?.message || t("settings.integrations.toastUnknownReason"),
+                     { title: t("settings.integrations.toastTestFailedTitle", { name: provider.name }) });
       }
     } catch (e) {
       setTestResult("fail");
