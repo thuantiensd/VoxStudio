@@ -433,17 +433,28 @@ def build_speaker_analysis_prompt(
     visual_context: Optional[dict] = None,
     max_lines: int = 200,
 ) -> dict:
-    """Pass-0: phân tích quan hệ giữa SPEAKER_XX → JSON map.
+    """Pass-0: phân tích quan hệ giữa SPEAKER_XX → JSON map + auto-detect genre.
 
     Nếu có visual_context (từ VLM Pass-(-1)) → inject làm GROUND TRUTH.
     LLM dùng để confirm gender + role thay vì đoán từ text alone.
+
+    Sample DIVERSE: first/middle/last để tránh bias do intro chậm — phim
+    hay có scene đầu lạc thể loại với phần chính.
     """
     src_name = _lang_display_name(source_lang)
+
+    # Sample diverse: first/middle/last để catch genre shift
+    valid = [s for s in segments if (s.get("original_text") or "").strip()]
+    n = len(valid)
+    if n <= max_lines:
+        picked = valid
+    else:
+        third = max_lines // 3
+        picked = valid[:third] + valid[n // 2 - third // 2 : n // 2 + third // 2] + valid[-third:]
+
     sample_lines = []
-    for seg in segments[:max_lines]:
+    for seg in picked:
         text = (seg.get("original_text") or "").strip()
-        if not text:
-            continue
         spk = seg.get("speaker") or "?"
         sample_lines.append(f"{spk}: {text}")
 
@@ -566,10 +577,37 @@ CẢNH BÁO:
 ❌ "Con" KHÔNG dùng giữa vợ chồng. Cha/mẹ tự xưng "ba/mẹ" (KHÔNG "con").
 ❌ Cha/mẹ gọi con "con" (vocative). Con tự xưng "con", gọi cha mẹ "ba/mẹ".
 {genre_hint}
+🎬 GENRE AUTO-DETECT (CHAIN-OF-THOUGHT):
+
+Đọc TOÀN BỘ sample → tìm signals → classify. Output JSON:
+   genre_signals: array các bằng chứng cụ thể (vd "朕 xuất hiện 12 lần",
+                  "宫殿 xuất hiện 8 lần", "tu hành mention nhiều")
+   film_genre_primary: 1 trong 13 thể loại:
+      • romance      — tình cảm yêu đương
+      • drama        — kịch tâm lý / gia đình
+      • comedy       — hài
+      • action       — hành động
+      • thriller     — giật gân
+      • horror       — kinh dị
+      • historical   — cổ trang (KHÔNG võ thuật)
+      • wuxia        — kiếm hiệp / tiên hiệp / võ thuật
+      • scifi        — khoa học viễn tưởng
+      • fantasy      — huyền huyễn / fantasy
+      • documentary  — tài liệu
+      • news         — tin tức
+      • kids         — thiếu nhi
+   film_genre_secondary: optional, nếu phim mix 2 genre rõ (vd "rom-com"
+                        → primary=romance, secondary=comedy). null nếu single.
+   genre_confidence: 0.0-1.0. < 0.5 = không chắc → fallback "drama" sau.
+
 OUTPUT JSON duy nhất:
 {{
-  "scene_context": "Vợ chồng đang LY HÔN — vợ đã chuẩn bị giấy ly hôn, muốn cưới người khác. Con gái bị tẩy não, ghét cha. Chồng quyết định ra trận.",
-  "register": "modern/cổ trang/business/family",
+  "scene_context": "Mô tả ngắn bối cảnh + quan hệ chính của các speakers",
+  "register": "modern/cổ trang/business/family/news/documentary",
+  "genre_signals": ["..."],
+  "film_genre_primary": "drama",
+  "film_genre_secondary": null,
+  "genre_confidence": 0.85,
   "speakers": {{
     "SPEAKER_00": {{
       "character_name": "Diệp Thần",
@@ -632,9 +670,35 @@ def parse_speaker_analysis(response_text: str) -> dict:
             "third_person_label": (info.get("third_person_label") or "").strip()[:30],
             "evidence": (info.get("evidence") or "").strip()[:200],
         }
+    valid_genres = {
+        "romance", "drama", "comedy", "action", "thriller", "horror",
+        "historical", "wuxia", "scifi", "fantasy", "documentary",
+        "news", "kids",
+    }
+    gp = (parsed.get("film_genre_primary") or "").lower().strip()
+    if gp not in valid_genres:
+        gp = ""
+    gs = (parsed.get("film_genre_secondary") or "")
+    gs = gs.lower().strip() if isinstance(gs, str) else ""
+    if gs not in valid_genres:
+        gs = ""
+    try:
+        gc = float(parsed.get("genre_confidence", 0.0))
+        gc = max(0.0, min(1.0, gc))
+    except (TypeError, ValueError):
+        gc = 0.0
+    signals = parsed.get("genre_signals") or []
+    if not isinstance(signals, list):
+        signals = []
+    signals = [str(s).strip()[:120] for s in signals[:8] if s]
+
     return {
         "scene_context": (parsed.get("scene_context") or "").strip()[:300],
         "register": (parsed.get("register") or "").strip()[:40],
+        "film_genre_primary": gp,
+        "film_genre_secondary": gs,
+        "genre_confidence": gc,
+        "genre_signals": signals,
         "speakers": speakers,
     }
 
@@ -1077,52 +1141,31 @@ KHÔNG cần lo style cinematic — Editor pass sẽ polish.
    "❌ \"Vì sao bị xử tử gấp?\"      ✅ \"Cớ sao phải xử trảm gấp?\"\\n\\n"
    "⚠️ TRƯỚC KHI XUẤT JSON, SCAN output: nếu thấy bất kỳ FORBIDDEN word\\n"
    "nào → SỬA NGAY. Đặc biệt check: cảm ơn / tù nhân / kết hôn / xử tử / giao dịch.\\n"
-   if is_classical else
-   "🏠 REGISTER = MODERN — pronoun anh/em rule áp dụng dưới đây:\\n\\n"
-   "🚨🚨🚨 PRONOUN VỢ CHỒNG (MODERN) — RULE CỨNG BẮT BUỘC 🚨🚨🚨"
+   if is_classical else ""
 }
 
-Vợ chồng / cặp đôi yêu nhau / mới cưới / đính hôn TUYỆT ĐỐI DÙNG "anh/em".
-KHÔNG bao giờ "tôi/cô" cho vợ chồng trừ trường hợp SIÊU HIẾM dưới đây.
+⚡ PRONOUN — NGUYÊN TẮC UNIVERSAL (áp dụng cho MỌI thể loại):
 
-ÁP DỤNG "anh/em" cho TẤT CẢ trường hợp:
-✓ Vợ chồng mới cưới còn ngượng → "anh/em" (KHÔNG "tôi/cô")
-✓ Vợ chồng cưới vì hợp đồng / không yêu nhau → VẪN "anh/em" (đây là phim drama)
-✓ Vợ chồng cãi nhau, ghen tuông, hiểu lầm → VẪN "anh/em"
-✓ Vợ chồng có chuyện phức tạp (ôm nhầm con, hôn nhân giả, etc) → VẪN "anh/em"
-✓ Đối thoại lạnh nhạt giữa vợ chồng → VẪN "anh/em" (chỉ tone lạnh, KHÔNG pronoun lạnh)
+1. THEO SPEAKER MAP nếu có — đó là DEFAULT tuyệt đối.
 
-CHỈ DÙNG "tôi/cô" CHO VỢ CHỒNG KHI:
-✗ Đã LY HÔN chính thức (đã ký giấy / tòa xử xong)
-✗ Đã LY THÂN >6 tháng + không còn coi là vợ chồng
-✗ Speaker dùng "tôi/cô" để CỐ Ý hạ thấp + thể hiện sự khinh thường tột độ
-  (vd thoại có "cô không xứng" / "ông đừng gọi tôi là vợ nữa")
-→ Nếu KHÔNG có dấu hiệu trên rõ ràng → mặc định "anh/em".
+2. KHÔNG có map → infer từ CONTEXT TỪNG SCENE (nội dung dialogue, vocative,
+   quan hệ thể hiện qua lời nói). Đừng giả định mặc định một kiểu.
 
-🔴 KEYWORD GÂY NHẦM (KHÔNG nghĩa là phải dùng "tôi/cô"):
-- "Đối tượng kết hôn không rõ ràng" / "kết hôn vội vàng" / "kết hôn nhầm"
-  → vẫn là vợ chồng → "anh/em"
-- "Ôm nhầm con" / "hiểu lầm" / "không hợp nhau" → vẫn vợ chồng → "anh/em"
-- "Không quen biết nhau lắm" / "mới cưới chưa quen" → vẫn vợ chồng → "anh/em"
-- Vợ chồng phim ngôn tình / drama luôn dùng "anh/em" kể cả tình huống xa cách
+3. NHẤT QUÁN xuyên suốt batch:
+   • Mỗi speaker chỉ dùng 1 self_pronoun từ đầu → cuối.
+   • Mỗi cặp speaker chỉ dùng 1 cách gọi nhau từ đầu → cuối.
+   • TRƯỚC KHI TRẢ JSON: scan lại tất cả line — nếu speaker đầu xưng A,
+     cuối xưng B → SAI → SỬA về 1.
+   • Cuối batch dễ slip vì context "loãng" — kiểm tra kỹ 2-3 line cuối.
 
-🔹 Cha/mẹ ↔ con:
-   DEFAULT MẠNH: con xưng "con", gọi "bố/mẹ"
-   "Ông/bà" CHỈ khi con đã đoạn tuyệt + nói thẳng từ chối ("ông không phải bố tôi")
+4. GENRE-AWARE: register/vocab tuân theo block 🎬 THỂ LOẠI ở trên (nếu có).
+   Ví dụ romance/drama dùng pronoun thân mật; news/documentary dùng formal;
+   action câu ngắn. Đừng pha trộn register giữa các genre.
 
-🔹 NGUYÊN TẮC: theo SPEAKER MAP làm DEFAULT TUYỆT ĐỐI.
-KHÔNG được "đoán" emotion từ scene context để tự ý đổi pronoun.
+5. KHÔNG đoán emotion để tự ý đổi pronoun. Tone thể hiện qua TỪ NGỮ +
+   TIỂU TỪ + nhịp câu, KHÔNG phải đổi đại từ.
 
-⚡⚡⚡ NHẤT QUÁN TOÀN BATCH (BUG hay gặp — CHECK KỸ):
-   • Mỗi speaker chỉ dùng 1 self_pronoun XUYÊN SUỐT batch (đầu→cuối).
-   • Mỗi cặp speaker chỉ dùng 1 cách gọi nhau XUYÊN SUỐT batch.
-   • TRƯỚC KHI TRẢ JSON: scan lại tất cả line — nếu line đầu "anh/em" mà
-     line cuối "tôi/cô" cho CÙNG cặp speaker → SAI → SỬA về "anh/em".
-   • Cuối batch dễ slip vì context "loãng" — đặc biệt cẩn thận 2-3 line cuối.
-   • Nếu nghi ngờ "có thể họ ly hôn" mà KHÔNG có bằng chứng rõ ràng trong
-     text (ký giấy, ra tòa, "đừng gọi tôi là vợ") → GIỮ "anh/em".
-
-🚨 RULE MAPPING ĐẠI TỪ (CỰC QUAN TRỌNG — đọc kỹ TRƯỚC khi dịch):
+🚨 RULE MAPPING ĐẠI TỪ (cho line có anchor — đọc kỹ TRƯỚC khi dịch):
 
 Mỗi line có anchor `[Role: 我="X" | → Target: 你="Y"]`. Ý nghĩa:
    • 我/我们 trong gốc → DÙNG "X" (self_pronoun của speaker đang nói)

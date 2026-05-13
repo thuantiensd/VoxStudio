@@ -299,7 +299,7 @@ def _translate_3pass(engine: str, texts: list[str], target: str, source: str,
             for i, t in enumerate(texts)
         ]
 
-    # Pass-0: speaker analysis
+    # Pass-0: speaker analysis + auto-detect genre
     relationships: dict = {}
     try:
         relationships = run_analyze(
@@ -321,6 +321,22 @@ def _translate_3pass(engine: str, texts: list[str], target: str, source: str,
                 for spk_id, info in relationships["speakers"].items()
             }
             _store_llm_genders(engine, full_info)
+
+        # Auto-detect genre từ Pass-0 — override film_genre nếu user pick
+        # "auto" / "generic" và confidence >= 0.5.
+        detected = (relationships.get("film_genre_primary") or "").strip()
+        conf = float(relationships.get("genre_confidence") or 0.0)
+        if detected and conf >= 0.5 and (not film_genre or film_genre in ("auto", "generic", "")):
+            logger.info(
+                "Genre auto-detected: %s (confidence=%.2f, signals=%s) — override user 'auto'",
+                detected, conf, relationships.get("genre_signals", [])[:3],
+            )
+            film_genre = detected
+        elif detected and conf < 0.5:
+            logger.info(
+                "Genre detected: %s (confidence=%.2f LOW) — keeping user pick=%s",
+                detected, conf, film_genre or "auto",
+            )
     except Exception as e:
         logger.warning("%s Pass-0 fail: %s", engine, e)
 
