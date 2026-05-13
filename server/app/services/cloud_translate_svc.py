@@ -469,9 +469,41 @@ def _translate_3pass(engine: str, texts: list[str], target: str, source: str,
                 logger.debug("Cache write fail batch %d: %s", batch_idx, e)
 
         if skip_editor:
-            logger.info("%s flagship (%s) → skip Editor pass (Pass-1 đã đủ chất lượng)",
-                        engine, model)
+            # Task 3: flagship skip rewrite NHƯNG vẫn QA scan nhẹ bằng Python
+            # (không thêm LLM call). Catch lỗi LLM hay slip:
+            # - Dòng quá dài cho lồng tiếng (>2× max_chars)
+            # - Còn chữ Trung gốc lọt vào output
+            # - Tên cá biệt drift trong batch
             out = [p.get("translated_text", "") for p in literal]
+            qa_issues: list[str] = []
+            import re as _re_qa
+            seen_names: dict[str, set] = {}
+            for i, (t, seg) in enumerate(zip(out, batch)):
+                if not t or not t.strip():
+                    qa_issues.append(f"L{seg.get('index', i)}: empty")
+                    continue
+                # Quá dài: >2× max_chars cho lồng tiếng
+                max_c = (seg.get("end", 0) - seg.get("start", 0)) * 15
+                if max_c > 0 and len(t) > max_c * 2.0:
+                    qa_issues.append(f"L{seg.get('index', i)}: too long ({len(t)} vs {int(max_c)})")
+                # Chữ Trung lọt → undertranslated
+                if _re_qa.search(r"[一-鿿]", t):
+                    qa_issues.append(f"L{seg.get('index', i)}: contains Han chars")
+                # Track tên xuất hiện để check drift
+                for name_match in _re_qa.finditer(r"\b[A-ZĐ][a-zà-ỹ]+(?:\s+[A-ZĐ][a-zà-ỹ]+)+\b", t):
+                    full = name_match.group(0)
+                    seen_names.setdefault(full.split()[0], set()).add(full)
+            # Name drift detection
+            for first, variants in seen_names.items():
+                if len(variants) > 1:
+                    qa_issues.append(f"name drift: {first} → {list(variants)}")
+            if qa_issues:
+                logger.warning(
+                    "%s batch %d QA scan: %d issues — %s",
+                    engine, batch_idx, len(qa_issues), "; ".join(qa_issues[:5]),
+                )
+            else:
+                logger.info("%s batch %d QA scan: clean (no issues)", engine, batch_idx)
             _save_cache(out)
             return out
 
