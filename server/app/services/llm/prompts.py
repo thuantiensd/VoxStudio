@@ -1248,22 +1248,69 @@ KHÔNG cần lo style cinematic — Editor pass sẽ polish.
    if is_classical else ""
 }
 
+🚨🚨🚨 ANTI-ROBOT — CẤM DỊCH MÁY:
+
+User báo bản dịch nhiều khi như Google Translate ("bạn/tôi" cho mọi quan
+hệ, câu word-for-word). ĐÂY LÀ LỖI LỚN NHẤT. Cần tránh tuyệt đối.
+
+❌ TUYỆT ĐỐI KHÔNG dùng "bạn"/"tôi" robot khi 2 người có quan hệ rõ:
+
+   Hội thoại gia đình (mẹ ↔ con / ba ↔ con / anh ↔ em):
+   ❌ "Tại sao BẠN lại quay lại?"   → ✅ "Sao con lại về?"
+   ❌ "BẠN ăn cơm chưa?"            → ✅ "Con ăn cơm chưa?"
+   ❌ "TÔI đã nói bao nhiêu lần"    → ✅ "Mẹ nói bao nhiêu lần"
+   ❌ "Anh trai của BẠN"            → ✅ "Anh con" / "Anh trai con"
+   ❌ "BẠN sống thế nào?"           → ✅ "Con sống sao?"
+
+   Vợ chồng / yêu nhau:
+   ❌ "BẠN đi đâu vậy?"             → ✅ "Anh đi đâu vậy?" (vợ hỏi chồng)
+   ❌ "TÔI yêu BẠN"                 → ✅ "Em yêu anh" / "Anh yêu em"
+
+   Sếp ↔ nhân viên:
+   ❌ "TÔI cần BẠN làm việc này"   → ✅ "Em làm việc này giúp anh/chị"
+
+   Bạn bè thân:
+   ❌ "BẠN đến nhà TÔI"             → ✅ "Cậu đến nhà tớ" / "Mày đến nhà tao"
+
+   "BẠN" CHỈ DÙNG KHI:
+   • Người LẠ HOÀN TOÀN (vd nhân viên với khách hàng không quen)
+   • Ngữ cảnh FORMAL công sở vô danh / tin tức / phỏng vấn
+   • Sách giáo khoa, hướng dẫn user
+
+❌ TUYỆT ĐỐI KHÔNG dịch literal word-by-word:
+
+   ❌ "Tháng này BẠN đã nhận được lương chưa?"
+   ✅ "Tháng này con nhận lương chưa?"
+
+   ❌ "Đừng trở thành loại người trở nên giàu có chỉ sau một đêm"
+   ✅ "Đừng có mơ tưởng làm giàu sau một đêm"
+
+   ❌ "Bạn đã nói chuyện với mẹ như thế nào?"
+   ✅ "Sao con dám nói với mẹ kiểu đó?"
+
+   Cách dịch: ĐỌC HIỂU ý → DIỄN ĐẠT lại bằng tiếng Việt tự nhiên,
+   KHÔNG translate từng từ.
+
 ⚡ PRONOUN — NGUYÊN TẮC UNIVERSAL (áp dụng cho MỌI thể loại):
 
 1. THEO SPEAKER MAP nếu có — đó là DEFAULT tuyệt đối.
 
-2. KHÔNG có map → infer từ CONTEXT TỪNG SCENE (nội dung dialogue, vocative,
-   quan hệ thể hiện qua lời nói). Đừng giả định mặc định một kiểu.
+2. KHÔNG có map → infer QUAN HỆ từ CONTEXT TỪNG SCENE:
+   • Có ai gọi "妈/爸/娘/爹" → đây là CHA MẸ ↔ CON → dùng "mẹ/ba/con"
+   • Có ai gọi "老公/老婆/亲爱的" → VỢ CHỒNG → "anh/em"
+   • Có ai gọi "哥/姐" → ANH/CHỊ ↔ EM → "anh/chị/em"
+   • Có "老板/总裁/经理" → SẾP ↔ NHÂN VIÊN → "anh/chị/em" hoặc "ngài"
+   • Cổ trang → "đại nhân/thiếp/tại hạ" (xem block CỔ TRANG)
+   • CHỈ KHI không tìm được signal nào → mới fallback "bạn/tôi"
 
 3. NHẤT QUÁN xuyên suốt batch:
    • Mỗi speaker chỉ dùng 1 self_pronoun từ đầu → cuối.
    • Mỗi cặp speaker chỉ dùng 1 cách gọi nhau từ đầu → cuối.
    • TRƯỚC KHI TRẢ JSON: scan lại tất cả line — nếu speaker đầu xưng A,
      cuối xưng B → SAI → SỬA về 1.
-   • Cuối batch dễ slip vì context "loãng" — kiểm tra kỹ 2-3 line cuối.
 
 4. GENRE-AWARE: register/vocab tuân theo block 🎬 THỂ LOẠI ở trên (nếu có).
-   Ví dụ romance/drama dùng pronoun thân mật; news/documentary dùng formal;
+   Romance/drama dùng pronoun thân mật; news/documentary dùng formal;
    action câu ngắn. Đừng pha trộn register giữa các genre.
 
 5. KHÔNG đoán emotion để tự ý đổi pronoun. Tone thể hiện qua TỪ NGỮ +
