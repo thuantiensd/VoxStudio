@@ -235,6 +235,11 @@ _PINYIN_TO_HANVIET: dict[str, str] = {
     "Meili": "Mỹ Lệ", "Yanhua": "Diễm Hoa", "Yixin": "Nhất Tâm",
     "Junjie": "Tuấn Kiệt", "Jiahao": "Gia Hạo", "Tianyu": "Thiên Vũ",
     "Xinyu": "Hâm Vũ", "Wenhao": "Văn Hạo",
+    "Mingyue": "Minh Nguyệt", "Mingxin": "Minh Tâm", "Xueying": "Tuyết Anh",
+    "Tianlong": "Thiên Long", "Yulin": "Vũ Lâm", "Chunyang": "Xuân Dương",
+    "Yunfei": "Vân Phi", "Jingyi": "Tinh Y", "Xiyan": "Hi Yến",
+    "Liangchen": "Lương Thần", "Hanxue": "Hàn Tuyết", "Yiran": "Y Nhiên",
+    "Ziyan": "Tử Yến", "Aoxue": "Ngạo Tuyết",
 }
 
 
@@ -256,7 +261,17 @@ def _hanviet_post_fix(text: str) -> str:
         return text
     import re
 
-    # Compound họ — replace nguyên cụm
+    # Compound họ + compound names — replace nguyên cụm.
+    # Pinyin ≥6 chars chắc chắn KHÔNG phải từ Việt (Vietnamese ko có chuỗi
+    # 6+ chữ thường ASCII liền nhau không dấu) → an toàn replace.
+    long_compounds = {
+        k: v for k, v in _PINYIN_TO_HANVIET.items()
+        if len(k) >= 6 and k.isalpha()
+    }
+    for compound, vn in long_compounds.items():
+        if compound in text:
+            text = text.replace(compound, vn)
+    # Họ compound ngắn (5 chars) — vẫn an toàn (Murong/Sima/Zhuge…)
     for compound in ("Murong", "Sima", "Ouyang", "Zhuge", "Shangguan"):
         if compound in text:
             text = text.replace(compound, _PINYIN_TO_HANVIET.get(compound, compound))
@@ -367,6 +382,21 @@ def _phrase_post_fix(text: str) -> str:
     out = text
     for pat, repl, _desc in _PHRASE_FIXES:
         out = re.sub(pat, repl, out)
+
+    # Fix all-uppercase Vietnamese word (LLM hay viết "KHÔNG."/"VÂNG.") →
+    # Title case ("Không."/"Vâng."). Chỉ apply cho từ Việt có dấu hoặc
+    # 3-7 char không có chữ pinyin (tránh đụng acronym AI/USA/CEO).
+    def _fix_caps(m: "re.Match") -> str:
+        w = m.group(0)
+        # Bỏ qua acronym 2-5 char không dấu (đã handle ở TTS preprocess)
+        if len(w) <= 5 and re.match(r"^[A-Z]+$", w):
+            return w
+        return w[0] + w[1:].lower()
+
+    out = re.sub(
+        r"\b[A-ZÀÁẢÃẠĂẰẮẲẴẶÂẦẤẨẪẬÈÉẺẼẸÊỀẾỂỄỆÌÍỈĨỊÒÓỎÕỌÔỒỐỔỖỘƠỜỚỞỠỢÙÚỦŨỤƯỪỨỬỮỰỲÝỶỸỴĐ]{2,}\b",
+        _fix_caps, out,
+    )
     return out
 
 

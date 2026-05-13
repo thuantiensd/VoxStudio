@@ -1363,6 +1363,16 @@ hoặc từ ngắn tương đương — TUYỆT ĐỐI KHÔNG để rỗng.
    • TUYỆT ĐỐI KHÔNG dùng pinyin (Chen Yu / Wang Xiao / Xin Mei) ở output.
      Pinyin đọc dub ra âm tiếng Anh-Việt lai rất tệ. Luôn phiên Hán-Việt
      mỗi character (tra BẢNG HỌ + ÂM PHỔ BIẾN ở trên).
+   • TUYỆT ĐỐI KHÔNG dùng Romaji Nhật cho tên Trung. Source là tiếng Trung
+     → 列子 phải đọc "Liệt Tử" Hán-Việt, KHÔNG "Retsuko" (Romaji).
+     → 明月 phải đọc "Minh Nguyệt" Hán-Việt, KHÔNG "Mingyue" (pinyin)
+       và KHÔNG "Meigetsu" (Romaji).
+   • TUYỆT ĐỐI KHÔNG hallucinate từ tiếng Anh không có trong source.
+     Vd 锐器 phải dịch "vũ khí sắc" / "binh khí", KHÔNG "Rapier" (tự đặt từ
+     tiếng Anh không có trong gốc).
+   • Output CHỈ chứa: tiếng Việt thuần / Hán-Việt cho tên riêng / con số.
+     KHÔNG có chữ Trung gốc, KHÔNG pinyin, KHÔNG Romaji Nhật, KHÔNG từ Anh
+     không phải tên thương hiệu / acronym kỹ thuật.
 
 🚨 NAME-STABILITY XUYÊN SUỐT BATCH (BẮT BUỘC SCAN LẠI):
    • 1 nhân vật = 1 cách viết DUY NHẤT. Đầu batch "Tâm Mi" thì cuối batch
