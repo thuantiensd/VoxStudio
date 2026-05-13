@@ -2726,14 +2726,9 @@ def generate_segment(project_id: str, seg_id: str) -> dict:
             fade_samples = min(int(seg["fade_out"] * sr), len(audio_np))
             audio_np[-fade_samples:] *= np.linspace(1, 0, fade_samples)
 
-        # ── Chống CHỒNG TIẾNG (anti-overlap, smart) ──
-        # 3 tầng phòng vệ trước khi trim cụt câu:
-        #   1. Thử trim trailing silence (-40dB) trước — bớt im lặng cuối
-        #      (không mất tiếng nói)
-        #   2. Nếu vẫn không fit → emergency speedup atempo 1.40x (acceptable
-        #      cho 1 vài cảnh, tốt hơn mất tiếng)
-        #   3. Sau cùng mới hard-trim với fade-out
-        # Buffer cuối: 50ms (đủ để không click + không cướp tiếng segment kế)
+        # ── Chống CHỒNG TIẾNG (anti-overlap) ──
+        # Hard-cap audio không vượt qua start của segment kế tiếp. Nếu bị
+        # cap, trim với fade-out 50ms cuối để không cụt giật.
         try:
             all_segs = sorted(project["segments"], key=lambda x: x.get("start", 0))
             cur_start = seg.get("start", 0)
@@ -2742,65 +2737,19 @@ def generate_segment(project_id: str, seg_id: str) -> dict:
                 None,
             )
             if next_seg is not None:
-                max_seg_dur = max(0.5, next_seg.get("start", 0) - cur_start - 0.05)
+                # Khoảng tối đa audio có thể chiếm = next.start - cur.start - 100ms buffer
+                max_seg_dur = max(0.5, next_seg.get("start", 0) - cur_start - 0.1)
                 max_samples = int(max_seg_dur * sr)
-
-                if len(audio_np) > max_samples:
-                    overflow_ms = (len(audio_np) - max_samples) / sr * 1000
-                    # Tier 1: trim trailing silence (-40dB threshold)
-                    if overflow_ms < 600:  # chỉ thử nếu overflow < 0.6s (khả thi)
-                        try:
-                            from app.services.tts_svc import trim_silence
-                            import torch as _torch
-                            t = _torch.from_numpy(audio_np.astype(np.float32))
-                            t_trimmed = trim_silence(t, sr, threshold_db=-40, pad_ms=30)
-                            new_arr = t_trimmed.numpy()
-                            if len(new_arr) <= max_samples:
-                                audio_np = new_arr
-                                logger.info(
-                                    "[dub] segment %s anti-overlap: trimmed %dms "
-                                    "trailing silence — saved câu",
-                                    seg_id, int(overflow_ms),
-                                )
-                        except Exception as ts_e:
-                            logger.debug("trim_silence skipped: %s", ts_e)
-
-                # Tier 2: nếu vẫn overflow → emergency atempo speedup (1.40x max)
-                if len(audio_np) > max_samples:
-                    needed_factor = len(audio_np) / max_samples
-                    if needed_factor <= 1.40:
-                        seg_dir = _segments_dir(project_id)
-                        raw_wav = seg_dir / f"{seg_id}_emergency_raw.wav"
-                        out_wav = seg_dir / f"{seg_id}_emergency.wav"
-                        sf.write(str(raw_wav), audio_np, sr)
-                        try:
-                            _atempo_stretch(raw_wav, out_wav, needed_factor)
-                            audio_np, sr = sf.read(str(out_wav))
-                            logger.info(
-                                "[dub] segment %s anti-overlap: emergency speedup "
-                                "%.2fx (was %.2fs → %.2fs) để giữ trọn câu",
-                                seg_id, needed_factor,
-                                len(audio_np) * needed_factor / sr,
-                                len(audio_np) / sr,
-                            )
-                        except Exception as e:
-                            logger.warning("emergency atempo fail: %s", e)
-                        finally:
-                            raw_wav.unlink(missing_ok=True)
-                            out_wav.unlink(missing_ok=True)
-
-                # Tier 3: hard-trim (last resort)
                 if len(audio_np) > max_samples:
                     fade_samples = min(int(0.05 * sr), max_samples // 4)
-                    lost_ms = (len(audio_np) - max_samples) / sr * 1000
                     audio_np = audio_np[:max_samples].copy()
                     if fade_samples > 0:
                         env = np.linspace(1.0, 0.0, fade_samples, dtype=np.float32)
                         audio_np[-fade_samples:] *= env
-                    logger.warning(
-                        "[dub] segment %s anti-overlap HARD-TRIM: mất %dms tiếng "
-                        "cuối (next seg at %.2fs)",
-                        seg_id, int(lost_ms), next_seg.get("start", 0),
+                    logger.info(
+                        "[dub] segment %s anti-overlap trim: capped to %.2fs "
+                        "(would overlap with next seg at %.2fs)",
+                        seg_id, max_seg_dur, next_seg.get("start", 0),
                     )
         except Exception as e:
             logger.debug("anti-overlap check skipped: %s", e)
