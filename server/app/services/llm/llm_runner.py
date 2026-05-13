@@ -28,6 +28,73 @@ logger = logging.getLogger(__name__)
 
 TIMEOUT_S = 90
 VISION_TIMEOUT_S = 120  # VLM với images chậm hơn
+
+
+# Tên hiển thị cho user (không leak engine code raw)
+_PROVIDER_NAME = {
+    "openai":     "OpenAI",
+    "claude":     "Anthropic Claude",
+    "gemini":     "Google Gemini",
+    "gemini_http": "Google Gemini",
+}
+
+
+def _check_llm_http_response(engine: str, response) -> None:
+    """Map HTTP error status → exception đúng loại.
+
+    - 401/403/402 → FatalAuthError (dubbing_svc abort, không fallback)
+    - 429         → ValueError "quá tải, đổi engine"
+    - 404         → ValueError "model không tồn tại"
+    - 400         → ValueError + log raw body (thường do model id sai
+                    / param không hợp lệ — cần xem body để debug)
+    - 5xx         → ValueError "dịch vụ tạm lỗi"
+    - khác        → ValueError generic
+    LOG raw body (truncated) cho mọi 4xx/5xx để user/admin trace được.
+    """
+    code = response.status_code
+    if code < 400:
+        return
+
+    try:
+        body = response.text[:1000]
+    except Exception:
+        body = ""
+
+    name = _PROVIDER_NAME.get(engine, engine)
+    logger.error("[LLM %s] HTTP %d: %s", engine, code, body)
+
+    # Lazy import để tránh circular
+    from app.services.cloud_translate_svc import FatalAuthError
+
+    if code in (401, 403, 402):
+        raise FatalAuthError(
+            f"API key cho {name} không hợp lệ / hết quota / hết credit. "
+            f"Kiểm tra trong Cài đặt → AI & API keys."
+        )
+    if code == 429:
+        raise ValueError(
+            f"{name} đang quá tải (rate limit). Chờ vài phút hoặc đổi engine khác."
+        )
+    if code == 404:
+        # Thường do model id không tồn tại (vd gpt-5 chưa có với account này)
+        raise ValueError(
+            f"{name}: model không tồn tại hoặc không có quyền truy cập. "
+            f"Thử đổi sang model khác trong Cài đặt nâng cao. "
+            f"Raw: {body[:200]}"
+        )
+    if code == 400:
+        # Thường do response_format / temperature / model param không hợp lệ
+        raise ValueError(
+            f"{name} từ chối request (HTTP 400). Có thể model/param sai. "
+            f"Raw: {body[:300]}"
+        )
+    if code in (500, 502, 503, 504):
+        raise ValueError(
+            f"{name} đang tạm lỗi (HTTP {code}). Thử lại sau ít phút."
+        )
+    raise ValueError(
+        f"{name} trả HTTP {code}. Raw: {body[:200]}"
+    )
 # Pass-0 vẫn chạy với 1 speaker để detect register/genre (cổ trang/modern…)
 # — info này critical cho Pass-1/Pass-2 quyết định vocab/honorifics.
 MIN_SPEAKERS_FOR_ANALYZE = 1
@@ -274,7 +341,7 @@ def _call_gemini_http(prompt: dict, api_key: Optional[str], model: Optional[str]
     with httpx.Client(timeout=TIMEOUT_S) as c:
         r = c.post(url, params={"key": api_key}, json=payload,
                     headers={"Content-Type": "application/json"})
-        r.raise_for_status()
+        _check_llm_http_response("gemini_http", r)
     return r.json()["candidates"][0]["content"]["parts"][0]["text"]
 
 
@@ -296,7 +363,7 @@ def _call_openai_http(prompt: dict, api_key: Optional[str], model: Optional[str]
     with httpx.Client(timeout=TIMEOUT_S) as c:
         r = c.post("https://api.openai.com/v1/chat/completions",
                     json=payload, headers=headers)
-        r.raise_for_status()
+        _check_llm_http_response("openai", r)
     return r.json()["choices"][0]["message"]["content"]
 
 
@@ -320,7 +387,7 @@ def _call_claude_http(prompt: dict, api_key: Optional[str], model: Optional[str]
     with httpx.Client(timeout=TIMEOUT_S) as c:
         r = c.post("https://api.anthropic.com/v1/messages",
                     json=payload, headers=headers)
-        r.raise_for_status()
+        _check_llm_http_response("claude", r)
     return r.json()["content"][0]["text"]
 
 
@@ -360,7 +427,7 @@ def _call_gemini_vision(prompt_text: str, frame_paths: list,
     with httpx.Client(timeout=VISION_TIMEOUT_S) as c:
         r = c.post(url, params={"key": api_key}, json=payload,
                     headers={"Content-Type": "application/json"})
-        r.raise_for_status()
+        _check_llm_http_response("gemini_http", r)
     return r.json()["candidates"][0]["content"]["parts"][0]["text"]
 
 
@@ -390,7 +457,7 @@ def _call_openai_vision(prompt_text: str, frame_paths: list,
     with httpx.Client(timeout=VISION_TIMEOUT_S) as c:
         r = c.post("https://api.openai.com/v1/chat/completions",
                     json=payload, headers=headers)
-        r.raise_for_status()
+        _check_llm_http_response("openai", r)
     return r.json()["choices"][0]["message"]["content"]
 
 
@@ -425,5 +492,5 @@ def _call_claude_vision(prompt_text: str, frame_paths: list,
     with httpx.Client(timeout=VISION_TIMEOUT_S) as c:
         r = c.post("https://api.anthropic.com/v1/messages",
                     json=payload, headers=headers)
-        r.raise_for_status()
+        _check_llm_http_response("claude", r)
     return r.json()["content"][0]["text"]
