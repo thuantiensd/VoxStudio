@@ -760,19 +760,25 @@ def translate_texts(
                                 glossary_block=glossary_block or None)
             else:
                 translated = fn(sub, target, source, api_key)
-        except httpx.RequestError:
+        except httpx.RequestError as e:
             raise ValueError(
-                f"Không kết nối được dịch vụ {PROVIDER_DISPLAY.get(engine, engine)}. "
-                f"Kiểm tra kết nối mạng và thử lại."
+                f"Không kết nối được dịch vụ {PROVIDER_DISPLAY.get(engine, engine)} "
+                f"({type(e).__name__}: {e}). Kiểm tra kết nối mạng và thử lại."
             )
         except ValueError:
+            # ValueError là loại lỗi đã có message user-friendly (từ
+            # _check_llm_http_response, FatalAuthError, run_parallel_batches…)
+            # → giữ nguyên, không bọc lại.
             raise
-        except Exception:
+        except Exception as e:
+            # Lỗi không lường trước (KeyError JSON, JSONDecodeError, TimeoutError…)
+            # → log full traceback + surface type+message lên user thay vì che
+            # bằng generic "đang gặp sự cố" (khiến debug bất khả).
             logger.exception("Engine %s failed", engine)
             raise ValueError(
-                f"Dịch vụ {PROVIDER_DISPLAY.get(engine, engine)} đang gặp sự cố. "
-                f"Vui lòng thử lại hoặc đổi sang engine khác."
-            )
+                f"{PROVIDER_DISPLAY.get(engine, engine)} lỗi không lường trước: "
+                f"{type(e).__name__}: {e}. Xem log server để biết chi tiết."
+            ) from e
 
     # Post-process glossary cho NON-LLM engines (LLM đã tự áp dụng qua prompt)
     if glossary and engine in ("google_free", "google_cloud", "deepl"):
