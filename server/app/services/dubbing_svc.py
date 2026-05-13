@@ -2178,19 +2178,24 @@ def translate_project(
     texts = [seg["original_text"] for seg in project["segments"]]
     logger.info("Translating %d segs via %s…", len(texts), eng)
 
-    # Engine fallback chain: nếu primary fail (quota/network/auth) → tự thử
-    # engine khác. Đảm bảo pipeline KHÔNG fail vì 1 engine duy nhất.
-    # Order: user_choice → các free engine sau (google_free luôn cuối, không cần key).
+    # Engine fallback chain — KHI primary fail (quota/network) tự thử engine
+    # khác để pipeline không chết hoàn toàn. Nguyên tắc thiết kế:
+    #
+    # 1) Nếu user chọn LLM (gemini/openai/claude) → KHÔNG silent fallback sang
+    #    google_free. Google Translate ra output kiểu "Bạn/Tôi" robot —
+    #    biến quality cliff thành ảo giác user nghĩ LLM đang work.
+    # 2) Chỉ add vào chain engine có ĐÚNG key (không guess từ api_key chéo).
+    # 3) Auth error → đã abort ngay ở FatalAuthError check bên dưới.
+    eng_is_llm = eng in ("gemini", "openai", "claude")
     fallback_chain = [eng]
-    for fallback_eng in ("gemini", "openai", "google_cloud", "google_free"):
-        if fallback_eng != eng and fallback_eng not in fallback_chain:
-            # Chỉ thêm vào chain nếu có key (gemini/openai/google_cloud cần BYOK)
-            # — google_free luôn available
-            if fallback_eng == "google_free":
-                fallback_chain.append(fallback_eng)
-            elif fallback_eng == "gemini" and (api_key or _has_env_gemini_key()):
-                fallback_chain.append(fallback_eng)
-            # OpenAI/Cloud không có key trong server → skip silently
+    if not eng_is_llm:
+        # Non-LLM (google_free / google_cloud / deepl) → có thể fallback chéo
+        for fallback_eng in ("google_cloud", "google_free"):
+            if fallback_eng != eng and fallback_eng not in fallback_chain:
+                if fallback_eng == "google_free":
+                    fallback_chain.append(fallback_eng)
+    # LLM engine → KHÔNG add google_free fallback. User chọn LLM thì phải
+    # ra LLM quality hoặc thấy error rõ để fix key/quota.
 
     # Build segments_meta đầy đủ + speaker_genders cho mọi LLM engine
     # để OpenAI/Claude có rich prompt giống Gemini (genre + pronoun + budget).
@@ -2212,7 +2217,8 @@ def translate_project(
         project["entity_registry"] = entity_registry
 
     translated: list[str] = []
-    last_error: Exception | None = None
+    primary_error: Exception | None = None  # error của engine USER CHỌN
+    last_error: Exception | None = None     # error của attempt gần nhất
     used_engine = eng
     for idx, try_eng in enumerate(fallback_chain):
         try:
@@ -2234,9 +2240,11 @@ def translate_project(
                 )
             used_engine = try_eng
             if idx > 0:
+                # Log primary_error (engine user chọn), không phải last_error
+                # (có thể là error của engine intermediate khác)
                 logger.warning(
-                    "Translate fallback %s → %s thành công (primary fail: %s)",
-                    eng, try_eng, last_error,
+                    "Translate fallback %s → %s thành công (primary [%s] fail: %s)",
+                    eng, try_eng, eng, primary_error,
                 )
             break
         except cloud_translate_svc.FatalAuthError as e:
@@ -2251,13 +2259,24 @@ def translate_project(
             ) from e
         except Exception as e:
             last_error = e
+            if idx == 0:
+                primary_error = e  # save engine USER chọn's lỗi
             logger.warning("Engine %s failed: %s", try_eng, e)
             translated = []
             continue
 
     if not translated:
+        # Khi user chọn LLM mà tất cả fallback (chỉ chính nó) fail → message
+        # tập trung vào primary_error (= lỗi engine user chọn), không nhồi
+        # lỗi gemini "thiếu key" gây hiểu nhầm.
+        err_msg = primary_error or last_error
+        if eng_is_llm:
+            raise ValueError(
+                f"❌ {eng}: {err_msg}\n\n"
+                f"Vào Cài đặt → AI & API keys kiểm tra key {eng} hoặc đổi sang engine khác.",
+            )
         raise ValueError(
-            f"Mọi engine dịch đều fail. Last error: {last_error}. "
+            f"Mọi engine dịch đều fail. Last error: {err_msg}. "
             f"Đã thử: {fallback_chain}",
         )
     if used_engine != eng:
