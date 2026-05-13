@@ -177,6 +177,24 @@ def test_provider_key(
                     return False, "Key Gemini không hợp lệ"
                 if r.status_code == 404:
                     return False, f"Model Gemini {model} không tồn tại / chưa có quyền"
+                # 400 thường là Google catch-all — có thể là key sai HOẶC model
+                # không có quyền cho account này. Phân biệt bằng cách test
+                # list-models: nếu list OK → key OK, model không có quyền.
+                if r.status_code == 400:
+                    fallback_body = r.text[:200]
+                    list_url = (
+                        f"https://generativelanguage.googleapis.com/v1beta/"
+                        f"models?key={api_key}"
+                    )
+                    with httpx.Client(timeout=10) as c2:
+                        r2 = c2.get(list_url)
+                    if r2.status_code == 200:
+                        return False, (
+                            f"Key Gemini hợp lệ NHƯNG model {model} không khả dụng "
+                            f"cho account này. Thử đổi sang gemini-2.5-flash hoặc "
+                            f"gemini-2.0-flash (free tier). Raw: {fallback_body}"
+                        )
+                    return False, f"Key Gemini không hợp lệ. Raw: {fallback_body}"
                 return False, f"Gemini trả {r.status_code}: {r.text[:200]}"
             # Không có model → list models (key check)
             url = f"https://generativelanguage.googleapis.com/v1beta/models?key={api_key}"
