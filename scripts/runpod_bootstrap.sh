@@ -154,15 +154,52 @@ export TRANSFORMERS_CACHE="$HF_DIR"
 if [ -n "$HF_TOKEN" ]; then export HF_TOKEN="$HF_TOKEN"; fi
 
 if [ ! -f "$MODELS_SENTINEL" ]; then
-    echo "→ Pre-warming HF models (10-15 phút lần đầu, lưu vào Network Volume)..."
+    echo "→ Pre-warming HF models (15-20 phút lần đầu, lưu Network Volume forever)..."
     python -c "
 from huggingface_hub import snapshot_download
 import os
 token = os.environ.get('HF_TOKEN')
-snapshot_download('openai/whisper-large-v3-turbo', token=token)
-snapshot_download('k2-fsa/OmniVoice', token=token)
-print('✓ Models cached to', os.environ.get('HF_HOME'))
+
+# STT + TTS chính (cần auth HF token cho pyannote)
+models = [
+    'openai/whisper-large-v3-turbo',   # ~3GB — STT
+    'k2-fsa/OmniVoice',                 # ~8GB — TTS premium
+    'pyannote/speaker-diarization-3.1', # ~50MB — diarization
+    'pyannote/segmentation-3.0',        # ~5MB — required by diarization-3.1
+    'pyannote/embedding',               # ~17MB — speaker embedding
+    'pyannote/wespeaker-voxceleb-resnet34-LM',  # ~25MB — used by 3.1
+]
+for repo in models:
+    try:
+        print(f'→ {repo}...')
+        snapshot_download(repo, token=token)
+        print(f'  ✓ {repo} cached')
+    except Exception as e:
+        print(f'  ⚠ {repo} fail: {e} (sẽ retry khi dùng lần đầu)')
+print('✓ All HF models cached to', os.environ.get('HF_HOME'))
 " && touch "$MODELS_SENTINEL"
+
+    # Demucs (vocal separator) + Silero VAD — tự pull qua torch.hub khi
+    # gọi lần đầu. Pre-warm bằng cách trigger 1 lần với dummy audio.
+    echo "→ Pre-warming Demucs + Silero VAD (~2GB, 3-5 phút)..."
+    python -c "
+try:
+    import demucs.pretrained
+    demucs.pretrained.get_model('htdemucs')
+    print('  ✓ Demucs htdemucs cached')
+except Exception as e:
+    print(f'  ⚠ Demucs fail: {e} (sẽ retry khi dùng lần đầu)')
+
+try:
+    import torch
+    torch.hub.load(
+        repo_or_dir='snakers4/silero-vad',
+        model='silero_vad', force_reload=False, trust_repo=True,
+    )
+    print('  ✓ Silero VAD cached')
+except Exception as e:
+    print(f'  ⚠ Silero VAD fail: {e} (sẽ retry khi dùng lần đầu)')
+" || echo "  ⚠ Some background models failed — sẽ tự load khi dùng"
 else
     echo "→ Models OK (sentinel exists)."
 fi
