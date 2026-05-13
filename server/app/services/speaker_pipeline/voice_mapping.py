@@ -82,22 +82,32 @@ def build_speaker_voice_map(
             g = genders.get(spk, "unknown")
             if g not in ("male", "female"):
                 continue
-            # Confidence threshold gate — confidence thấp → KHÔNG strict match
-            spk_conf = confs.get(spk, 1.0)  # default 1.0 nếu thiếu (backward compat)
-            if spk_conf < confidence_threshold:
-                logger.info(
-                    "Speaker %s gender=%s conf=%.2f < %.2f → skip strict match (will cycle)",
-                    spk, g, spk_conf, confidence_threshold,
-                )
-                continue
-            # Tìm slot match gender, chưa dùng, slot value non-empty
+            # Confidence cao → strict match. Confidence thấp → SOFT match
+            # (vẫn ưu tiên slot match gender, KHÔNG cycle về slot 0 mặc định —
+            # vì cycle hay làm female speaker đọc bằng giọng nam).
+            spk_conf = confs.get(spk, 1.0)
+            is_low_conf = spk_conf < confidence_threshold
+
+            matched = False
             for i, sg in enumerate(slot_genders):
                 if i in used_slots or sg != g:
                     continue
                 if i < n_slots and voice_slots[i]:
                     result[spk] = voice_slots[i]
                     used_slots.add(i)
+                    matched = True
+                    if is_low_conf:
+                        logger.info(
+                            "Speaker %s gender=%s conf=%.2f < %.2f LOW conf — vẫn dùng "
+                            "slot gender-match %d (avoid male voice for female speaker)",
+                            spk, g, spk_conf, confidence_threshold, i,
+                        )
                     break
+            if not matched and is_low_conf:
+                logger.info(
+                    "Speaker %s gender=%s conf=%.2f thấp + không có slot match → cycle",
+                    spk, g, spk_conf,
+                )
 
     # Pass 3: speaker còn sót → ưu tiên slot CHƯA DÙNG, sau đó cycle.
     for i, spk in enumerate(speakers):

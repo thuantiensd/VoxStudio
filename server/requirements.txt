@@ -11,7 +11,7 @@ scipy
 ffmpeg-python
 edge-tts
 bitsandbytes
-pyannote.audio
+pyannote.audio==3.3.2  # Pin: 4.x rewrite có bug AudioDecoder với torchaudio 2.x → diarization fail → multi-voice không hoạt động
 pedalboard
 pyloudnorm
 resemblyzer
