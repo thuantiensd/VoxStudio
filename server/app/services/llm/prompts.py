@@ -30,6 +30,8 @@ import json
 import re
 from typing import Optional
 
+from .few_shot_examples import build_few_shot_block
+
 
 # ═══════════════════════════════════════════════════════════════
 # Utilities
@@ -1058,6 +1060,14 @@ def build_translator_prompt(
     content_type = (speaker_relationships or {}).get("content_type") if speaker_relationships else ""
     content_profile = _content_type_profile_vn(content_type) if is_vn else ""
 
+    # Few-shot examples library — pattern matching > rule-only học cho LLM.
+    # Chỉ inject khi target = VN (library hiện chỉ có cặp src→vi).
+    few_shot_block = build_few_shot_block(
+        genre=film_genre,
+        content_type=content_type,
+        target_lang=target_lang,
+    ) if is_vn else ""
+
     # Auto-detect classical register từ register field hoặc scan source text.
     # Khi True → Pass-1 chỉ inject classical block (không show modern) để LLM
     # không bị phân vân giữa 2 register.
@@ -1428,7 +1438,7 @@ hoặc từ ngắn tương đương — TUYỆT ĐỐI KHÔNG để rỗng.
      đã render — nếu cùng source char sequence (vd 心眉) mà có 2+ Việt
      name → CHỌN MỘT (cách đầu tiên) → SỬA TẤT CẢ về một spelling.
    • Áp dụng cho cả tên riêng lẫn vocative ("Tiểu Bảo" / "Tiểu Bão" → chọn 1).
-{extra_block}{context_section}
+{few_shot_block}{extra_block}{context_section}
 OUTPUT JSON DUY NHẤT (không markdown):
 {{
   "translations": [
