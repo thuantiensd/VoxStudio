@@ -360,11 +360,40 @@ def _translate_3pass(engine: str, texts: list[str], target: str, source: str,
     logger.info("%s: %d segments → adaptive batch_size=%d",
                  engine, len(segments_meta), batch_size)
 
-    # Task 5 v2: batch cache theo content hash (engine + model + target + texts)
-    # Resume khi pipeline fail giữa chừng — chỉ retry batch chưa có cache.
+    # Batch cache — phục vụ DUY NHẤT cho resume khi pipeline crash giữa chừng.
+    # Scope: 1 thư mục riêng cho mỗi (corpus + LLM code version) → khi user
+    # re-dub project khác / LLM prompt đổi → cache miss tự nhiên, không bị
+    # ăn output cũ. Pipeline success → xoá toàn bộ scope ở cuối hàm.
     import hashlib as _hl, json as _json, tempfile as _tf, os as _os
-    cache_root = _os.path.join(_tf.gettempdir(), "voxstudio_batch_cache")
-    _os.makedirs(cache_root, exist_ok=True)
+    import shutil as _shutil
+
+    # 1) Corpus fingerprint: hash toàn bộ source text của video này.
+    #    Cùng video → cùng corpus_fp. Khác video → khác fp.
+    _corpus_key = "\n".join(
+        (s.get("original_text") or "").strip() for s in segments_meta
+    )
+    _corpus_fp = _hl.sha256(_corpus_key.encode("utf-8")).hexdigest()[:12]
+
+    # 2) LLM code fingerprint: hash các file có ảnh hưởng output LLM.
+    #    Thay đổi prompt / few-shot / runner → fp đổi → cache auto-invalidate.
+    _llm_dir = _os.path.dirname(__file__) + "/llm"
+    _code_h = _hl.sha256()
+    for _fn in ("prompts.py", "few_shot_examples.py", "llm_runner.py"):
+        try:
+            with open(_os.path.join(_llm_dir, _fn), "rb") as _f:
+                _code_h.update(_f.read())
+        except FileNotFoundError:
+            pass
+    _code_fp = _code_h.hexdigest()[:8]
+
+    _scope_dir = _os.path.join(
+        _tf.gettempdir(), "voxstudio_batch_cache",
+        f"{_corpus_fp}_{_code_fp}",
+    )
+    _os.makedirs(_scope_dir, exist_ok=True)
+    logger.info("%s cache scope: %s/%s (corpus=%s, code=%s)",
+                engine, _os.path.basename(_os.path.dirname(_scope_dir)),
+                _os.path.basename(_scope_dir), _corpus_fp, _code_fp)
 
     def _batch_cache_path(batch: list[dict]) -> str:
         key = _json.dumps({
@@ -375,7 +404,7 @@ def _translate_3pass(engine: str, texts: list[str], target: str, source: str,
             "texts": [s.get("original_text", "") for s in batch],
         }, ensure_ascii=False, sort_keys=True)
         h = _hl.sha256(key.encode("utf-8")).hexdigest()[:16]
-        return _os.path.join(cache_root, f"batch_{h}.json")
+        return _os.path.join(_scope_dir, f"batch_{h}.json")
 
     def _validate_batch_output(result: list[str], batch: list[dict]) -> tuple[bool, str]:
         """Task 4: validate output. Trả (ok, reason).
@@ -580,10 +609,19 @@ def _translate_3pass(engine: str, texts: list[str], target: str, source: str,
             process_fn=_process_batch_with_retry,
         )
     except Exception as e:
-        logger.error("%s parallel batch fail: %s", engine, e)
+        # FAIL → giữ cache để retry resume nhanh.
+        logger.error("%s parallel batch fail: %s — keeping cache for resume",
+                     engine, e)
         raise ValueError(f"{engine} lỗi: {e}") from e
 
-    # parallel là list[str] cùng length segments_meta (None khi fail)
+    # SUCCESS → cache hoàn thành sứ mệnh resume, xoá scope để lần dịch sau
+    # cùng video chắc chắn gọi LLM tươi (user có thể đã đổi model / settings).
+    try:
+        _shutil.rmtree(_scope_dir, ignore_errors=True)
+        logger.info("%s cache cleanup OK: %s", engine, _os.path.basename(_scope_dir))
+    except Exception as e:
+        logger.debug("%s cache cleanup skip: %s", engine, e)
+
     return [t or "" for t in parallel]
 
 
