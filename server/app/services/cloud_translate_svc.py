@@ -360,13 +360,67 @@ def _translate_3pass(engine: str, texts: list[str], target: str, source: str,
     logger.info("%s: %d segments → adaptive batch_size=%d",
                  engine, len(segments_meta), batch_size)
 
+    # Task 5 v2: batch cache theo content hash (engine + model + target + texts)
+    # Resume khi pipeline fail giữa chừng — chỉ retry batch chưa có cache.
+    import hashlib as _hl, json as _json, tempfile as _tf, os as _os
+    cache_root = _os.path.join(_tf.gettempdir(), "voxstudio_batch_cache")
+    _os.makedirs(cache_root, exist_ok=True)
+
+    def _batch_cache_path(batch: list[dict]) -> str:
+        key = _json.dumps({
+            "engine": engine,
+            "model": model or "",
+            "target": target,
+            "source": source,
+            "texts": [s.get("original_text", "") for s in batch],
+        }, ensure_ascii=False, sort_keys=True)
+        h = _hl.sha256(key.encode("utf-8")).hexdigest()[:16]
+        return _os.path.join(cache_root, f"batch_{h}.json")
+
+    def _validate_batch_output(result: list[str], batch: list[dict]) -> tuple[bool, str]:
+        """Task 4: validate output. Trả (ok, reason).
+
+        Pass nếu:
+        - Length match batch
+        - >= 70% có translation non-empty (cho phép vài line truly empty
+          như interjection silent)
+        - Không quá nhiều pinyin token (LLM dịch lười)
+        """
+        if not isinstance(result, list) or len(result) != len(batch):
+            return False, f"length mismatch: got {len(result) if isinstance(result, list) else type(result)}, want {len(batch)}"
+        non_empty = sum(1 for t in result if t and t.strip())
+        if non_empty < max(1, int(len(batch) * 0.7)):
+            return False, f"only {non_empty}/{len(batch)} non-empty (need >= 70%)"
+        # Pinyin heuristic: đếm bigram pinyin (2 caps cạnh nhau)
+        import re as _re_v
+        pinyin_hits = 0
+        for t in result:
+            if not t:
+                continue
+            pinyin_hits += len(_re_v.findall(r"\b[A-Z][a-z]{1,7}\s+[A-Z][a-z]{1,7}\b", t))
+        if pinyin_hits > len(batch) * 0.5:
+            return False, f"too much pinyin ({pinyin_hits} bigrams in {len(batch)} lines)"
+        return True, "ok"
+
     def _process_batch(batch_idx: int, batch: list[dict]) -> list[str]:
         """Return list[str] cùng length batch — translated text per seg.
 
-        Task 2 v2: thêm context_before = 10 line ngay trước batch hiện tại
-        (lấy original_text từ segments_meta). LLM thấy continuity → giữ
-        pronoun + tone nhất quán cross-batch.
+        Task 2 v2: context_before = 10 lines trước (continuity).
+        Task 5 v2: cache hit → skip LLM call.
+        Task 4 v2: validation + retry up to 2 lần nếu output bad.
         """
+        # Cache check
+        cpath = _batch_cache_path(batch)
+        try:
+            if _os.path.exists(cpath):
+                with open(cpath, "r", encoding="utf-8") as f:
+                    cached = _json.load(f)
+                if isinstance(cached, list) and len(cached) == len(batch):
+                    logger.info("%s batch %d: cache HIT (%s) — skip LLM",
+                                engine, batch_idx, _os.path.basename(cpath))
+                    return cached
+        except Exception as e:
+            logger.debug("Cache read fail batch %d: %s", batch_idx, e)
         # Build context_before từ 10 line trước batch
         context_before = None
         if batch and batch_idx > 0:
@@ -404,10 +458,22 @@ def _translate_3pass(engine: str, texts: list[str], target: str, source: str,
             "gemini-2.5-pro",
         }
         skip_editor = (model or "").lower() in flagship_models
+
+        def _save_cache(result: list[str]) -> None:
+            """Cache batch output. Only cache nếu ≥1 non-empty translation."""
+            try:
+                if any(t and t.strip() for t in result):
+                    with open(cpath, "w", encoding="utf-8") as f:
+                        _json.dump(result, f, ensure_ascii=False)
+            except Exception as e:
+                logger.debug("Cache write fail batch %d: %s", batch_idx, e)
+
         if skip_editor:
             logger.info("%s flagship (%s) → skip Editor pass (Pass-1 đã đủ chất lượng)",
                         engine, model)
-            return [p.get("translated_text", "") for p in literal]
+            out = [p.get("translated_text", "") for p in literal]
+            _save_cache(out)
+            return out
 
         try:
             items = []
@@ -432,12 +498,54 @@ def _translate_3pass(engine: str, texts: list[str], target: str, source: str,
                     polished[i] = p
         except Exception as e:
             logger.warning("%s Pass-2 fail batch %d: %s — dùng literal", engine, batch_idx, e)
-        return [p.get("translated_text", "") for p in polished]
+        out = [p.get("translated_text", "") for p in polished]
+        _save_cache(out)
+        return out
+
+    def _process_batch_with_retry(batch_idx: int, batch: list[dict]) -> list[str]:
+        """Task 4: retry batch up to 2 lần nếu validation fail.
+
+        Cache hits → no retry needed (cache check trong _process_batch đã
+        skip LLM khi có result cũ). Nếu LLM call mới ra output bad →
+        retry. Sau 2 retry fail → giữ result tốt nhất (literal fallback).
+        """
+        last_result: list[str] = []
+        for attempt in range(3):  # 1 try + 2 retry
+            try:
+                result = _process_batch(batch_idx, batch)
+            except Exception as e:
+                logger.warning("%s batch %d attempt %d crashed: %s",
+                               engine, batch_idx, attempt + 1, e)
+                if attempt == 2:
+                    raise
+                continue
+            ok, reason = _validate_batch_output(result, batch)
+            if ok:
+                if attempt > 0:
+                    logger.info("%s batch %d: validated OK at retry %d",
+                                engine, batch_idx, attempt)
+                return result
+            logger.warning(
+                "%s batch %d attempt %d validation fail: %s — retry",
+                engine, batch_idx, attempt + 1, reason,
+            )
+            last_result = result
+            # Xoá cache để retry không dùng kết quả bad
+            try:
+                cpath = _batch_cache_path(batch)
+                if _os.path.exists(cpath):
+                    _os.remove(cpath)
+            except Exception:
+                pass
+        # Sau 2 retry vẫn fail → return result cuối cùng
+        logger.error("%s batch %d: ALL 3 attempts failed validation — using last result",
+                     engine, batch_idx)
+        return last_result
 
     try:
         parallel = run_parallel_batches(
             items=segments_meta, batch_size=batch_size, engine=engine,
-            process_fn=_process_batch,
+            process_fn=_process_batch_with_retry,
         )
     except Exception as e:
         logger.error("%s parallel batch fail: %s", engine, e)
