@@ -361,11 +361,36 @@ def _translate_3pass(engine: str, texts: list[str], target: str, source: str,
                  engine, len(segments_meta), batch_size)
 
     def _process_batch(batch_idx: int, batch: list[dict]) -> list[str]:
-        """Return list[str] cùng length batch — translated text per seg."""
+        """Return list[str] cùng length batch — translated text per seg.
+
+        Task 2 v2: thêm context_before = 10 line ngay trước batch hiện tại
+        (lấy original_text từ segments_meta). LLM thấy continuity → giữ
+        pronoun + tone nhất quán cross-batch.
+        """
+        # Build context_before từ 10 line trước batch
+        context_before = None
+        if batch and batch_idx > 0:
+            first_idx = batch[0].get("index", 0)
+            ctx_segs = [
+                s for s in segments_meta
+                if first_idx - 10 <= s.get("index", -1) < first_idx
+                and (s.get("original_text") or "").strip()
+            ]
+            if ctx_segs:
+                context_before = [
+                    {
+                        "index": s["index"] + 1,
+                        "original": (s.get("original_text") or "").strip(),
+                        "translated": (s.get("translated_text") or "").strip() or "—",
+                    }
+                    for s in ctx_segs[-10:]
+                ]
+
         literal = run_translate(
             engine=engine, segments=batch,
             target_lang=target, source_lang=source,
             speaker_relationships=relationships,
+            context_before=context_before,
             topic_hint=topic_hint, glossary_block=glossary_block,
             film_genre=film_genre, api_key=api_key, model=model,
         )
