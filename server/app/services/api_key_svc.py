@@ -190,7 +190,23 @@ def test_provider_key(
 
         if provider == "openai":
             if model:
-                # Test trực tiếp model với chat completion 1 token
+                # GPT-5 / o-series đổi param: dùng max_completion_tokens thay
+                # max_tokens, KHÔNG cho temperature ≠ 1 (force default).
+                m_low = model.lower()
+                uses_new_api = (
+                    m_low.startswith("gpt-5")
+                    or m_low.startswith("o1")
+                    or m_low.startswith("o3")
+                    or m_low.startswith("o4")
+                )
+                payload: dict = {
+                    "model": model,
+                    "messages": [{"role": "user", "content": "hi"}],
+                }
+                if uses_new_api:
+                    payload["max_completion_tokens"] = 1
+                else:
+                    payload["max_tokens"] = 1
                 with httpx.Client(timeout=15) as c:
                     r = c.post(
                         "https://api.openai.com/v1/chat/completions",
@@ -198,11 +214,7 @@ def test_provider_key(
                             "Authorization": f"Bearer {api_key}",
                             "Content-Type": "application/json",
                         },
-                        json={
-                            "model": model,
-                            "messages": [{"role": "user", "content": "hi"}],
-                            "max_tokens": 1,
-                        },
+                        json=payload,
                     )
                 if r.status_code == 200:
                     return True, f"Key OpenAI hợp lệ + model {model} dùng được"

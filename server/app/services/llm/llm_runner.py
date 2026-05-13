@@ -350,15 +350,26 @@ def _call_openai_http(prompt: dict, api_key: Optional[str], model: Optional[str]
         raise ValueError("api_key required cho openai")
     import httpx
     m = model or "gpt-5"
-    payload = {
+    m_low = m.lower()
+    # GPT-5 / o-series: API mới — KHÔNG nhận temperature ≠ 1, dùng
+    # max_completion_tokens thay max_tokens. Older models giữ schema cũ.
+    uses_new_api = (
+        m_low.startswith("gpt-5")
+        or m_low.startswith("o1")
+        or m_low.startswith("o3")
+        or m_low.startswith("o4")
+    )
+    payload: dict = {
         "model": m,
-        "temperature": 0.2,
         "response_format": {"type": "json_object"},
         "messages": [
             {"role": "system", "content": prompt["system"]},
             {"role": "user", "content": prompt["user"]},
         ],
     }
+    if not uses_new_api:
+        # Older models: thấp temperature cho dịch chính xác hơn
+        payload["temperature"] = 0.2
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
     with httpx.Client(timeout=TIMEOUT_S) as c:
         r = c.post("https://api.openai.com/v1/chat/completions",
@@ -433,11 +444,18 @@ def _call_gemini_vision(prompt_text: str, frame_paths: list,
 
 def _call_openai_vision(prompt_text: str, frame_paths: list,
                          api_key: Optional[str], model: Optional[str]) -> str:
-    """OpenAI vision (gpt-4o family) — chat.completions với image_url base64."""
+    """OpenAI vision (gpt-4o / gpt-5) — chat.completions với image_url base64."""
     if not api_key:
         raise ValueError("api_key required cho openai vision")
     import httpx
     m = model or "gpt-5"
+    m_low = m.lower()
+    uses_new_api = (
+        m_low.startswith("gpt-5")
+        or m_low.startswith("o1")
+        or m_low.startswith("o3")
+        or m_low.startswith("o4")
+    )
 
     content = [{"type": "text", "text": prompt_text}]
     for fp in frame_paths:
@@ -447,12 +465,13 @@ def _call_openai_vision(prompt_text: str, frame_paths: list,
             "image_url": {"url": f"data:{mime};base64,{b64}"},
         })
 
-    payload = {
+    payload: dict = {
         "model": m,
-        "temperature": 0.1,
         "response_format": {"type": "json_object"},
         "messages": [{"role": "user", "content": content}],
     }
+    if not uses_new_api:
+        payload["temperature"] = 0.1
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
     with httpx.Client(timeout=VISION_TIMEOUT_S) as c:
         r = c.post("https://api.openai.com/v1/chat/completions",
