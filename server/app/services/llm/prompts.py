@@ -577,32 +577,35 @@ CẢNH BÁO:
 ❌ "Con" KHÔNG dùng giữa vợ chồng. Cha/mẹ tự xưng "ba/mẹ" (KHÔNG "con").
 ❌ Cha/mẹ gọi con "con" (vocative). Con tự xưng "con", gọi cha mẹ "ba/mẹ".
 {genre_hint}
-🎬 GENRE AUTO-DETECT (CHAIN-OF-THOUGHT):
+🎬 CONTENT TYPE + GENRE AUTO-DETECT (CHAIN-OF-THOUGHT):
 
-Đọc TOÀN BỘ sample → tìm signals → classify. Output JSON:
-   genre_signals: array các bằng chứng cụ thể (vd "朕 xuất hiện 12 lần",
-                  "宫殿 xuất hiện 8 lần", "tu hành mention nhiều")
-   film_genre_primary: 1 trong 13 thể loại:
-      • romance      — tình cảm yêu đương
-      • drama        — kịch tâm lý / gia đình
-      • comedy       — hài
-      • action       — hành động
-      • thriller     — giật gân
-      • horror       — kinh dị
-      • historical   — cổ trang (KHÔNG võ thuật)
-      • wuxia        — kiếm hiệp / tiên hiệp / võ thuật
-      • scifi        — khoa học viễn tưởng
-      • fantasy      — huyền huyễn / fantasy
-      • documentary  — tài liệu
-      • news         — tin tức
-      • kids         — thiếu nhi
-   film_genre_secondary: optional, nếu phim mix 2 genre rõ (vd "rom-com"
-                        → primary=romance, secondary=comedy). null nếu single.
-   genre_confidence: 0.0-1.0. < 0.5 = không chắc → fallback "drama" sau.
+App dịch ĐA DẠNG VIDEO — không chỉ phim. Phải nhận diện đúng loại
+nội dung để chọn style dịch phù hợp. Đọc sample → output:
+
+content_type — DẠNG VIDEO (chính):
+   • short_drama   — phim ngắn drama (TikTok-style 1-5 min/tập)
+   • movie         — phim dài / phim truyền hình
+   • anime         — hoạt hình Nhật/Trung
+   • vlog          — vlog đời sống, du lịch, ăn uống
+   • news          — bản tin
+   • documentary   — phim tài liệu, narrator
+   • interview     — phỏng vấn / talkshow
+   • tutorial      — hướng dẫn, dạy học
+   • sales         — quảng cáo, bán hàng, live bán hàng
+   • livestream    — livestream gaming/chat
+   • other         — không thuộc loại trên
+
+genre_signals: bằng chứng cụ thể (vd "朕 xuất hiện 12 lần", "今日新闻 mention 3x")
+film_genre_primary: 1 trong 13 thể loại (chỉ áp dụng cho short_drama/movie/anime):
+   romance / drama / comedy / action / thriller / horror /
+   historical / wuxia / scifi / fantasy / documentary / news / kids
+film_genre_secondary: optional. null nếu single-genre.
+genre_confidence: 0.0-1.0. < 0.5 → fallback an toàn.
 
 OUTPUT JSON duy nhất:
 {{
   "scene_context": "Mô tả ngắn bối cảnh + quan hệ chính của các speakers",
+  "content_type": "short_drama",
   "register": "modern/cổ trang/business/family/news/documentary",
   "genre_signals": ["..."],
   "film_genre_primary": "drama",
@@ -692,15 +695,92 @@ def parse_speaker_analysis(response_text: str) -> dict:
         signals = []
     signals = [str(s).strip()[:120] for s in signals[:8] if s]
 
+    valid_content_types = {
+        "short_drama", "movie", "anime", "vlog", "news", "documentary",
+        "interview", "tutorial", "sales", "livestream", "other",
+    }
+    ct = (parsed.get("content_type") or "").lower().strip()
+    if ct not in valid_content_types:
+        ct = ""
+
     return {
         "scene_context": (parsed.get("scene_context") or "").strip()[:300],
         "register": (parsed.get("register") or "").strip()[:40],
+        "content_type": ct,
         "film_genre_primary": gp,
         "film_genre_secondary": gs,
         "genre_confidence": gc,
         "genre_signals": signals,
         "speakers": speakers,
     }
+
+
+# Content-type profiles — mỗi loại video có style dịch riêng. Lấy nhánh
+# Việt vì user chủ yếu dịch sang VN; có thể mở rộng cho ngôn ngữ khác sau.
+_CONTENT_TYPE_PROFILE_VN: dict[str, str] = {
+    "short_drama": (
+        "📺 PHIM NGẮN DRAMA (TikTok-style): câu ngắn, hợp lồng tiếng. "
+        "Giữ cảm xúc + twist. Tên nhân vật NHẤT QUÁN xuyên suốt. "
+        "Tone tự nhiên — đừng dịch máy từng chữ."
+    ),
+    "movie": (
+        "🎬 PHIM DÀI: dịch theo cảm xúc nhân vật, văn nói tự nhiên. "
+        "Quan hệ nhân vật phức tạp — cẩn thận pronoun + xưng hô. "
+        "Cho phép câu dài hơn short_drama (audience đọc kỹ hơn)."
+    ),
+    "anime": (
+        "🎌 HOẠT HÌNH NHẬT/TRUNG: tone biểu cảm cao, hay có thán từ "
+        "(『うわぁ』『なるほど』『え?!』). Giữ vibe energetic — dịch "
+        "phải có nhịp + cảm thán tương đương Việt ('Hả?!', 'Tuyệt vời!', "
+        "'Á!'). Tên nhân vật giữ Romaji (Naruto, Sakura) — KHÔNG Hán-Việt."
+    ),
+    "vlog": (
+        "🎥 VLOG ĐỜI SỐNG: tone gần gũi, conversational. Như đang nói "
+        "chuyện với bạn bè. Tránh tiểu từ kịch tính ('lắm đấy', 'cơ', "
+        "'thế'). Dùng từ phổ thông: 'mình', 'bạn', 'mọi người'. "
+        "Câu dạng: 'Hôm nay mình sẽ dẫn mọi người đi…', 'Cùng xem nhé…'"
+    ),
+    "news": (
+        "📰 TIN TỨC: formal register. Không thêm cảm xúc, không slang. "
+        "Giữ CHÍNH XÁC số liệu / địa danh / chức danh / ngày tháng. "
+        "Câu chủ-vị-bổ rõ ràng. Không tiểu từ ('nhỉ/thế/à'). "
+        "Vocab chuẩn báo chí: 'theo nguồn tin', 'được biết', 'cho hay'."
+    ),
+    "documentary": (
+        "🎞️ TÀI LIỆU: tone narrator trung tính, trang trọng vừa phải. "
+        "Dùng 'chúng ta/quý vị' cho khán giả. Câu dài có cấu trúc rõ. "
+        "Giữ thuật ngữ chính xác. Không tiểu từ thân mật."
+    ),
+    "interview": (
+        "🎤 PHỎNG VẤN: hai bên hỏi-đáp tự nhiên. Pronoun phụ thuộc tuổi "
+        "+ chức danh khách mời (host trẻ với khách lớn tuổi → 'em' với "
+        "'anh/chị/chú/bác'). Câu của khách thường dài hơn host."
+    ),
+    "tutorial": (
+        "📖 HƯỚNG DẪN: rõ thao tác, ngắn gọn, mệnh lệnh nhẹ. Dùng 'bạn' "
+        "hoặc bỏ chủ ngữ. VD: 'Nhấn vào nút ở góc trên', 'Mở menu → "
+        "chọn…'. Không cần cảm xúc, không cần văn vẻ. Số bước rõ."
+    ),
+    "sales": (
+        "🛒 BÁN HÀNG / QUẢNG CÁO: tone marketing — nhiệt tình, persuasive. "
+        "Câu ngắn, có nhấn mạnh ('Cực kỳ tiện', 'Siêu xịn', 'Đáng mua "
+        "lắm!'). Không khô kiểu 'cái này thực sự rất hữu ích' — phải tự "
+        "nhiên như shop livestream / TikTok shop."
+    ),
+    "livestream": (
+        "📡 LIVESTREAM: rất casual, slang hợp với audience trẻ. Cho phép "
+        "interjection ('ờ', 'à', 'thật ạ?'). Câu vụn, ngắt nhịp tự nhiên "
+        "như đang nói thật. KHÔNG over-edit."
+    ),
+}
+
+
+def _content_type_profile_vn(content_type: Optional[str]) -> str:
+    """Return profile block tiếng Việt theo content_type. Empty nếu không match."""
+    if not content_type:
+        return ""
+    guide = _CONTENT_TYPE_PROFILE_VN.get(content_type.lower().strip())
+    return f"\n📼 LOẠI VIDEO: {guide}\n" if guide else ""
 
 
 def _format_speaker_anchor_block(relationships: dict) -> str:
@@ -953,6 +1033,10 @@ def build_translator_prompt(
     is_vn = _is_vietnamese(target_lang)
     genre_block = _genre_style_guide(film_genre, target_lang)
     lang_notes = "" if is_vn else _target_language_notes(target_lang)
+    # Content type profile: từ speaker_relationships.content_type (Pass-0
+    # detect) — chỉ apply nếu target=VN (FE chưa thiết kế cho ngôn ngữ khác)
+    content_type = (speaker_relationships or {}).get("content_type") if speaker_relationships else ""
+    content_profile = _content_type_profile_vn(content_type) if is_vn else ""
 
     # Auto-detect classical register từ register field hoặc scan source text.
     # Khi True → Pass-1 chỉ inject classical block (không show modern) để LLM
@@ -1085,7 +1169,7 @@ NHIỆM VỤ Pass này:
 4. KHÔNG vượt max_chars
 
 KHÔNG cần lo style cinematic — Editor pass sẽ polish.
-{genre_block}{anchor_block}
+{content_profile}{genre_block}{anchor_block}
 {
    "🏯🏯🏯 REGISTER = CỔ TRANG (auto-detected) — RULE BẮT BUỘC, "
    "KHÔNG ĐƯỢC SLIP VỀ MODERN GIỮA CHỪNG 🏯🏯🏯\\n\\n"
