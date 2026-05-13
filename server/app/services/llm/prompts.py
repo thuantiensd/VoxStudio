@@ -624,6 +624,30 @@ film_genre_primary: 1 trong 13 thể loại (chỉ áp dụng cho short_drama/mo
 film_genre_secondary: optional. null nếu single-genre.
 genre_confidence: 0.0-1.0. < 0.5 → fallback an toàn.
 
+📛 GLOSSARY (BẮT BUỘC — bảng dịch CỐ ĐỊNH cho phim này):
+
+Quét toàn bộ sample và xuất 3 map dịch CHÍNH THỨC. Pass-1 sẽ tra bảng
+này như nguồn duy nhất — mọi line đều phải dùng đúng từ ngữ ở đây.
+
+→ name_map: tên người (TỪNG nhân vật xuất hiện ≥ 1 lần)
+   Format: source → Hán-Việt canonical
+   VD: "叶辰": "Diệp Thần", "秦夏": "Tần Hạ", "小宝": "Tiểu Bảo"
+   ⚠️ Phiên Hán-Việt từng character (KHÔNG pinyin "Ye Chen"). Tên Nhật giữ
+       Romaji ("Sakura"), tên Hàn dùng quy ước tiếng Việt cho tên Hàn.
+
+→ term_map: cụm/danh từ riêng đặc trưng phim (tổ chức, môn phái, tuyệt
+   chiêu, biệt danh, vật phẩm). Chỉ entry NHẤT QUÁN sẽ ảnh hưởng nhiều line.
+   VD: "玄铁剑": "Huyền Thiết Kiếm", "陈氏集团": "Tập đoàn họ Trần"
+   Tối đa 20 entry — chọn cái xuất hiện nhiều / quan trọng nhất.
+
+→ place_map: địa danh (thành phố, vùng, cung điện, môn phái nếu là nơi).
+   VD: "京城": "Kinh thành", "长安": "Trường An", "北京": "Bắc Kinh"
+   Tối đa 15 entry.
+
+⚠️ NGUYÊN TẮC chọn entry: chỉ thêm nếu xuất hiện ≥ 2 lần HOẶC là tên
+nhân vật chính. Đừng nhét những từ dịch máy bình thường (KHÔNG cần
+"老婆" → "em" vì đã xử lý bằng pronoun mapping).
+
 OUTPUT JSON duy nhất:
 {{
   "scene_context": "Mô tả ngắn bối cảnh + quan hệ chính của các speakers",
@@ -633,6 +657,11 @@ OUTPUT JSON duy nhất:
   "film_genre_primary": "drama",
   "film_genre_secondary": null,
   "genre_confidence": 0.85,
+  "glossary": {{
+    "name_map": {{"叶辰": "Diệp Thần", "秦夏": "Tần Hạ"}},
+    "term_map": {{"陈氏集团": "Tập đoàn họ Trần"}},
+    "place_map": {{"京城": "Kinh thành"}}
+  }},
   "speakers": {{
     "SPEAKER_00": {{
       "character_name": "Diệp Thần",
@@ -725,6 +754,33 @@ def parse_speaker_analysis(response_text: str) -> dict:
     if ct not in valid_content_types:
         ct = ""
 
+    # Glossary — name_map / term_map / place_map. Source→canonical strings.
+    # Filter rỗng + cắt độ dài để không bloat prompt downstream.
+    def _clean_glossary_map(m, max_entries: int, max_key: int, max_val: int) -> dict:
+        if not isinstance(m, dict):
+            return {}
+        out: dict[str, str] = {}
+        for k, v in m.items():
+            if not isinstance(k, str) or not isinstance(v, str):
+                continue
+            k = k.strip()[:max_key]
+            v = v.strip()[:max_val]
+            if not k or not v or k == v:
+                continue
+            out[k] = v
+            if len(out) >= max_entries:
+                break
+        return out
+
+    glossary_raw = parsed.get("glossary") or {}
+    if not isinstance(glossary_raw, dict):
+        glossary_raw = {}
+    glossary = {
+        "name_map":  _clean_glossary_map(glossary_raw.get("name_map"),  40, 30, 40),
+        "term_map":  _clean_glossary_map(glossary_raw.get("term_map"),  20, 30, 40),
+        "place_map": _clean_glossary_map(glossary_raw.get("place_map"), 15, 30, 40),
+    }
+
     return {
         "scene_context": (parsed.get("scene_context") or "").strip()[:300],
         "register": (parsed.get("register") or "").strip()[:40],
@@ -733,6 +789,7 @@ def parse_speaker_analysis(response_text: str) -> dict:
         "film_genre_secondary": gs,
         "genre_confidence": gc,
         "genre_signals": signals,
+        "glossary": glossary,
         "speakers": speakers,
     }
 
@@ -845,6 +902,52 @@ def _format_speaker_anchor_block(relationships: dict) -> str:
     lines.append("⚠️ 你 (ngôi 2) → vocative trong addresses. 他/她 (ngôi 3) → third_person_label.")
     lines.append("⚠️ TIN context — xung đột/ly hôn → pronoun có thể lạnh hơn (tôi/cô).")
     lines.append("⚠️ KHÔNG cứng nhắc rule — đọc context để pick phù hợp emotion.")
+    return "\n".join(lines)
+
+
+def _format_glossary_block(relationships: Optional[dict]) -> str:
+    """Format glossary (name/term/place_map) thành bảng tra cứu cho Pass-1.
+
+    Mục tiêu: cấp cho Pass-1 1 NGUỒN DUY NHẤT về cách dịch tên / thuật ngữ /
+    địa danh — để mọi batch không drift giữa cùng 1 phim. Pass-1 PHẢI tra
+    bảng này trước khi tự phiên Hán-Việt.
+
+    Trả "" nếu glossary rỗng (không inject section trống vào prompt).
+    """
+    if not relationships:
+        return ""
+    g = relationships.get("glossary") or {}
+    if not isinstance(g, dict):
+        return ""
+    name_map  = g.get("name_map")  or {}
+    term_map  = g.get("term_map")  or {}
+    place_map = g.get("place_map") or {}
+    if not (name_map or term_map or place_map):
+        return ""
+
+    lines = [
+        "📛 GLOSSARY (BẢNG TRA CỨU CHÍNH THỨC — DÙNG NGUYÊN BẢN, KHÔNG TỰ ĐOÁN):",
+        "",
+        "Pass-0 đã phân tích toàn video và chốt cách dịch dưới đây. Mọi line",
+        "có chứa source bên trái PHẢI render đúng vế Việt bên phải. KHÔNG được",
+        "tự phiên Hán-Việt khác đi (đặc biệt với tên người — sai 1 ký tự là drift).",
+        "",
+    ]
+    if name_map:
+        lines.append("• Tên người (name_map):")
+        for src, vi in name_map.items():
+            lines.append(f'    {src} → "{vi}"')
+    if term_map:
+        lines.append("• Thuật ngữ / danh từ riêng phim (term_map):")
+        for src, vi in term_map.items():
+            lines.append(f'    {src} → "{vi}"')
+    if place_map:
+        lines.append("• Địa danh (place_map):")
+        for src, vi in place_map.items():
+            lines.append(f'    {src} → "{vi}"')
+    lines.append("")
+    lines.append("⚠️ TRƯỚC KHI XUẤT JSON: scan output — mỗi token source trong glossary")
+    lines.append("   đã xuất hiện → kiểm tra render đúng entry chưa. Sai = SỬA NGAY.")
     return "\n".join(lines)
 
 
@@ -1158,11 +1261,16 @@ If only 1-2 lines and context is unclear, default to the warmer/more intimate
 register typical for the genre, not the formal one.
 """
 
+    # Glossary từ Pass-0 (name_map / term_map / place_map). Đây là bảng tra
+    # cứu authoritative — đặt ngang tầm anchor_block (không vùi vào extra).
+    glossary_from_rels = _format_glossary_block(speaker_relationships)
+    glossary_section = ("\n" + glossary_from_rels + "\n") if glossary_from_rels else ""
+
     extra_block = ""
     if topic_hint:
         extra_block += f"\n📌 Topic: {topic_hint}\n"
     if glossary_block:
-        extra_block += f"\n📖 Glossary:\n{glossary_block}\n"
+        extra_block += f"\n📖 Glossary (external):\n{glossary_block}\n"
 
     context_section = ""
     if context_before:
@@ -1199,7 +1307,7 @@ NHIỆM VỤ Pass này:
 4. KHÔNG vượt max_chars
 
 KHÔNG cần lo style cinematic — Editor pass sẽ polish.
-{content_profile}{genre_block}{anchor_block}
+{content_profile}{genre_block}{anchor_block}{glossary_section}
 {
    "🏯🏯🏯 REGISTER = CỔ TRANG (auto-detected) — RULE BẮT BUỘC, "
    "KHÔNG ĐƯỢC SLIP VỀ MODERN GIỮA CHỪNG 🏯🏯🏯\\n\\n"
@@ -1651,6 +1759,11 @@ def build_editor_prompt(
             parts.append(f"Register: {register}")
         scene_block = "\n".join("   " + p for p in parts) + "\n"
 
+    # Glossary cũng inject vào Editor — đảm bảo Pass-2 không drift tên ngay
+    # cả khi Pass-1 đã render đúng. Chỉ áp dụng VN.
+    glossary_from_rels = _format_glossary_block(speaker_relationships) if is_vn else ""
+    glossary_section = ("\n" + glossary_from_rels + "\n") if glossary_from_rels else ""
+
     is_classical = "cổ trang" in register.lower() or "wuxia" in register.lower() \
         or "xianxia" in register.lower() or "historical" in register.lower() \
         or (film_genre or "").lower() in ("historical", "wuxia", "xianxia",
@@ -1701,7 +1814,7 @@ với scene_context. CHO PHÉP đổi pronoun nếu literal sai emotion (ví d�
 vợ chồng đang ly hôn mà literal dùng "anh/em" thân mật → đổi sang "tôi/cô" lạnh).
 {classical_block}
 
-{scene_block}{genre_block}
+{scene_block}{genre_block}{glossary_section}
 🚨🚨🚨 RULE TUYỆT ĐỐI VỀ PRONOUN — KHÔNG ĐƯỢC ĐỔI:
 
 ⚡ NHẤT QUÁN XUYÊN SUỐT: pronoun của MỖI SPEAKER phải GIỐNG NHAU từ đầu
