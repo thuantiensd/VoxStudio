@@ -74,6 +74,109 @@ DEFAULT_EDGE_VOICES_BY_LANG: dict[str, dict[str, str]] = {
 }
 
 
+# ── Entity scan toàn file (Task 1 pipeline v2) ───────────────────────────
+# LLM Pass-0 chỉ đọc 180 lines sample → có thể bỏ sót tên/vocative ở phần
+# giữa video. Hàm này quét TOÀN BỘ original_text bằng regex để xây
+# "name registry" — danh sách tên người + vocative xuất hiện ≥ N lần.
+# Registry inject vào Pass-0 prompt làm authoritative để LLM không drift.
+
+_VOCATIVE_PATTERNS_ZH = (
+    # Cha mẹ
+    "爸", "妈", "爹", "娘", "爸爸", "妈妈", "爹爹", "母亲", "父亲",
+    # Vợ chồng / yêu nhau
+    "老公", "老婆", "亲爱的", "宝贝", "媳妇", "相公", "夫君", "娘子",
+    # Anh chị em
+    "哥", "姐", "弟", "妹", "哥哥", "姐姐",
+    # Cấp bậc
+    "总", "总裁", "老板", "老总", "经理", "主任", "处长",
+    "少爷", "公子", "小姐", "夫人", "先生",
+    # Cổ trang
+    "陛下", "殿下", "皇上", "娘娘", "贵妃", "王爷", "王妃", "公主", "郡主",
+    "大人", "师父", "师傅", "师兄", "师姐", "师妹", "师弟",
+)
+
+
+def _scan_proper_nouns_zh(text: str, min_count: int = 2) -> list[tuple[str, int]]:
+    """Scan tên người Trung Quốc 2-3 char xuất hiện ≥ min_count lần.
+
+    Heuristic:
+    - Tìm sequence 2-3 chữ Hán liên tiếp KHÔNG bị âm vực thường (a/的/了/...)
+    - Phải xuất hiện ≥ 2 lần để loại nhiễu
+    - Whitelist Hán-Việt phổ biến trong text để filter common nouns
+
+    Returns: list[(name, count)] sorted by count desc.
+    """
+    import re as _re_local
+    from collections import Counter
+    # Sliding-window scan: match 2-char Han sequences với overlap
+    # (re.findall không overlap — "陈宇说" sẽ ăn cả "陈宇" → cần manual sliding).
+    han_re = _re_local.compile(r"[一-鿿]")
+    candidates = []
+    chars = [(m.start(), m.group(0)) for m in han_re.finditer(text)]
+    # Tìm runs liên tiếp (vị trí Han chars adjacent)
+    for i in range(len(chars)):
+        # 2-char
+        if i + 1 < len(chars) and chars[i+1][0] == chars[i][0] + 1:
+            candidates.append(chars[i][1] + chars[i+1][1])
+        # 3-char
+        if i + 2 < len(chars) and chars[i+1][0] == chars[i][0] + 1 and chars[i+2][0] == chars[i][0] + 2:
+            candidates.append(chars[i][1] + chars[i+1][1] + chars[i+2][1])
+    common_words = {
+        # Quá phổ biến — bỏ qua để không nhầm là tên
+        "什么", "怎么", "这个", "那个", "我们", "你们", "他们", "她们",
+        "现在", "今天", "明天", "昨天", "之后", "之前", "时候", "事情",
+        "知道", "觉得", "看到", "听到", "想到", "希望", "应该", "可以",
+        "可能", "不是", "已经", "还有", "因为", "所以", "但是", "如果",
+        "不能", "不会", "没有", "一个", "一些", "一直", "一样",
+        "出来", "回来", "过来", "进来", "下来", "上来", "起来",
+        "说话", "说过", "看见", "回去", "过去", "拿来", "放下",
+        "对啊", "好的", "好吧", "真的", "确实", "当然", "只是",
+        "马上", "立刻", "刚才", "刚刚", "随便", "其实",
+        "不行", "怎样", "为啥", "为何", "如何",
+    }
+    counts = Counter(c for c in candidates if c not in common_words)
+    return [(name, n) for name, n in counts.most_common(50) if n >= min_count]
+
+
+def _scan_vocative_zh(text: str, min_count: int = 2) -> list[tuple[str, int]]:
+    """Scan vocative xưng hô phổ biến."""
+    from collections import Counter
+    counts = Counter()
+    for v in _VOCATIVE_PATTERNS_ZH:
+        c = text.count(v)
+        if c >= min_count:
+            counts[v] = c
+    return counts.most_common(20)
+
+
+def build_entity_registry(project: dict) -> dict:
+    """Quét toàn bộ original_text của project → trả registry.
+
+    Returns: {
+        "proper_nouns": [(name, count)],   # Tên người 2-3 char (Trung)
+        "vocatives": [(word, count)],      # Xưng hô lặp lại
+        "source_lang": "...",
+    }
+    """
+    segments = project.get("segments", [])
+    if not segments:
+        return {"proper_nouns": [], "vocatives": [], "source_lang": ""}
+    src = (project.get("source_language") or "").lower()
+    src_input = (project.get("source_language_input") or "").lower()
+    src_lang = src or src_input or "auto"
+
+    full_text = " ".join((s.get("original_text") or "") for s in segments)
+
+    # Chỉ scan cho Trung — Korean/Japanese cần handler riêng (chưa wire)
+    if src_lang in ("zh", "chinese", "auto"):
+        return {
+            "proper_nouns": _scan_proper_nouns_zh(full_text),
+            "vocatives": _scan_vocative_zh(full_text),
+            "source_lang": src_lang,
+        }
+    return {"proper_nouns": [], "vocatives": [], "source_lang": src_lang}
+
+
 # ── Pinyin → Hán-Việt post-fixer ─────────────────────────────────────────
 # LLM (cả flagship) đôi khi vẫn slip pinyin vào output Việt — đặc biệt cho
 # tên Trung trong phim Nhật/Hàn. Bảng này map deterministic 100+ pinyin
@@ -2064,6 +2167,19 @@ def translate_project(
     segments_meta = list(project.get("segments") or [])
     speaker_genders_meta = project.get("speaker_genders") or {}
     film_genre_meta = project.get("film_genre")
+
+    # Task 1 v2: entity scan toàn file → registry inject vào prompt
+    # để LLM giữ name nhất quán + không drift.
+    entity_registry = build_entity_registry(project)
+    if entity_registry["proper_nouns"]:
+        logger.info(
+            "Entity scan: %d proper nouns + %d vocatives (top: %s)",
+            len(entity_registry["proper_nouns"]),
+            len(entity_registry["vocatives"]),
+            [n for n, _ in entity_registry["proper_nouns"][:5]],
+        )
+        # Persist vào project meta → Pass-0/1/2 đều đọc được
+        project["entity_registry"] = entity_registry
 
     translated: list[str] = []
     last_error: Exception | None = None

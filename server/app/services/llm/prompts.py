@@ -431,6 +431,7 @@ def build_speaker_analysis_prompt(
     source_lang: str,
     film_genre: Optional[str] = None,
     visual_context: Optional[dict] = None,
+    entity_registry: Optional[dict] = None,
     max_lines: int = 200,
 ) -> dict:
     """Pass-0: phân tích quan hệ giữa SPEAKER_XX → JSON map + auto-detect genre.
@@ -467,9 +468,28 @@ def build_speaker_analysis_prompt(
     if visual_context:
         visual_block = "\n" + format_visual_context_for_audio_analyze(visual_context) + "\n"
 
+    # Entity registry block — scan toàn file Python code, inject vào prompt
+    # để LLM có anchor name + vocative chính xác (không phụ thuộc sample bias).
+    entity_block = ""
+    if entity_registry and (entity_registry.get("proper_nouns") or entity_registry.get("vocatives")):
+        names = entity_registry.get("proper_nouns", [])[:30]
+        vocs = entity_registry.get("vocatives", [])[:15]
+        parts = ["\n📛 ENTITY REGISTRY (scan TOÀN BỘ source — authoritative):"]
+        if names:
+            parts.append("   Tên người (≥2 lần xuất hiện):")
+            for name, cnt in names:
+                parts.append(f"      • {name} ({cnt}×) → phiên Hán-Việt nhất quán, KHÔNG drift")
+        if vocs:
+            parts.append("   Xưng hô / chức danh:")
+            for v, cnt in vocs:
+                parts.append(f"      • {v} ({cnt}×)")
+        parts.append("⚠️ Các tên trên xuất hiện nhiều — PHẢI có trong character_name của speakers,")
+        parts.append("   spelling Hán-Việt phải nhất quán (cùng source chars → cùng output).")
+        entity_block = "\n".join(parts) + "\n"
+
     system = f"""Bạn là chuyên gia phân tích kịch bản phim. Đọc hội thoại từ {src_name}
 và XÁC ĐỊNH QUAN HỆ giữa các SPEAKER.
-{visual_block}
+{visual_block}{entity_block}
 
 NHIỆM VỤ với MỖI speaker:
 • character_name — TÊN THẬT nếu detect được trong text (KHÔNG phải SPEAKER_XX)

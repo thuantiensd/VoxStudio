@@ -72,10 +72,12 @@ def run_analyze(
     model: Optional[str] = None,
     film_genre: Optional[str] = None,
     visual_context: Optional[dict] = None,
+    entity_registry: Optional[dict] = None,
 ) -> dict:
     """Pass-0: speaker relationship analysis. Skip nếu 1 speaker.
 
     Nếu có visual_context (từ Pass-(-1) VLM) → inject làm ground truth.
+    entity_registry: từ Python scan toàn file → name anchor authoritative.
 
     Returns {} nếu skip/fail (caller phải fallback Pass-1 không anchor).
     """
@@ -88,6 +90,7 @@ def run_analyze(
     prompt = build_speaker_analysis_prompt(
         segments=segments, source_lang=source_lang,
         film_genre=film_genre, visual_context=visual_context,
+        entity_registry=entity_registry,
     )
     try:
         raw = _call_llm(engine, prompt, api_key=api_key, model=model)

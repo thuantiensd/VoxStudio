@@ -299,13 +299,27 @@ def _translate_3pass(engine: str, texts: list[str], target: str, source: str,
             for i, t in enumerate(texts)
         ]
 
-    # Pass-0: speaker analysis + auto-detect genre
+    # Pass-0: speaker analysis + auto-detect genre.
+    # entity_registry (từ Python scan toàn file) inject vào Pass-0 prompt
+    # làm name anchor — tránh LLM bỏ sót tên do sample bias.
+    entity_registry = None
+    try:
+        # segments_meta là từ project["segments"] → có thể tìm registry trong meta
+        if segments_meta and isinstance(segments_meta[0], dict):
+            # Build mini project structure để call build_entity_registry
+            from app.services.dubbing_svc import build_entity_registry
+            mini_project = {"segments": segments_meta, "source_language": source}
+            entity_registry = build_entity_registry(mini_project)
+    except Exception as e:
+        logger.debug("entity_registry build skipped: %s", e)
+
     relationships: dict = {}
     try:
         relationships = run_analyze(
             engine=engine, segments=segments_meta, source_lang=source,
             api_key=api_key, model=model, film_genre=film_genre,
             visual_context=visual_context,
+            entity_registry=entity_registry,
         )
         # Backward-compat: extract gender → cache cho dubbing_svc đọc lại.
         # Store FULL info (character_name, age, role) để TTS routing + UI dùng.
