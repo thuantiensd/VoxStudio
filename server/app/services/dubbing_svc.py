@@ -2525,6 +2525,8 @@ def generate_segment(project_id: str, seg_id: str) -> dict:
     tts_text = (seg.get("speech_text") or seg["translated_text"] or "").strip()
     if not tts_text:
         raise ValueError("No translated text for this segment")
+    # Pad text quá ngắn (1-3 chars) — TTS model dễ ra âm thanh kì
+    tts_text = _pad_short_text_for_tts(tts_text)
 
     seg["status"] = "generating"
     _save_meta(project)
@@ -2557,12 +2559,15 @@ def generate_segment(project_id: str, seg_id: str) -> dict:
                 seg, target_duration, tts_text, actual_dur,
             )
 
-            # Pass 2: re-generate CHỈ KHI cần speedup (speed_factor > 1.0).
-            # speed_factor < 1.0 không bao giờ xảy ra sau fix _compute_target_speed,
-            # nhưng giữ guard rõ để tránh slow audio.
-            if auto_pace and speed_factor > 1.0 + SPEED_TOLERANCE:
-                edge_speed = max(1.0, min(MAX_EDGE_SPEED, speed_factor))
-                logger.info("[dub] edge speedup: target=%.2fs actual=%.2fs "
+            # Pass 2: re-generate với native Edge speed (cả speedup + slowdown
+            # trong [MIN_EDGE_SPEED, MAX_EDGE_SPEED] = [0.85, 1.25]).
+            need_regen = auto_pace and (
+                speed_factor > 1.0 + SPEED_TOLERANCE
+                or speed_factor < 1.0 - SPEED_TOLERANCE
+            )
+            if need_regen:
+                edge_speed = max(MIN_EDGE_SPEED, min(MAX_EDGE_SPEED, speed_factor))
+                logger.info("[dub] edge speed-match: target=%.2fs actual=%.2fs "
                             "speed=%.2fx reason=%s",
                             target_duration, actual_dur, edge_speed, reason)
                 mp3_v2 = seg_dir / f"{seg_id}_v2.mp3"
@@ -2572,12 +2577,11 @@ def generate_segment(project_id: str, seg_id: str) -> dict:
                 audio_np, sr = sf.read(str(out_path))
                 actual_dur = len(audio_np) / sr
 
-            # Fine-tune với atempo CHỈ KHI cần speedup (final_ratio > 1.0).
-            # KHÔNG stretch chậm — câu Việt ngắn hơn slot để silence tự nhiên fill.
+            # Fine-tune với atempo — cả speedup lẫn slowdown trong cap.
             if auto_pace and actual_dur > 0 and target_duration > 0:
                 final_ratio = actual_dur / target_duration
-                # Chỉ atempo khi cần SPEEDUP (ratio > 1.03) và trong giới hạn strict.
-                if final_ratio > 1.03 and final_ratio <= MAX_SPEED_FACTOR:
+                if (final_ratio > 1.03 and final_ratio <= MAX_SPEED_FACTOR) \
+                   or (final_ratio < 0.97 and final_ratio >= MIN_SPEED_FACTOR):
                     stretched = seg_dir / f"{seg_id}_stretched.wav"
                     _atempo_stretch(out_path, stretched, final_ratio)
                     audio_np, sr = sf.read(str(stretched))
@@ -2587,7 +2591,10 @@ def generate_segment(project_id: str, seg_id: str) -> dict:
                                    "ratio=%.2f > MAX %.2f — accepting overflow",
                                    seg.get("id", "?"), actual_dur, target_duration,
                                    final_ratio, MAX_SPEED_FACTOR)
-                # final_ratio < 1.0 (audio ngắn hơn slot) → KHÔNG làm gì, silence fill
+                elif final_ratio < MIN_SPEED_FACTOR:
+                    # Voice quá nhanh so với slot, không kéo dài thêm được
+                    # (cap 0.85x) → audio sẽ ngắn hơn slot, silence fill cuối.
+                    pass
 
         else:
             # ── OmniVoice (local GPU) ──
@@ -2651,17 +2658,17 @@ def generate_segment(project_id: str, seg_id: str) -> dict:
             sr = gpu.sampling_rate
             audio_np = waveform.cpu().numpy()
 
-            # ── Tier 1.1 + 1.4: rate-aware auto-align ──
-            # Atempo < 1.0 muddies voice → chỉ speedup, slowdown để silence fill.
-            # Strict cap MAX_SPEED_FACTOR (1.10x) thay vì 1.3x để tránh chipmunk.
+            # ── Speed match cho Vox Premium ──
+            # Cho phép cả speedup (≤1.25x) lẫn slowdown (≥0.85x) để bám
+            # pace baseline (Cô Ba). Atempo < 0.85 muddies — đó là cap.
             actual_dur = len(audio_np) / sr
-            if auto_pace and target_duration > 0 and actual_dur > target_duration:
+            if auto_pace and target_duration > 0 and actual_dur > 0:
                 speed_factor, reason = _compute_target_speed(
                     seg, target_duration, tts_text, actual_dur,
                 )
-                # Speed factor luôn trong [MIN, MAX]. Nếu reason=overflow_clamped
-                # → segment sẽ overflow nhẹ vào silence kế (chấp nhận được).
-                if speed_factor > 1.0 + 0.03:
+                # Apply atempo nếu lệch > tolerance (cả 2 hướng)
+                if abs(speed_factor - 1.0) > 0.03 and \
+                   MIN_SPEED_FACTOR <= speed_factor <= MAX_SPEED_FACTOR:
                     logger.info("[dub] Vox Premium speed-match: actual=%.2fs target=%.2fs "
                                 "speed=%.2fx reason=%s",
                                 actual_dur, target_duration, speed_factor, reason)
@@ -2680,9 +2687,6 @@ def generate_segment(project_id: str, seg_id: str) -> dict:
                                    "%.2fx — dub will be %.0fms longer than slot",
                                    seg.get("id", "?"), MAX_SPEED_FACTOR,
                                    (actual_dur / MAX_SPEED_FACTOR - target_duration) * 1000)
-            elif actual_dur < target_duration * 0.9:
-                logger.info("Vox Premium short-fill: actual=%.2fs target=%.2fs (silence padding)",
-                            actual_dur, target_duration)
 
         # Tier 1.2: Insert internal pauses để giữ rhythm gốc
         internal_pauses = seg.get("internal_pauses") or []
@@ -2721,6 +2725,34 @@ def generate_segment(project_id: str, seg_id: str) -> dict:
         if seg.get("fade_out", 0) > 0:
             fade_samples = min(int(seg["fade_out"] * sr), len(audio_np))
             audio_np[-fade_samples:] *= np.linspace(1, 0, fade_samples)
+
+        # ── Chống CHỒNG TIẾNG (anti-overlap) ──
+        # Hard-cap audio không vượt qua start của segment kế tiếp. Nếu bị
+        # cap, trim với fade-out 50ms cuối để không cụt giật.
+        try:
+            all_segs = sorted(project["segments"], key=lambda x: x.get("start", 0))
+            cur_start = seg.get("start", 0)
+            next_seg = next(
+                (s for s in all_segs if s.get("start", 0) > cur_start),
+                None,
+            )
+            if next_seg is not None:
+                # Khoảng tối đa audio có thể chiếm = next.start - cur.start - 100ms buffer
+                max_seg_dur = max(0.5, next_seg.get("start", 0) - cur_start - 0.1)
+                max_samples = int(max_seg_dur * sr)
+                if len(audio_np) > max_samples:
+                    fade_samples = min(int(0.05 * sr), max_samples // 4)
+                    audio_np = audio_np[:max_samples].copy()
+                    if fade_samples > 0:
+                        env = np.linspace(1.0, 0.0, fade_samples, dtype=np.float32)
+                        audio_np[-fade_samples:] *= env
+                    logger.info(
+                        "[dub] segment %s anti-overlap trim: capped to %.2fs "
+                        "(would overlap with next seg at %.2fs)",
+                        seg_id, max_seg_dur, next_seg.get("start", 0),
+                    )
+        except Exception as e:
+            logger.debug("anti-overlap check skipped: %s", e)
 
         # Save final wav
         sf.write(str(out_path), audio_np, sr)
@@ -2911,11 +2943,12 @@ def _atempo_stretch(in_path: Path, out_path: Path, tempo: float):
 # trailing silence + cap cứng overflow để KHÔNG overlap batch sau.
 SPEED_TOLERANCE = 0.05      # 5% — chỉ skip atempo nếu lệch < 5%
 MAX_SPEED_FACTOR = 1.25     # speedup tối đa (atempo)
-# KHÔNG slowdown — câu Việt ngắn hơn slot Trung → để silence tự nhiên fill,
-# KHÔNG kéo dài audio (kéo nghe muddy + giả tạo).
-MIN_SPEED_FACTOR = 1.0      # KHÔNG slowdown (trước: 0.92 — gây kéo dài audio)
+# Slowdown HẠN CHẾ — cho phép kéo dài voice đọc nhanh hơn Cô Ba về gần
+# baseline, nhưng cap 0.85x (kéo dài ~18%). Dưới 0.85x atempo bắt đầu
+# muddy giọng. User feedback: "cho phép kéo dài nhưng mức độ cho phép".
+MIN_SPEED_FACTOR = 0.85     # Slowdown tối đa 0.85x (kéo dài ~18%)
 MAX_EDGE_SPEED = 1.25       # Edge TTS rate max
-MIN_EDGE_SPEED = 1.0        # KHÔNG slowdown Edge TTS (trước: 0.92)
+MIN_EDGE_SPEED = 0.85       # Edge TTS slowdown cùng cap
 # Sau khi đã max speed, cho phép overflow X% rồi mới hard-trim. 15% grace
 # để cuối câu không bị cụt giật khi ratio nhỏ (1.10–1.20x).
 OVERFLOW_GRACE = 1.15
@@ -2923,6 +2956,37 @@ OVERFLOW_GRACE = 1.15
 # Dùng làm fallback khi không tính được rate gốc (vd Whisper không có
 # original_text, hoặc segment có text rỗng).
 DEFAULT_VN_RATE = 13.0
+
+
+def _pad_short_text_for_tts(text: str, min_chars: int = 6) -> str:
+    """Pad text quá ngắn để TTS model có đủ context generate audio đẹp.
+
+    Model TTS hay ra âm thanh kì khi text 1-3 char ("À", "Ừ", "Hả"):
+    - Voice clone đôi khi sinh garbled / cut off
+    - Edge TTS đỡ hơn nhưng vẫn có tone khác
+
+    Fix: pad với punctuation phù hợp. Model TTS coi punctuation như tín hiệu
+    intonation → ổn định hơn.
+
+    Examples:
+      "Ừ"   → "Ừ."
+      "Hả"  → "Hả?"
+      "À"   → "À."
+      "Không" → "Không."  (đã đủ 5 char, ít cần pad)
+    """
+    t = (text or "").strip()
+    if not t or len(t) >= min_chars:
+        return t
+    # Tự thêm punctuation phù hợp nếu chưa có
+    if t[-1] in ".?!,:;…":
+        return t  # đã có punct rồi
+    # Heuristic: từ hỏi → "?", cảm thán → "!", còn lại → "."
+    lower = t.lower()
+    if lower in ("hả", "hớ", "ủa", "what"):
+        return t + "?"
+    if lower in ("á", "ấy", "ồ", "ôi", "trời", "wow", "yeah"):
+        return t + "!"
+    return t + "."
 
 
 def _count_meaningful_chars(text: str) -> int:
@@ -2992,12 +3056,18 @@ def _compute_target_speed(seg: dict, target_dur: float, dub_text: str,
         est_dur = dub_chars / orig_rate if orig_rate > 0 else target_dur
         ratio = est_dur / target_dur if target_dur > 0 else 1.0
 
-    # ── KHÔNG SLOWDOWN ──
-    # Audio Việt ngắn hơn slot → để silence tự nhiên fill, KHÔNG kéo dài.
-    # Slowdown làm voice nghe lờ đờ, méo (timbre artifact của atempo < 1.0).
-    if ratio <= 1.0:
-        return (1.0, "natural_no_slowdown")
-    # Speedup nhỏ trong tolerance → giữ natural 1.0
+    # ── SLOWDOWN có HẠN CHẾ — bám pace Cô Ba (baseline) ──
+    # Audio voice ngắn hơn slot → có thể slowdown để bám Cô Ba, nhưng cap 0.85x
+    # (atempo dưới đó muddy giọng). Voice native fast (> Cô Ba) → kéo dài về
+    # gần baseline. Voice native slow tự nhiên fill slot, không cần slowdown.
+    if ratio < MIN_SPEED_FACTOR:
+        # Audio quá ngắn so với slot → cap slowdown ở MIN (0.85x)
+        # Phần dư silence tự nhiên fill cuối segment.
+        return (MIN_SPEED_FACTOR, "slowdown_capped")
+    if ratio < 1.0 - SPEED_TOLERANCE:
+        # Slowdown vừa phải trong limit (0.85-0.95)
+        return (ratio, "slowdown_within_limit")
+    # Speedup nhỏ / natural trong tolerance ±5% → giữ 1.0
     if ratio <= 1.0 + SPEED_TOLERANCE:
         return (1.0, "natural")
     # Speedup vừa phải trong cap (1.05-1.32 tuỳ emotion)
