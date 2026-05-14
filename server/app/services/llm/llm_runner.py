@@ -27,6 +27,7 @@ from .prompts import (
 logger = logging.getLogger(__name__)
 
 TIMEOUT_S = 90
+TIMEOUT_REASONING_S = 240  # GPT-5/o-series có reasoning tokens → mất 30-90s
 VISION_TIMEOUT_S = 120  # VLM với images chậm hơn
 
 
@@ -370,8 +371,11 @@ def _call_openai_http(prompt: dict, api_key: Optional[str], model: Optional[str]
     if not uses_new_api:
         # Older models: thấp temperature cho dịch chính xác hơn
         payload["temperature"] = 0.2
+    # Reasoning models cần timeout dài hơn — 90s thường không đủ cho GPT-5
+    # batch lớn (>30 segments) vì có reasoning tokens trước output.
+    timeout = TIMEOUT_REASONING_S if uses_new_api else TIMEOUT_S
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
-    with httpx.Client(timeout=TIMEOUT_S) as c:
+    with httpx.Client(timeout=timeout) as c:
         r = c.post("https://api.openai.com/v1/chat/completions",
                     json=payload, headers=headers)
         _check_llm_http_response("openai", r)
