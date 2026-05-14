@@ -197,12 +197,16 @@ class GPUManager:
                     "compression_ratio_threshold": 2.2,
                 }
                 if vad:
+                    # VAD nhạy hơn cho phim Trung — Whisper hay bỏ sót dialogue
+                    # khi có nhạc nền mixed vào speech (gap 19s+ giữa phim
+                    # mà thực tế có người nói). Lower threshold + smaller
+                    # min_speech_duration để bắt giọng yếu / câu ngắn.
                     kwargs["vad_parameters"] = {
-                        "min_speech_duration_ms": 250,
+                        "min_speech_duration_ms": 150,  # bắt câu 1-2 từ (cũ 250)
                         "max_speech_duration_s": 15,
-                        "min_silence_duration_ms": 500,
-                        "speech_pad_ms": 400,
-                        "threshold": 0.3,
+                        "min_silence_duration_ms": 400,  # cắt sớm hơn (cũ 500)
+                        "speech_pad_ms": 500,            # pad rộng hơn (cũ 400)
+                        "threshold": 0.2,                # nhạy hơn (cũ 0.3, Silero default 0.5)
                     }
                 if language:
                     kwargs["language"] = language
