@@ -191,10 +191,15 @@ class GPUManager:
                     "vad_filter": vad,
                     "word_timestamps": True,
                     "condition_on_previous_text": False,
-                    "hallucination_silence_threshold": 2.0,
+                    # 3.0s threshold (cũ 2.0) — phim có nhạc nền + pause tự
+                    # nhiên giữa câu hay bị coi là hallucinate → drop nhầm
+                    # câu THẬT. Nới ra để giữ dialogue.
+                    "hallucination_silence_threshold": 3.0,
                     "no_repeat_ngram_size": 3,
                     "temperature": [0.0, 0.2, 0.4, 0.6, 0.8, 1.0],
-                    "compression_ratio_threshold": 2.2,
+                    # 2.4 = default Whisper (cũ 2.2 quá strict — drop nhầm
+                    # câu thoại tự nhiên có lặp tiểu từ "à/nhỉ/thế").
+                    "compression_ratio_threshold": 2.4,
                 }
                 if vad:
                     # VAD nhạy hơn cho phim Trung — Whisper hay bỏ sót dialogue
