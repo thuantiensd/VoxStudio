@@ -222,7 +222,10 @@ def test_provider_key(
                     "messages": [{"role": "user", "content": "hi"}],
                 }
                 if uses_new_api:
-                    payload["max_completion_tokens"] = 1
+                    # GPT-5/o-series có "reasoning tokens" trước output —
+                    # cần ≥ 16 token budget để model finish thay vì cụt
+                    # giữa chừng. 32 đủ cho test ping mà vẫn nhẹ chi phí.
+                    payload["max_completion_tokens"] = 32
                 else:
                     payload["max_tokens"] = 1
                 with httpx.Client(timeout=15) as c:
