@@ -1546,6 +1546,35 @@ hoặc từ ngắn tương đương — TUYỆT ĐỐI KHÔNG để rỗng.
      đã render — nếu cùng source char sequence (vd 心眉) mà có 2+ Việt
      name → CHỌN MỘT (cách đầu tiên) → SỬA TẤT CẢ về một spelling.
    • Áp dụng cho cả tên riêng lẫn vocative ("Tiểu Bảo" / "Tiểu Bão" → chọn 1).
+
+🚨 INPUT MIXED LANGUAGE / NOISE (RẤT QUAN TRỌNG):
+
+Source text có thể chứa:
+
+1) Pinyin lọt từ Whisper STT (nhận diện không hoàn hảo):
+   ❌ "Nǐ suǒ chén" / "Wǒ ài nǐ" / "Lao Wang"
+   ✅ DỊCH: phiên Hán-Việt → "Anh nói gì?" / "Em yêu anh" / "Lão Vương"
+   → Khi thấy chuỗi Latin có dấu thanh ǎǐǒǔē hoặc Capital + lowercase
+   pattern (Lao/Xiao + Name), đây là CHẮC CHẮN pinyin → tra Hán-Việt
+   tương đương rồi dịch ý câu. KHÔNG copy nguyên pinyin vào output.
+
+2) Tiếng Anh THẬT trong phim (scene học tiếng Anh, nhân vật nước ngoài,
+   thương hiệu quốc tế, câu trích dẫn):
+   ✅ DỊCH ý sang tiếng Việt cho người Việt hiểu, ghi chú thể loại nếu cần.
+   Vd: "I love you" trong scene học → "Em yêu anh"
+       "Time is money" trong bài giảng → "Thời gian là tiền bạc"
+   → KHÔNG giữ nguyên tiếng Anh trừ khi là TÊN RIÊNG nổi tiếng / acronym
+   kỹ thuật (BMW, NASA, iPhone — giữ nguyên).
+
+3) Whisper hallucinate (tiếng nhạc/silence bị bịa thành câu vô nghĩa):
+   ❌ "So Pierre with Stocks Pierre" / "Thank you" / "Bye bye" lặp lại
+   → Nếu line ngắn + vô nghĩa + không khớp context scene → ĐÁNH GIÁ:
+   • Giữ ý đúng context (vd dialogue đang nói A/B → đoán B response)
+   • HOẶC trả "" (chuỗi rỗng) nếu thực sự là rác, để pipeline downstream
+     bỏ qua khỏi dub. Đừng nhồi câu vô nghĩa vào output.
+
+⚡ Mục tiêu: output Việt MƯỢT, không xen pinyin/raw English, không câu
+vô nghĩa. User xem dub không cần biết nguồn STT bị lỗi gì.
 {few_shot_block}{extra_block}{context_section}
 OUTPUT JSON DUY NHẤT (không markdown):
 {{
