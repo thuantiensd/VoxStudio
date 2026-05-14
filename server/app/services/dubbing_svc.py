@@ -348,6 +348,56 @@ def _hanviet_post_fix(text: str) -> str:
         _hanviet_pinyin_repl, text,
     )
 
+    # TONE-MARKED PINYIN — vd "Nǐ suǒ chén" lọt qua LLM với dấu thanh.
+    # CHỈ dùng các ký tự ĐẶC TRƯNG PINYIN (caron, macron) — KHÔNG dùng các
+    # dấu chung với tiếng Việt (à/á/è/é/ì/í/ò/ó/ù/ú có ở cả 2 → false positive).
+    # Pinyin-only: ā ē ī ō ū ǎ ě ǐ ǒ ǔ ǖ ǘ ǚ ǜ + capital variants.
+    _PINYIN_TONE_CHARS = "āēīōūǎěǐǒǔǖǘǚǜĀĒĪŌŪǍĚǏǑǓǕǗǙǛ"
+
+    def _strip_tone(s: str) -> str:
+        """Xoá dấu thanh pinyin: nǐ → ni, chén → chen."""
+        tone_map = {
+            "ā": "a", "á": "a", "ǎ": "a", "à": "a",
+            "ē": "e", "é": "e", "ě": "e", "è": "e",
+            "ī": "i", "í": "i", "ǐ": "i", "ì": "i",
+            "ō": "o", "ó": "o", "ǒ": "o", "ò": "o",
+            "ū": "u", "ú": "u", "ǔ": "u", "ù": "u",
+            "ǖ": "v", "ǘ": "v", "ǚ": "v", "ǜ": "v",
+            "Ā": "A", "Á": "A", "Ǎ": "A", "À": "A",
+            "Ē": "E", "É": "E", "Ě": "E", "È": "E",
+            "Ī": "I", "Í": "I", "Ǐ": "I", "Ì": "I",
+            "Ō": "O", "Ó": "O", "Ǒ": "O", "Ò": "O",
+            "Ū": "U", "Ú": "U", "Ǔ": "U", "Ù": "U",
+        }
+        return "".join(tone_map.get(c, c) for c in s)
+
+    def _tone_pinyin_repl(m: "re.Match") -> str:
+        raw = m.group(0)
+        stripped = _strip_tone(raw)
+        # Title case từng word → tra _PINYIN_TO_HANVIET
+        parts = stripped.split()
+        out_parts = []
+        any_match = False
+        for p in parts:
+            tc = p.capitalize()
+            vn = _PINYIN_TO_HANVIET.get(tc)
+            if vn:
+                out_parts.append(vn)
+                any_match = True
+            else:
+                out_parts.append(tc)
+        if any_match:
+            return " ".join(out_parts)
+        # Không match được trong bảng → ít nhất loại tone để LLM khác đỡ lú
+        return stripped
+
+    # Match cụm gồm ≥1 từ có chứa dấu thanh pinyin (chuỗi liên tiếp)
+    text = re.sub(
+        rf"(?:[A-Za-z]*[{re.escape(_PINYIN_TONE_CHARS)}][A-Za-z]*)"
+        rf"(?:\s+[A-Za-z]*[{re.escape(_PINYIN_TONE_CHARS)}A-Za-z]*)*",
+        _tone_pinyin_repl, text,
+    )
+
     return text
 
 
