@@ -240,10 +240,17 @@ class GPUManager:
                     })
                 return segs, info
 
-            segments, info = _run(vad=True)
+            # Default vad=False — VAD Silero hay bỏ sót dialogue khi mixed
+            # nhạc nền (xác nhận bằng test thực tế: tắt VAD bắt được 6 câu
+            # mà bật VAD bỏ qua hết). Whisper internal đã handle silence OK.
+            # Trade-off: chậm hơn ~2x cho audio dài, nhưng precision quan trọng
+            # hơn cho dub. Audio dài hiếm gặp dub job (<30 min typical).
+            segments, info = _run(vad=False)
             if not segments:
-                logger.warning("VAD removed all audio — retrying without VAD filter")
-                segments, info = _run(vad=False)
+                # Hiếm khi xảy ra (Whisper raw thường output gì đó) — fallback
+                # bật VAD lenient. Chỉ làm gì khi VAD-off trả nothing.
+                logger.warning("Whisper raw returned no segments — retry with VAD")
+                segments, info = _run(vad=True)
 
             full_text = " ".join(seg["text"] for seg in segments)
             self._clear_cache()
