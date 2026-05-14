@@ -2994,12 +2994,16 @@ def _atempo_stretch(in_path: Path, out_path: Path, tempo: float):
 # tối đa 1.25x. Nếu vẫn không đủ (cao trào, batch ngắn vs dài), trim
 # trailing silence + cap cứng overflow để KHÔNG overlap batch sau.
 SPEED_TOLERANCE = 0.05      # 5% — chỉ skip atempo nếu lệch < 5%
-MAX_SPEED_FACTOR = 1.25     # speedup tối đa (atempo)
+# 1.30x: kinh nghiệm thực tế phim Trung — câu Việt thường +25-30% dài hơn
+# tiếng Trung do thừa các tiểu từ ("đó", "nhỉ", "thế..."). Cap 1.25 cũ
+# khiến 50-60% segments overflow (bleed sang câu sau). 1.30 vẫn nghe
+# tự nhiên không chipmunk, giảm overflow đáng kể.
+MAX_SPEED_FACTOR = 1.30     # speedup tối đa (atempo)
 # KHÔNG slowdown — câu Việt ngắn hơn slot Trung → để silence tự nhiên fill,
 # KHÔNG kéo dài audio (kéo nghe muddy + giả tạo).
 MIN_SPEED_FACTOR = 1.0      # KHÔNG slowdown (trước: 0.92 — gây kéo dài audio)
-MAX_EDGE_SPEED = 1.25       # Edge TTS rate max
-MIN_EDGE_SPEED = 1.0        # KHÔNG slowdown Edge TTS (trước: 0.92)
+MAX_EDGE_SPEED = 1.30       # Edge TTS rate max (đồng bộ với atempo)
+MIN_EDGE_SPEED = 1.0        # KHÔNG slowdown Edge TTS
 # Sau khi đã max speed, cho phép overflow X% rồi mới hard-trim. 15% grace
 # để cuối câu không bị cụt giật khi ratio nhỏ (1.10–1.20x).
 OVERFLOW_GRACE = 1.15
@@ -3033,12 +3037,12 @@ def _emotion_speed_cap(emotion: str | None) -> float:
         return MAX_SPEED_FACTOR
     e = emotion.lower().strip()
     if e in ("angry", "argument", "shouting"):
-        return 1.32  # Cãi nhau/giận → nhanh OK
+        return 1.37  # Cãi nhau/giận → nhanh OK (đồng bộ với neutral 1.30)
     if e in ("whisper", "sad", "tender", "intimate"):
-        return 1.15  # Truyền cảm → giữ chậm
+        return 1.18  # Truyền cảm → giữ chậm
     if e in ("happy", "surprised", "fearful", "excited"):
-        return 1.28  # Cảm xúc tăng — nhẹ hơn neutral
-    return MAX_SPEED_FACTOR  # neutral / unknown → 1.25
+        return 1.33  # Cảm xúc tăng — nhẹ hơn neutral
+    return MAX_SPEED_FACTOR  # neutral / unknown → 1.30
 
 
 def _compute_target_speed(seg: dict, target_dur: float, dub_text: str,

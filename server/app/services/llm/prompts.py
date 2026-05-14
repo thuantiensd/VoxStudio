@@ -37,7 +37,10 @@ from .few_shot_examples import build_few_shot_block
 # Utilities
 # ═══════════════════════════════════════════════════════════════
 
-VN_SPEECH_RATE = 11.5  # chars/s — Việt thoải mái, ép xuống để dub có headroom
+VN_SPEECH_RATE = 10.5  # chars/s — siết budget để LLM dịch súc tích hơn,
+# tránh TTS overflow (cũ 11.5 → 50-60% segments bleed sang slot sau).
+# Vietnamese TTS thực tế ~13 chars/s, ép xuống 10.5 = 80% → có headroom
+# cho atempo speedup (cap 1.30x) khớp slot nguồn.
 
 
 def _max_chars(seg: dict) -> int:
