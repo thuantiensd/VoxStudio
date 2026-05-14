@@ -1525,6 +1525,17 @@ hoặc từ ngắn tương đương — TUYỆT ĐỐI KHÔNG để rỗng.
      - 美 (Mỹ) / 梅 (Mai) / 妹 (Muội) / 梦 (Mộng) — 4 char khác nhau
      - 然 = "Nhiên" (không phải Nhan = 颜)
      - 莉 = "Lị" / 丽 = "Lệ" / 莉 ≠ 丽
+   • BẢNG SURNAME DISAMBIGUATION (LLM hay slip):
+     - 林 = "Lâm" (rừng/họ Lin) — TUYỆT ĐỐI KHÔNG "Linh"
+     - 灵 = "Linh" (tinh linh/灵气) — KHÔNG "Lâm"
+     - 凌 = "Lăng" (đỉnh cao/họ Ling) — KHÔNG "Lâm" hoặc "Linh"
+     - 陈 = "Trần" — KHÔNG "Chân" hoặc "Tân"
+     - 沈 = "Thẩm" — KHÔNG "Trầm"
+     - 邓 = "Đặng" — KHÔNG "Đăng"
+     - 蒋 = "Tưởng" — KHÔNG "Tương"
+     - 钱 = "Tiền" — KHÔNG "Tiển"
+     ⚠️ Khi thấy 林氏 / 林家 / 林集团 → CHẮC CHẮN "Lâm thị/gia/tập đoàn",
+        scene có vẻ tâm linh / huyền huyễn cũng KHÔNG đổi sang "Linh".
    • TUYỆT ĐỐI KHÔNG dùng pinyin (Chen Yu / Wang Xiao / Xin Mei) ở output.
      Pinyin đọc dub ra âm tiếng Anh-Việt lai rất tệ. Luôn phiên Hán-Việt
      mỗi character (tra BẢNG HỌ + ÂM PHỔ BIẾN ở trên).
@@ -1575,6 +1586,22 @@ Source text có thể chứa:
 
 ⚡ Mục tiêu: output Việt MƯỢT, không xen pinyin/raw English, không câu
 vô nghĩa. User xem dub không cần biết nguồn STT bị lỗi gì.
+
+🛑 RULE CHỐNG BỊA (CỰC QUAN TRỌNG — gặp khi Whisper transcribe lỗi):
+
+Khi câu nguồn chứa từ KHÔNG có nghĩa rõ ràng (vd "建设等你" = "xây dựng
+đợi ngài" — vô nghĩa context):
+   ❌ KHÔNG bịa cụ thể: "khu chợ trên tầng ba" / "Vạn Hậu Tống Khắc"
+       — đây là LLM tự đặt detail không có trong gốc → SAI HOÀN TOÀN.
+   ✅ DỊCH NGUYÊN literal câu (kể cả nghe gãy gọn) HOẶC dịch generic:
+       "Nếu không cô ấy sẽ đợi ngài ở dưới" (giữ ý "đợi") thay vì
+       sáng tạo địa điểm.
+   ✅ Tên company / tổ chức không rõ source → giữ chung "công ty đó" /
+       "tổ chức đó" + tên speaker đã biết, KHÔNG sáng tạo tên mới.
+
+Nguyên tắc: thà DỊCH NGẮN ÍT NGHĨA còn hơn BỊA DETAIL không có trong gốc.
+User nghe dub có thể nhận ra câu ngắn = STT yếu, nhưng nếu nghe câu bịa
+chi tiết SAI thì mất hết tin tưởng pipeline.
 {few_shot_block}{extra_block}{context_section}
 OUTPUT JSON DUY NHẤT (không markdown):
 {{

@@ -421,6 +421,21 @@ _PHRASE_FIXES: list[tuple[str, str, str]] = [
     (r"\btheo nghĩa đen ", "", "真的 inline"),
     # Misc phổ biến
     (r"\bĐồng chí ", "", "同志 trong cổ trang/drama không phải đồng chí CM"),
+    # SURNAME DISAMBIGUATION — 林 = "Lâm" KHÔNG phải "Linh" (灵 mới là Linh)
+    (r"\b(?:Tập đoàn|tập đoàn|Công ty|công ty) Linh thị\b", "Tập đoàn Lâm thị", "林氏集团 → Lâm KHÔNG Linh"),
+    (r"\bLinh thị (?:tập đoàn|company)\b", "Lâm thị tập đoàn", "林氏 → Lâm"),
+    (r"\bLinh gia\b", "Lâm gia", "林家 → Lâm gia"),
+    (r"\bnhà họ Linh\b", "nhà họ Lâm", "林家 → Lâm"),
+    # 好了 trong context đuổi khéo / kết thúc → "Thôi/Được rồi", KHÔNG "Cái gì?"
+    (r"^Cái gì\?\s*$", "Thôi được rồi.", "好了 đứng riêng KHÔNG phải 'Cái gì?'"),
+    # 请吧 = "mời ra/đi" gesture lịch sự, KHÔNG "xin hỏi" (đó là 请问).
+    # Chỉ match khi đứng riêng sau xưng hô: "Cô Lâm, xin hỏi" thay vì
+    # match mọi "xin hỏi" trong câu phức.
+    (
+        r"^(Cô|Anh|Cậu|Ngài|Thầy|Cô nương|Đại nhân|Công tử|Tiểu thư|Phu nhân|Em|Chú|Bác|Ông|Bà)\s+([\wÀ-ỹ]+),\s+xin hỏi\.?$",
+        lambda m: f"{m.group(1)} {m.group(2)}, mời.",
+        "Title + Name + xin hỏi → mời (请吧 chứ không 请问)",
+    ),
 ]
 
 
