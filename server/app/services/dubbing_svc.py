@@ -421,6 +421,23 @@ _PHRASE_FIXES: list[tuple[str, str, str]] = [
     (r"\btheo nghĩa đen ", "", "真的 inline"),
     # Misc phổ biến
     (r"\bĐồng chí ", "", "同志 trong cổ trang/drama không phải đồng chí CM"),
+    # HONORIFIC TITLES sau surname Hán-Việt: capitalize để TTS đọc liền mạch
+    # "Tô lão gia" → "Tô Lão Gia" (TTS không pause giữa Tô và lão)
+    # Pattern: <Capitalized 1-2 word Hán-Việt name> + lowercase title
+    (r"\b((?:Tô|Trần|Lý|Vương|Lâm|Hồ|Lưu|Mã|Quách|Trương|Đinh|Hoàng|Tống|Điền|Đỗ|Phùng|Đặng|Tưởng|Châu|Tiền|Tôn|Hứa|Tạ|Cao|Lương|Diệp|Phương|Tăng|Bành|La|Mạnh|Khúc|Cố|Tiêu|Trình|Đường|Tần|Chu|Thẩm|Cốc|Cát|Hoa|Nguỵ|Bao|Bùi|Doãn|Dư|Đoàn|Hà|Lục|Mẫn|Nghê|Nhâm|Phan|Phó|Tào|Thái|Thi|Triệu|Văn|Bạch|Khang)) lão gia\b",
+     r"\1 Lão Gia", "Surname + lão gia → liền mạch"),
+    (r"\b((?:Tô|Trần|Lý|Vương|Lâm|Hồ|Lưu|Mã|Quách|Trương|Đinh|Hoàng|Tống|Điền|Đỗ|Phùng|Đặng|Tưởng|Châu|Tiền|Tôn|Hứa|Tạ|Cao|Lương|Diệp|Phương|Tăng|Bành|La|Mạnh|Khúc|Cố|Tiêu|Trình|Đường|Tần|Chu|Thẩm|Cốc|Cát|Hoa|Nguỵ|Bao|Bùi|Doãn|Dư|Đoàn|Hà|Lục|Mẫn|Nghê|Nhâm|Phan|Phó|Tào|Thái|Thi|Triệu|Văn|Bạch|Khang)) đại nhân\b",
+     r"\1 Đại Nhân", "Surname + đại nhân → liền mạch"),
+    (r"\b((?:Tô|Trần|Lý|Vương|Lâm|Hồ|Lưu|Mã|Quách|Trương|Đinh|Hoàng|Tống|Điền|Đỗ|Phùng|Đặng|Tưởng|Châu|Tiền|Tôn|Hứa|Tạ|Cao|Lương|Diệp|Phương|Tăng|Bành|La|Mạnh|Khúc|Cố|Tiêu|Trình|Đường|Tần|Chu|Thẩm|Cốc|Cát|Hoa|Nguỵ|Bao|Bùi|Doãn|Dư|Đoàn|Hà|Lục|Mẫn|Nghê|Nhâm|Phan|Phó|Tào|Thái|Thi|Triệu|Văn|Bạch|Khang)) tiểu thư\b",
+     r"\1 Tiểu Thư", "Surname + tiểu thư → liền mạch"),
+    (r"\b((?:Tô|Trần|Lý|Vương|Lâm|Hồ|Lưu|Mã|Quách|Trương|Đinh|Hoàng|Tống|Điền|Đỗ|Phùng|Đặng|Tưởng|Châu|Tiền|Tôn|Hứa|Tạ|Cao|Lương|Diệp|Phương|Tăng|Bành|La|Mạnh|Khúc|Cố|Tiêu|Trình|Đường|Tần|Chu|Thẩm|Cốc|Cát|Hoa|Nguỵ|Bao|Bùi|Doãn|Dư|Đoàn|Hà|Lục|Mẫn|Nghê|Nhâm|Phan|Phó|Tào|Thái|Thi|Triệu|Văn|Bạch|Khang)) công tử\b",
+     r"\1 Công Tử", "Surname + công tử → liền mạch"),
+    (r"\b((?:Tô|Trần|Lý|Vương|Lâm|Hồ|Lưu|Mã|Quách|Trương|Đinh|Hoàng|Tống|Điền|Đỗ|Phùng|Đặng|Tưởng|Châu|Tiền|Tôn|Hứa|Tạ|Cao|Lương|Diệp|Phương|Tăng|Bành|La|Mạnh|Khúc|Cố|Tiêu|Trình|Đường|Tần|Chu|Thẩm|Cốc|Cát|Hoa|Nguỵ|Bao|Bùi|Doãn|Dư|Đoàn|Hà|Lục|Mẫn|Nghê|Nhâm|Phan|Phó|Tào|Thái|Thi|Triệu|Văn|Bạch|Khang)) phu nhân\b",
+     r"\1 Phu Nhân", "Surname + phu nhân → liền mạch"),
+    (r"\b((?:Tô|Trần|Lý|Vương|Lâm|Hồ|Lưu|Mã|Quách|Trương|Đinh|Hoàng|Tống|Điền|Đỗ|Phùng|Đặng|Tưởng|Châu|Tiền|Tôn|Hứa|Tạ|Cao|Lương|Diệp|Phương|Tăng|Bành|La|Mạnh|Khúc|Cố|Tiêu|Trình|Đường|Tần|Chu|Thẩm|Cốc|Cát|Hoa|Nguỵ|Bao|Bùi|Doãn|Dư|Đoàn|Hà|Lục|Mẫn|Nghê|Nhâm|Phan|Phó|Tào|Thái|Thi|Triệu|Văn|Bạch|Khang)) tổng\b",
+     r"\1 Tổng", "Surname + tổng → liền mạch (Trình tổng → Trình Tổng)"),
+    (r"\b((?:Tô|Trần|Lý|Vương|Lâm|Hồ|Lưu|Mã|Quách|Trương|Đinh|Hoàng|Tống|Điền|Đỗ|Phùng|Đặng|Tưởng|Châu|Tiền|Tôn|Hứa|Tạ|Cao|Lương|Diệp|Phương|Tăng|Bành|La|Mạnh|Khúc|Cố|Tiêu|Trình|Đường|Tần|Chu|Thẩm|Cốc|Cát|Hoa|Nguỵ|Bao|Bùi|Doãn|Dư|Đoàn|Hà|Lục|Mẫn|Nghê|Nhâm|Phan|Phó|Tào|Thái|Thi|Triệu|Văn|Bạch|Khang)) sư phụ\b",
+     r"\1 Sư Phụ", "Surname + sư phụ → liền mạch"),
     # SURNAME DISAMBIGUATION — 林 = "Lâm" KHÔNG phải "Linh" (灵 mới là Linh)
     (r"\b(?:Tập đoàn|tập đoàn|Công ty|công ty) Linh thị\b", "Tập đoàn Lâm thị", "林氏集团 → Lâm KHÔNG Linh"),
     (r"\bLinh thị (?:tập đoàn|company)\b", "Lâm thị tập đoàn", "林氏 → Lâm"),
