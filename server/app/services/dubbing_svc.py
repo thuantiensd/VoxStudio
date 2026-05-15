@@ -453,6 +453,21 @@ _PHRASE_FIXES: list[tuple[str, str, str]] = [
         lambda m: f"{m.group(1)} {m.group(2)}, mời.",
         "Title + Name + xin hỏi → mời (请吧 chứ không 请问)",
     ),
+    # SURNAME ORDER FIX — LLM hay dịch 秦总 thành "Tổng Tần" (đảo)
+    # Đúng phải là "Tần Tổng" (surname + title, giống Trình Tổng / Tô Tổng).
+    (r"\bTổng\s+((?:Tô|Trần|Lý|Vương|Lâm|Hồ|Lưu|Mã|Quách|Trương|Đinh|Hoàng|Tống|Điền|Đỗ|Phùng|Đặng|Tưởng|Châu|Tiền|Tôn|Hứa|Tạ|Cao|Lương|Diệp|Phương|Tăng|Bành|La|Mạnh|Khúc|Cố|Tiêu|Trình|Đường|Tần|Chu|Thẩm|Cốc|Cát|Hoa|Nguỵ|Bao|Bùi|Doãn|Dư|Đoàn|Hà|Lục|Mẫn|Nghê|Nhâm|Phan|Phó|Tào|Thái|Thi|Triệu|Văn|Bạch|Khang))\b",
+     r"\1 Tổng", "秦总 → Tần Tổng (KHÔNG đảo Tổng Tần)"),
+
+    # 信号格 = cột sóng / vạch sóng (4G/wifi), KHÔNG phải "vạch tín hiệu"
+    (r"\bmấy vạch tín hiệu\b", "mấy vạch sóng", "信号格 → vạch sóng"),
+    (r"\b(\d+) vạch tín hiệu\b", r"\1 vạch sóng", "信号格"),
+    (r"\bvạch tín hiệu\b", "vạch sóng", "信号格"),
+    (r"\bcột tín hiệu\b", "cột sóng", "信号塔 ambiguous"),
+
+    # 差等生 = học dốt / kém, KHÔNG phải "buôn lậu" (LLM nhầm 差 = chênh lệch?)
+    (r"\bđồ buôn lậu\b", "đồ học dốt", "差等生 (học sinh kém)"),
+    (r"\b(?:tên|kẻ|thằng) buôn lậu (?:hồi học|ở (?:tiểu học|trường))\b", "đứa học dốt ở trường", "差等生 context tiểu học"),
+
     # CỔ TRANG IDIOM — Hán-Việt dịch literal nghe ngơ. Thay bằng phrasing tự nhiên.
     (r"\bmột mối búp bê\b", "đính ước trẻ con", "娃娃亲 — không phải 'búp bê'"),
     (r"\bmối búp bê\b", "đính ước trẻ con", "娃娃亲 đứng riêng"),
