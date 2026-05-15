@@ -34,6 +34,15 @@ echo "════════════════════════�
 echo "  VoxStudio Pod Start  ($(date '+%Y-%m-%d %H:%M:%S'))"
 echo "═══════════════════════════════════════════════════════"
 
+# ── 0. System deps — ffmpeg (cần cho Whisper / Demucs / TTS export) ──
+# Pod restart đôi khi mất ffmpeg (container disk reset). Tự cài nếu thiếu.
+if ! command -v ffprobe >/dev/null 2>&1 || ! command -v ffmpeg >/dev/null 2>&1; then
+    echo "→ ffmpeg/ffprobe missing — installing..."
+    apt-get update -qq
+    apt-get install -y --no-install-recommends ffmpeg libsndfile1 libsox-fmt-all sox
+    echo "  ✓ ffmpeg installed: $(ffmpeg -version 2>&1 | head -1)"
+fi
+
 # ── 1. Activate venv ──────────────────────────────────────────────
 if [ ! -f "$VENV/bin/activate" ]; then
     echo "✗ Venv chưa có ($VENV). Chạy scripts/runpod_bootstrap.sh trước."
