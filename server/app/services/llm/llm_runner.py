@@ -301,7 +301,9 @@ def _call_gemini_sdk(prompt: dict, model: Optional[str] = None) -> str:
     if not GEMINI_API_KEY:
         raise ValueError("GEMINI_API_KEY not set")
     genai.configure(api_key=GEMINI_API_KEY)
-    m = genai.GenerativeModel(model or "gemini-2.5-flash")
+    # Default flagship pro (chất lượng dịch tốt nhất). Flash chỉ dùng khi
+    # user explicit pick (test/cost saving).
+    m = genai.GenerativeModel(model or "gemini-2.5-pro")
 
     import threading
     import queue as _queue
@@ -368,7 +370,14 @@ def _call_openai_http(prompt: dict, api_key: Optional[str], model: Optional[str]
             {"role": "user", "content": prompt["user"]},
         ],
     }
-    if not uses_new_api:
+    if uses_new_api:
+        # GPT-5/o-series: dịch là task không cần reasoning sâu — set
+        # reasoning_effort=minimal để model làm theo prompt examples +
+        # glossary thay vì over-think. Cải thiện quality VÀ speed.
+        # Cũng bump max_completion_tokens cho output đủ space.
+        payload["reasoning_effort"] = "minimal"
+        payload["max_completion_tokens"] = 8192
+    else:
         # Older models: thấp temperature cho dịch chính xác hơn
         payload["temperature"] = 0.2
     # Reasoning models cần timeout dài hơn — 90s thường không đủ cho GPT-5
