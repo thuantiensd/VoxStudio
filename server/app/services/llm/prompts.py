@@ -88,10 +88,31 @@ _CLASSICAL_MARKERS_STRONG = (
     "处斩", "处死", "斩首", "诛九族", "凌迟",
 )
 _CLASSICAL_MARKERS_WEAK = (
-    "公子", "小姐", "姑娘", "夫人", "娘子", "相公", "官人", "老爷", "夫君",
-    "大人", "先生", "拜见", "告退", "失礼",
-    "爹爹", "娘亲", "儿臣", "下官",
-    "敢问", "请问", "敢不", "不敢", "万万不可",
+    # Chỉ giữ markers RÕ cổ trang (modern Trung không dùng):
+    "姑娘",    # cô nương — cổ trang
+    "娘子",    # nương tử — cổ trang (modern: 老婆)
+    "相公",    # phu quân — cổ trang (modern: 老公)
+    "官人",    # phu quân — cổ trang
+    "夫君",    # phu quân — cổ trang
+    "爹爹", "娘亲",  # cha mẹ cổ trang (modern: 爸爸/妈妈)
+    "儿臣", "下官",  # khiêm xưng cổ trang
+    "拜见", "告退", "失礼",  # nghi lễ cổ trang
+    "敢问", "敢不", "不敢", "万万不可",  # ngữ khí cổ trang
+    # ĐÃ BỎ: 小姐 / 大人 / 老爷 / 先生 / 公子 / 夫人 — ambiguous,
+    # cả modern lẫn classical đều dùng (vd 'Tống Tiểu Thư' trong
+    # CEO drama hiện đại, 'Tổng giám đốc Lý 老爷'). False-positive cao.
+)
+
+# Modern BUSINESS markers — nếu thấy ≥2 cái → CHẮC CHẮN phim hiện đại,
+# override cả weak classical markers (vd 小姐 cũ nhưng đây là Miss
+# trong company setting).
+_MODERN_BUSINESS_MARKERS = (
+    "公司", "集团", "总裁", "总经理", "经理", "老总", "老板",
+    "项目", "合同", "股东", "财务", "投资", "上市",
+    "亿", "万", "百亿", "千万",  # tiền hiện đại (cổ trang dùng 两 銀)
+    "手机", "电脑", "微信", "电话",  # tech modern
+    "公寓", "豪宅", "汽车", "酒店",  # modern setting
+    "酒吧", "咖啡", "餐厅", "西餐",  # modern places
 )
 
 
@@ -101,6 +122,8 @@ def _detect_classical(register: str, source_text: str) -> bool:
     Hai con đường:
     1. Pass-0 đã trả về register=cổ trang/historical/wuxia/xianxia → True
     2. Source text chứa ≥1 strong marker hoặc ≥3 weak markers → True
+    3. NHƯNG modern business markers (≥2) → OVERRIDE về False
+       (phim CEO/business hiện đại có 小姐/大人 cổ-có-vẻ nhưng thực ra modern)
     """
     reg = (register or "").lower()
     if any(kw in reg for kw in ("cổ trang", "co trang", "historical", "wuxia",
@@ -109,6 +132,12 @@ def _detect_classical(register: str, source_text: str) -> bool:
         return True
 
     if not source_text:
+        return False
+
+    # Modern business override: nếu ≥2 markers business → phim modern
+    # KỂ CẢ có markers cổ trang weak (vì 小姐/大人 ambiguous)
+    modern_count = sum(source_text.count(m) for m in _MODERN_BUSINESS_MARKERS)
+    if modern_count >= 2:
         return False
 
     # Strong markers — chỉ 1 cái xuất hiện là đủ kích hoạt
