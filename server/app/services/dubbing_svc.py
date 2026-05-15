@@ -2195,6 +2195,9 @@ def transcribe_project(project_id: str) -> dict:
             project_meta = _load_meta(project_id) or {}
             project_meta["speaker_analysis"] = sp_result.to_json()
             project_meta["speaker_voice_map"] = voice_map
+            # Persist gender_confidences để LLM-correction step dùng — pipeline
+            # detect conf cao → tin pipeline; conf thấp → tin LLM Pass-0 context.
+            project_meta["speaker_gender_confs"] = gender_confidences
             _save_meta(project_meta)
 
             from collections import Counter as _Counter
@@ -2571,19 +2574,51 @@ def translate_project(
                 for spk, info in llm_genders.items()
             }
 
+            # Pipeline gender confidence (per speaker) — saved bởi pipeline.
+            # Conf cao = audio detect rõ → tin pipeline. Conf thấp = ambiguous
+            # → tin LLM Pass-0 (đọc context text chuẩn hơn audio biên).
+            pipeline_confs = project.get("speaker_gender_confs") or {}
+
             overridden = {}
             for spk, info in llm_genders.items():
                 llm_g = info.get("gender", "unsure")
                 pipeline_g = pipeline_genders.get(spk, "unknown")
-                evidence = info.get("evidence", "")
-                if llm_g in ("male", "female") and llm_g != pipeline_g:
-                    # LLM disagree + có evidence → override
-                    if evidence and len(evidence) > 5:
-                        overridden[spk] = llm_g
-                        logger.info(
-                            "LLM corrected %s: pipeline=%s → %s (evidence: %s)",
-                            spk, pipeline_g, llm_g, evidence,
-                        )
+                pipeline_conf = float(pipeline_confs.get(spk, 0.5) or 0.5)
+                evidence = info.get("evidence", "") or ""
+
+                # LLM trả "unsure" → skip, không có ý kiến
+                if llm_g not in ("male", "female"):
+                    continue
+                # Agree → no action
+                if llm_g == pipeline_g:
+                    continue
+
+                # Disagree — quyết định theo pipeline confidence:
+                # • conf < 0.70 → audio biên/yếu → LLM thắng (kể cả không evidence)
+                # • 0.70 ≤ conf < 0.90 → ambiguous → cần LLM evidence ≥ 5 chars
+                # • conf ≥ 0.90 → audio chắc chắn → giữ pipeline (LLM có thể bias text)
+                should_override = False
+                reason = ""
+                if pipeline_conf < 0.70:
+                    should_override = True
+                    reason = f"pipeline_conf={pipeline_conf:.2f} thấp → LLM thắng"
+                elif pipeline_conf < 0.90 and evidence and len(evidence) > 5:
+                    should_override = True
+                    reason = f"pipeline_conf={pipeline_conf:.2f} ambiguous + LLM có evidence"
+                else:
+                    reason = f"pipeline_conf={pipeline_conf:.2f} cao → giữ audio"
+
+                if should_override:
+                    overridden[spk] = llm_g
+                    logger.info(
+                        "Gender %s: pipeline=%s → LLM=%s (%s, evidence: %s)",
+                        spk, pipeline_g, llm_g, reason, evidence[:80] or "(none)",
+                    )
+                else:
+                    logger.info(
+                        "Gender %s: KEEP pipeline=%s (LLM said %s but %s)",
+                        spk, pipeline_g, llm_g, reason,
+                    )
             if overridden:
                 # Update project meta
                 new_genders = dict(pipeline_genders)
