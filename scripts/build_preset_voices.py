@@ -180,6 +180,16 @@ TEXT_ES_NARRATOR = (
     "historias antiguas que sólo los viejos recordaban."
 )
 
+# ── Ad text cho 10 voice quảng cáo VoxStudio app ──
+TEXT_AD_VOXSTUDIO = (
+    "Chào bạn, đây là VoxStudio — phần mềm AI tạo giọng nói tiếng Việt chất "
+    "lượng phòng thu và lồng tiếng video tự động. Chỉ với vài cú nhấp chuột, "
+    "bạn có thể chuyển văn bản thành giọng nói chuyên nghiệp, hoặc lồng tiếng "
+    "video tiếng nước ngoài chỉ trong vài phút. Trải nghiệm VoxStudio ngay "
+    "hôm nay để mở khoá sức mạnh sáng tạo của bạn."
+)
+
+
 # ── Sample texts cho 7 voice mới (đảm bảo mỗi ngôn ngữ 3 voice) ──
 TEXT_ZH_AUDIOBOOK = (
     "深秋的午后，阳光斜斜地洒进书房，照亮了那本翻开的旧书。"
@@ -576,6 +586,117 @@ PRESETS = [
         "description": "Voix française féminine mature — documentaire, narration grave",
         "instruct": "female, middle-aged, low pitch",
         "sample_text": TEXT_FR_DOCUMENTARY,
+        "params": WARM_STUDIO_PARAMS,
+    },
+
+    # ════════════════════════════════════════════════════════════
+    # 10 VOICE QUẢNG CÁO — chuyên cho ad/commercial/promotion.
+    # Tất cả dùng TEXT_AD_VOXSTUDIO để preview giống nhau, dễ so sánh.
+    # Combo attribute UNIQUE so với 23 voice cũ.
+    # WARM_STUDIO_PARAMS cho controlled prosody, phù hợp quảng cáo.
+    # ════════════════════════════════════════════════════════════
+
+    # ── 5 NỮ — đa dạng độ tuổi + pitch ──
+    {
+        "slug": "nu_kim_chi",
+        "display_name": "Kim Chi",
+        "gender": "female",
+        "language": "vietnamese",
+        "description": "Nữ trẻ giọng cao vút — quảng cáo mỹ phẩm, beauty, năng lượng tích cực",
+        "instruct": "female, young adult, very high pitch",
+        "sample_text": TEXT_AD_VOXSTUDIO,
+        "params": WARM_STUDIO_PARAMS,
+    },
+    {
+        "slug": "nu_phuong_thao",
+        "display_name": "Phương Thảo",
+        "gender": "female",
+        "language": "vietnamese",
+        "description": "Nữ thiếu niên giọng cao vừa — Gen Z unboxing, sản phẩm trẻ trung",
+        "instruct": "female, teenager, high pitch",
+        "sample_text": TEXT_AD_VOXSTUDIO,
+        "params": WARM_STUDIO_PARAMS,
+    },
+    {
+        "slug": "nu_thuy_van",
+        "display_name": "Thuỳ Vân",
+        "gender": "female",
+        "language": "vietnamese",
+        "description": "Nữ trung niên giọng cao — quảng cáo dược, thực phẩm chức năng, tự tin",
+        "instruct": "female, middle-aged, high pitch",
+        "sample_text": TEXT_AD_VOXSTUDIO,
+        "params": WARM_STUDIO_PARAMS,
+    },
+    {
+        "slug": "nu_an_nhien",
+        "display_name": "An Nhiên",
+        "gender": "female",
+        "language": "vietnamese",
+        "description": "Nữ lớn tuổi giọng trung — chăm sóc sức khoẻ, dưỡng da gia đình, gentle",
+        "instruct": "female, elderly, moderate pitch",
+        "sample_text": TEXT_AD_VOXSTUDIO,
+        "params": WARM_STUDIO_PARAMS,
+    },
+    {
+        "slug": "nu_minh_chau",
+        "display_name": "Minh Châu",
+        "gender": "female",
+        "language": "vietnamese",
+        "description": "Nữ thanh niên giọng cực trầm — luxury brand, mỹ phẩm cao cấp, sang trọng",
+        "instruct": "female, young adult, very low pitch",
+        "sample_text": TEXT_AD_VOXSTUDIO,
+        "params": WARM_STUDIO_PARAMS,
+    },
+
+    # ── 5 NAM — đa dạng độ tuổi + pitch ──
+    {
+        "slug": "nam_dai_phat",
+        "display_name": "Đại Phát",
+        "gender": "male",
+        "language": "vietnamese",
+        "description": "Nam thiếu niên giọng cao — quảng cáo game, công nghệ trẻ, năng động",
+        "instruct": "male, teenager, high pitch",
+        "sample_text": TEXT_AD_VOXSTUDIO,
+        "params": WARM_STUDIO_PARAMS,
+    },
+    {
+        "slug": "nam_minh_huy",
+        "display_name": "Minh Huy",
+        "gender": "male",
+        "language": "vietnamese",
+        "description": "Nam thiếu niên giọng trung — Gen Z viral ad, trẻ trung gần gũi",
+        "instruct": "male, teenager, moderate pitch",
+        "sample_text": TEXT_AD_VOXSTUDIO,
+        "params": WARM_STUDIO_PARAMS,
+    },
+    {
+        "slug": "nam_truong_son",
+        "display_name": "Trường Sơn",
+        "gender": "male",
+        "language": "vietnamese",
+        "description": "Nam trung niên giọng cao — call-to-action urgency, ad khuyến mãi",
+        "instruct": "male, middle-aged, high pitch",
+        "sample_text": TEXT_AD_VOXSTUDIO,
+        "params": WARM_STUDIO_PARAMS,
+    },
+    {
+        "slug": "nam_long_vu",
+        "display_name": "Long Vũ",
+        "gender": "male",
+        "language": "vietnamese",
+        "description": "Nam thanh niên giọng cực trầm — luxury watch/car ad, deep authoritative",
+        "instruct": "male, young adult, very low pitch",
+        "sample_text": TEXT_AD_VOXSTUDIO,
+        "params": WARM_STUDIO_PARAMS,
+    },
+    {
+        "slug": "nam_phuoc_an",
+        "display_name": "Phước An",
+        "gender": "male",
+        "language": "vietnamese",
+        "description": "Nam lớn tuổi giọng trung — heritage brand, ngân hàng, bảo hiểm tin cậy",
+        "instruct": "male, elderly, moderate pitch",
+        "sample_text": TEXT_AD_VOXSTUDIO,
         "params": WARM_STUDIO_PARAMS,
     },
 ]
