@@ -88,13 +88,16 @@ def _classify(url: str) -> str:
 
 
 # ── Fetch info ─────────────────────────────────────────────────
-async def fetch_info(url: str, engine: str = "auto") -> InfoResult:
+async def fetch_info(url: str, engine: str = "auto",
+                     cookies_txt: str | None = None) -> InfoResult:
     """Lấy metadata + direct URL.
 
     engine:
       - "auto"    : scraper trước (nếu platform match), fallback yt-dlp
       - "scraper" : CHỈ Douyin scraper, không fallback
       - "ytdlp"   : CHỈ yt-dlp
+
+    cookies_txt: user paste cookie Netscape format (web bypass platform login).
     """
     url = (url or "").strip()
     if not url or not url.lower().startswith(("http://", "https://")):
@@ -135,7 +138,9 @@ async def fetch_info(url: str, engine: str = "auto") -> InfoResult:
         if not _YTDLP_OK:
             raise RuntimeError("Chế độ Toàn năng chưa sẵn sàng trên server.")
         loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(None, _fetch_via_ytdlp, url, platform)
+        return await loop.run_in_executor(
+            None, _fetch_via_ytdlp, url, platform, cookies_txt
+        )
 
     # engine == "auto" — smart fallback
     # 1. Scraper chỉ thử với Douyin/Bilibili vì TikTok signing hiện không ổn
@@ -156,7 +161,9 @@ async def fetch_info(url: str, engine: str = "auto") -> InfoResult:
     if _YTDLP_OK:
         loop = asyncio.get_running_loop()
         try:
-            return await loop.run_in_executor(None, _fetch_via_ytdlp, url, platform)
+            return await loop.run_in_executor(
+                None, _fetch_via_ytdlp, url, platform, cookies_txt
+            )
         except Exception as ytdlp_err:
             # Show both errors if scraper was also tried
             if scraper_err:
@@ -224,10 +231,28 @@ async def _fetch_via_scraper(url: str, platform: str) -> InfoResult | None:
     )
 
 
-def _fetch_via_ytdlp(url: str, platform: str) -> InfoResult:
+def _fetch_via_ytdlp(url: str, platform: str,
+                     cookies_txt: str | None = None) -> InfoResult:
     opts = {"quiet": True, "no_warnings": True, "skip_download": True,
             "noplaylist": True}
-    _attach_chrome_cookies(opts)
+    # Ưu tiên cookie user paste (cho web); fallback đọc Chrome local (chỉ desktop).
+    from tempfile import gettempdir
+    cookie_file = _write_cookies_file(cookies_txt, Path(gettempdir()) / "voxstudio_cookies")
+    if cookie_file:
+        opts["cookiefile"] = str(cookie_file)
+    else:
+        _attach_chrome_cookies(opts)
+    try:
+        return _fetch_via_ytdlp_inner(url, platform, opts)
+    finally:
+        if cookie_file:
+            try:
+                cookie_file.unlink(missing_ok=True)
+            except Exception:
+                pass
+
+
+def _fetch_via_ytdlp_inner(url: str, platform: str, opts: dict) -> InfoResult:
     try:
         with yt_dlp.YoutubeDL(opts) as y:
             info = y.extract_info(url, download=False)
@@ -296,6 +321,45 @@ def _fetch_via_ytdlp(url: str, platform: str) -> InfoResult:
         audio_url=None,
         source="ytdlp",
     )
+
+
+def _write_cookies_file(cookies_txt: str | None, dest_dir: Path) -> Path | None:
+    """Ghi Netscape cookie text ra file tạm để yt-dlp đọc.
+
+    Trên web (server RunPod), _attach_chrome_cookies() vô dụng — server không
+    có browser user. Thay vào đó user paste cookie (export từ extension
+    "Get cookies.txt LOCALLY") → frontend gửi qua HTTP → server ghi ra file
+    → pass `cookiefile` cho yt-dlp.
+
+    Trả None nếu cookies_txt rỗng hoặc invalid; caller sẽ fallback sang
+    _attach_chrome_cookies() (chỉ chạy được trên desktop).
+    """
+    if not cookies_txt or not cookies_txt.strip():
+        return None
+    content = cookies_txt.strip()
+    # Format check: Netscape cookie file phải có dòng tab-separated với
+    # ít nhất 7 column. Nếu user paste sai format → bỏ qua, không ghi.
+    has_valid_line = False
+    for line in content.splitlines():
+        if line.startswith("#") or not line.strip():
+            continue
+        if len(line.split("\t")) >= 7:
+            has_valid_line = True
+            break
+    if not has_valid_line:
+        logger.warning("cookies_txt không phải Netscape format (cần TAB phân tách)")
+        return None
+    # Đảm bảo header có comment Netscape — yt-dlp tolerant nhưng để cho chắc
+    if not content.lstrip().startswith("# Netscape"):
+        content = "# Netscape HTTP Cookie File\n" + content
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    fname = dest_dir / f"cookies_{uuid.uuid4().hex[:8]}.txt"
+    fname.write_text(content, encoding="utf-8")
+    try:
+        fname.chmod(0o600)
+    except Exception:
+        pass
+    return fname
 
 
 def _attach_chrome_cookies(opts: dict):
@@ -401,13 +465,18 @@ def download_to_file_generator(info: InfoResult, dest_path: Path,
 
 
 # ── yt-dlp download (auto-merge video+audio) ────────────────────
-def _download_via_ytdlp(url: str, pdir: Path, final_path: Path, max_height: int = 1080):
+def _download_via_ytdlp(url: str, pdir: Path, final_path: Path,
+                        max_height: int = 1080,
+                        cookies_txt: str | None = None):
     """Generator yield progress. Dùng yt-dlp download+merge thay vì httpx
     stream 1 URL — fix case DASH có video/audio tách riêng (FB/YouTube).
 
     max_height: cap chiều cao video (360/480/720/1080). Đặt 99999 = "best available".
+    cookies_txt: Netscape cookie text user paste (cho web bypass platform login).
     """
     q: "queue.Queue[dict | None]" = queue.Queue()
+    # Ghi cookie ra temp file (nếu user paste) — share giữa fetch + download.
+    _cookie_file_dl = _write_cookies_file(cookies_txt, pdir)
 
     def progress_hook(d):
         status = d.get("status")
@@ -464,7 +533,11 @@ def _download_via_ytdlp(url: str, pdir: Path, final_path: Path, max_height: int 
             ffbin = _shutil.which("ffmpeg")
             if ffbin:
                 common_opts["ffmpeg_location"] = ffbin
-            _attach_chrome_cookies(common_opts)
+            # Cookie: ưu tiên user paste (web) → fallback Chrome local (desktop).
+            if _cookie_file_dl is not None:
+                common_opts["cookiefile"] = str(_cookie_file_dl)
+            else:
+                _attach_chrome_cookies(common_opts)
 
             # Format selector priority (ưu tiên H.264 để SKIP transcode step
             # trên Mac, tiết kiệm 10-30s/video):
@@ -547,10 +620,17 @@ def _download_via_ytdlp(url: str, pdir: Path, final_path: Path, max_height: int 
             q.put(None)
 
     threading.Thread(target=worker, daemon=True).start()
-    while True:
-        item = q.get()
-        if item is None: break
-        yield item
+    try:
+        while True:
+            item = q.get()
+            if item is None: break
+            yield item
+    finally:
+        if _cookie_file_dl:
+            try:
+                _cookie_file_dl.unlink(missing_ok=True)
+            except Exception:
+                pass
 
 
 # ── High-level: download URL → VoxStudio project ───────────────
@@ -561,9 +641,13 @@ def download_to_project_generator(url: str,
                                   enable_subtitle: bool = False,
                                   use_watermark: bool = False,
                                   engine: str = "auto",
-                                  max_height: int = 1080):
+                                  max_height: int = 1080,
+                                  cookies_txt: str | None = None):
     """Full flow: fetch info → download → create dubbing project. Yields SSE.
-    Cuối cùng yield {step:"done", project_id, title, filename, duration}."""
+    Cuối cùng yield {step:"done", project_id, title, filename, duration}.
+
+    cookies_txt: Netscape cookie text user paste (bypass platform login).
+    """
     from .dubbing_svc import _project_dir, _save_meta, _detect_tts_engine
 
     # Resolve info (sync wrapper)
@@ -571,7 +655,9 @@ def download_to_project_generator(url: str,
         yield {"step": "resolving", "progress": 2, "label": "Đang phân tích URL…"}
         loop = asyncio.new_event_loop()
         try:
-            info = loop.run_until_complete(fetch_info(url, engine=engine))
+            info = loop.run_until_complete(
+                fetch_info(url, engine=engine, cookies_txt=cookies_txt)
+            )
         finally:
             loop.close()
     except Exception as e:
@@ -599,7 +685,9 @@ def download_to_project_generator(url: str,
     #                     thường trả URL combined sẵn).
     had_error = False
     if info.source == "ytdlp":
-        for tick in _download_via_ytdlp(url, pdir, final_path, max_height=max_height):
+        for tick in _download_via_ytdlp(url, pdir, final_path,
+                                        max_height=max_height,
+                                        cookies_txt=cookies_txt):
             if tick.get("step") == "error":
                 shutil.rmtree(pdir, ignore_errors=True)
                 had_error = True
@@ -704,7 +792,8 @@ def _safe_filename(name: str) -> str:
 def download_video_only_generator(url: str,
                                   engine: str = "auto",
                                   max_height: int = 1080,
-                                  use_watermark: bool = False):
+                                  use_watermark: bool = False,
+                                  cookies_txt: str | None = None):
     """Tải URL về VIDEO_CACHE_DIR (chỉ MP4, không tạo dubbing project).
 
     Dùng cho user web bấm "Tải về máy". SSE yield progress, event cuối có
@@ -712,6 +801,7 @@ def download_video_only_generator(url: str,
     /download/file/{file_id}?sig=… để stream MP4 về browser.
 
     File trong VIDEO_CACHE_DIR được cleanup theo TTL (xem main.py).
+    cookies_txt: Netscape cookie text user paste (bypass platform login).
     """
     from app.config import VIDEO_CACHE_DIR
 
@@ -725,7 +815,9 @@ def download_video_only_generator(url: str,
     try:
         loop = asyncio.new_event_loop()
         try:
-            info = loop.run_until_complete(fetch_info(url, engine=engine))
+            info = loop.run_until_complete(
+                fetch_info(url, engine=engine, cookies_txt=cookies_txt)
+            )
         finally:
             loop.close()
     except Exception as e:
@@ -749,7 +841,9 @@ def download_video_only_generator(url: str,
     # 2) Download — chọn engine theo source (yt-dlp tự merge DASH; httpx
     #    stream cho TikTok/Douyin URL combined).
     if info.source == "ytdlp":
-        for tick in _download_via_ytdlp(url, cache_dir, final_path, max_height=max_height):
+        for tick in _download_via_ytdlp(url, cache_dir, final_path,
+                                        max_height=max_height,
+                                        cookies_txt=cookies_txt):
             if tick.get("step") == "error":
                 final_path.unlink(missing_ok=True)
                 yield tick

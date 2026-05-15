@@ -733,12 +733,17 @@ export async function listJobs(limit = 20) {
   return api<{ jobs: Job[] }>(`/jobs?${params.toString()}`);
 }
 
-export async function fetchDownloadInfo(body: { url: string; engine?: string }) {
+export async function fetchDownloadInfo(body: {
+  url: string;
+  engine?: string;
+  cookies_txt?: string;
+}) {
   return api<DownloadInfo>("/download/info", {
     method: "POST",
     body: JSON.stringify({
       url: body.url,
       engine: body.engine || "auto",
+      cookies_txt: body.cookies_txt || null,
     }),
   });
 }
@@ -752,6 +757,7 @@ export async function downloadToProject(body: {
   use_watermark?: boolean;
   engine?: string;
   max_height?: number;
+  cookies_txt?: string;
 }) {
   const token = getToken();
   const res = await fetch(`${API_BASE}/download/to-project`, {
@@ -769,6 +775,7 @@ export async function downloadToProject(body: {
       use_watermark: body.use_watermark ?? false,
       engine: body.engine || "auto",
       max_height: body.max_height || 1080,
+      cookies_txt: body.cookies_txt || null,
     }),
   });
   if (!res.ok) {
@@ -793,6 +800,7 @@ export async function downloadToFile(body: {
   engine?: string;
   max_height?: number;
   use_watermark?: boolean;
+  cookies_txt?: string;
 }) {
   const token = getToken();
   const res = await fetch(`${API_BASE}/download/to-file`, {
@@ -806,6 +814,7 @@ export async function downloadToFile(body: {
       engine: body.engine || "auto",
       max_height: body.max_height || 1080,
       use_watermark: body.use_watermark ?? false,
+      cookies_txt: body.cookies_txt || null,
     }),
   });
   if (!res.ok) {

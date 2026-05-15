@@ -1183,6 +1183,7 @@ function HomeTab({
 // 2 actions: Tải MP4 về máy / Tạo dự án dubbing.
 // SSE progress, history localStorage, preview card với thumb + metadata.
 const VD_HISTORY_KEY = "voxstudio:web:download:history";
+const VD_COOKIES_KEY = "voxstudio:web:download:cookies";
 const VD_MAX_HISTORY = 12;
 
 type VdHistory = {
@@ -1251,6 +1252,23 @@ function VideoDownloadTab({ setActiveTab }: { setActiveTab: (t: Tab) => void }) 
       return [];
     }
   });
+  // Cookie state — paste 1 lần, lưu localStorage cho lần sau. User có thể
+  // xoá hoặc tắt "lưu lại" để chỉ session này. SECURITY: chứa session
+  // token thật, lưu plain trong localStorage không lý tưởng nhưng:
+  //   - HTTP-only cookie không web app khác đọc được
+  //   - localStorage chỉ same-origin (voxstudio.app) đọc
+  //   - User có tick "không lưu" thì chỉ giữ trong state
+  // Phase sau có thể encrypt với master password.
+  const [cookies, setCookies] = useState<string>(() => {
+    if (typeof window === "undefined") return "";
+    try { return window.localStorage.getItem(VD_COOKIES_KEY) || ""; }
+    catch { return ""; }
+  });
+  const [persistCookies, setPersistCookies] = useState<boolean>(() => {
+    if (typeof window === "undefined") return true;
+    try { return !!window.localStorage.getItem(VD_COOKIES_KEY); }
+    catch { return true; }
+  });
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const debounceRef = useRef<number | null>(null);
 
@@ -1267,12 +1285,29 @@ function VideoDownloadTab({ setActiveTab }: { setActiveTab: (t: Tab) => void }) 
     return () => {
       if (debounceRef.current) window.clearTimeout(debounceRef.current);
     };
+    // inspectUrlSilent intentionally omitted: chỉ trigger khi URL đổi,
+    // không phải mỗi lần cookies thay đổi.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [url]);
+
+  function saveCookies(next: string, persist: boolean) {
+    if (typeof window === "undefined") return;
+    try {
+      if (persist && next.trim()) {
+        window.localStorage.setItem(VD_COOKIES_KEY, next);
+      } else {
+        window.localStorage.removeItem(VD_COOKIES_KEY);
+      }
+    } catch {}
+  }
 
   async function inspectUrlSilent(target: string) {
     setBusyInfo(true);
     try {
-      const data = await fetchDownloadInfo({ url: target });
+      const data = await fetchDownloadInfo({
+        url: target,
+        cookies_txt: cookies.trim() || undefined,
+      });
       setInfo(data);
     } catch (e) {
       // silent — chỉ show khi user bấm action chính (Tải/Tạo dự án)
@@ -1349,6 +1384,7 @@ function VideoDownloadTab({ setActiveTab }: { setActiveTab: (t: Tab) => void }) 
         url: url.trim(),
         max_height: maxHeight,
         use_watermark: !preferNoWM,
+        cookies_txt: cookies.trim() || undefined,
       });
       let doneFileUrl = "";
       let doneFilename = "";
@@ -1422,6 +1458,7 @@ function VideoDownloadTab({ setActiveTab }: { setActiveTab: (t: Tab) => void }) 
         enable_subtitle: true,
         use_watermark: !preferNoWM,
         max_height: maxHeight,
+        cookies_txt: cookies.trim() || undefined,
       });
       let doneProjectId = "";
       let doneTitle = "";
@@ -1491,14 +1528,26 @@ function VideoDownloadTab({ setActiveTab }: { setActiveTab: (t: Tab) => void }) 
               </p>
             </div>
           </div>
-          <button
-            type="button"
-            onClick={() => setShowSettings((v) => !v)}
-            className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-border/60 bg-background/60 px-3 text-[11px] font-bold text-muted-foreground hover:border-primary/40 hover:text-foreground"
-          >
-            <Sliders className="h-3.5 w-3.5" />
-            Tuỳ chọn
-          </button>
+          <div className="flex items-center gap-2">
+            {cookies.trim() && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-2.5 py-1 text-[10px] font-black text-emerald-600 ring-1 ring-emerald-500/30 dark:text-emerald-300">
+                <CheckCircle2 className="h-3 w-3" />
+                Cookie sẵn sàng
+              </span>
+            )}
+            <button
+              type="button"
+              onClick={() => setShowSettings((v) => !v)}
+              className={`inline-flex h-9 items-center gap-1.5 rounded-lg border px-3 text-[11px] font-bold transition ${
+                showSettings
+                  ? "border-primary/60 bg-primary/15 text-primary"
+                  : "border-border/60 bg-background/60 text-muted-foreground hover:border-primary/40 hover:text-foreground"
+              }`}
+            >
+              <Sliders className="h-3.5 w-3.5" />
+              Tuỳ chọn
+            </button>
+          </div>
         </div>
 
         {/* Settings panel — slide in */}
@@ -1553,6 +1602,68 @@ function VideoDownloadTab({ setActiveTab }: { setActiveTab: (t: Tab) => void }) 
                   Giữ watermark
                 </button>
               </div>
+            </div>
+            <div className="sm:col-span-2">
+              <div className="flex items-center justify-between">
+                <label className="text-[10px] font-black uppercase tracking-wider text-muted-foreground">
+                  Cookie trình duyệt (tuỳ chọn — cho video cần đăng nhập)
+                </label>
+                {cookies && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCookies("");
+                      saveCookies("", persistCookies);
+                      toast.success("Đã xoá cookie");
+                    }}
+                    className="inline-flex h-6 items-center gap-1 rounded-md px-2 text-[10px] font-bold text-red-500 hover:bg-red-500/10"
+                  >
+                    <Trash2 className="h-3 w-3" />
+                    Xoá
+                  </button>
+                )}
+              </div>
+              <textarea
+                value={cookies}
+                onChange={(e) => {
+                  const next = e.target.value;
+                  setCookies(next);
+                  saveCookies(next, persistCookies);
+                }}
+                placeholder="# Netscape HTTP Cookie File&#10;.youtube.com&#9;TRUE&#9;/&#9;TRUE&#9;1234567890&#9;SID&#9;xxxxxxxxxx&#10;..."
+                rows={3}
+                className="mt-2 w-full resize-none rounded-lg border border-border/60 bg-background/60 px-3 py-2 font-mono text-[10px] leading-4 outline-none placeholder:text-muted-foreground/50 focus:border-primary/50"
+              />
+              <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+                <label className="inline-flex items-center gap-1.5 text-[11px] font-bold text-muted-foreground">
+                  <input
+                    type="checkbox"
+                    checked={persistCookies}
+                    onChange={(e) => {
+                      const next = e.target.checked;
+                      setPersistCookies(next);
+                      saveCookies(cookies, next);
+                    }}
+                    className="h-3.5 w-3.5 accent-primary"
+                  />
+                  Lưu cho lần sau (trong trình duyệt này)
+                </label>
+                <a
+                  href="https://chromewebstore.google.com/detail/get-cookiestxt-locally/cclelndahbckbenkjhflpdbgdldlbecc"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 text-[10px] font-bold text-primary hover:underline"
+                >
+                  <ExternalLink className="h-3 w-3" />
+                  Hướng dẫn lấy cookie (extension Chrome)
+                </a>
+              </div>
+              <p className="mt-1.5 leading-snug text-[10px] text-muted-foreground">
+                Cài extension <strong>Get cookies.txt LOCALLY</strong> → vào trang
+                TikTok/YouTube đã đăng nhập → click extension → Export →
+                paste nội dung file <code className="rounded bg-background/60 px-1">.txt</code> vào đây.
+                Cookie KHÔNG được gửi bên thứ ba — chỉ pass vào yt-dlp trên server VoxStudio.
+              </p>
             </div>
           </div>
         )}

@@ -29,15 +29,19 @@ def _client_ip(request: Request) -> str | None:
 async def fetch_info(
     url: str = Body(..., embed=True),
     engine: str = Body("auto", embed=True),
+    cookies_txt: Optional[str] = Body(None, embed=True),
 ):
     """Lấy metadata + direct URL (không tải). Dùng cho preview card ở UI.
 
     engine: 'auto' | 'scraper' (Douyin_TikTok_Scraper) | 'ytdlp' (yt-dlp).
+    cookies_txt: Netscape cookie text user paste (bypass platform login).
     Trả: { platform, title, author, thumbnail, duration, video_url,
             watermark_url, audio_url, source }
     """
     try:
-        info = await social_download_svc.fetch_info(url, engine=engine)
+        info = await social_download_svc.fetch_info(
+            url, engine=engine, cookies_txt=cookies_txt,
+        )
         return info.to_dict()
     except Exception as e:
         logger.warning("fetch_info failed: %s", e)
@@ -55,6 +59,7 @@ async def download_to_project(
     use_watermark: bool = Body(False, embed=True),
     engine: str = Body("auto", embed=True),
     max_height: int = Body(1080, embed=True),
+    cookies_txt: Optional[str] = Body(None, embed=True),
     ctx: dict = Depends(require_download_quota()),
 ):
     """Tải URL về → tạo dubbing project luôn. SSE stream progress.
@@ -80,6 +85,7 @@ async def download_to_project(
                     use_watermark=use_watermark,
                     engine=engine,
                     max_height=max_height,
+                    cookies_txt=cookies_txt,
                 ):
                     loop.call_soon_threadsafe(q.put_nowait, update)
             except Exception as e:
@@ -156,6 +162,7 @@ async def download_to_file(
     engine: str = Body("auto", embed=True),
     max_height: int = Body(1080, embed=True),
     use_watermark: bool = Body(False, embed=True),
+    cookies_txt: Optional[str] = Body(None, embed=True),
     ctx: dict = Depends(require_download_quota()),
 ):
     """Tải URL về cache server → SSE progress → final event chứa signed URL
@@ -182,6 +189,7 @@ async def download_to_file(
                     engine=engine,
                     max_height=max_height,
                     use_watermark=use_watermark,
+                    cookies_txt=cookies_txt,
                 ):
                     loop.call_soon_threadsafe(q.put_nowait, update)
             except Exception as e:
