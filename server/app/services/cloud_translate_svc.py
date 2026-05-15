@@ -157,7 +157,10 @@ DEFAULT_MODELS = {
     "gemini": "gemini-2.5-pro",        # flagship Google
 }
 
-TIMEOUT = 60.0
+# Gemini 2.5 Pro với batch 25+ segs hay mất 60-120s/call. Cũ 60s × 3
+# retries = chết 3 phút. Bump 180s × 3 = max 9 phút trước khi giả lập
+# "không kết nối" cho user.
+TIMEOUT = 180.0
 
 LANG_DISPLAY_NAMES = {
     "vi": "Vietnamese", "en": "English", "zh": "Chinese", "ja": "Japanese",
