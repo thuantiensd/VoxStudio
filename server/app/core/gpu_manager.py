@@ -180,6 +180,27 @@ class GPUManager:
         if self._fw_model is None and self._use_faster_whisper:
             self._load_faster_whisper()
         with self._lock:
+            # Auto-detect language NẾU user pick "auto" → cần biết để chọn
+            # initial_prompt đúng ngữ cảnh (Whisper train nhiều YouTube outro
+            # nên hay hallucinate "请订阅" khi gặp drama có nhạc nền).
+            detected_lang = (language or "").lower() if language else ""
+            if not detected_lang or detected_lang == "auto":
+                try:
+                    # Quick lang detect — Whisper analyse 30s đầu tự đoán
+                    _, info = self._fw_model.transcribe(
+                        audio_path,
+                        beam_size=1,
+                        vad_filter=False,
+                        without_timestamps=True,
+                        chunk_length=30,
+                    )
+                    detected_lang = info.language.lower() if info.language else ""
+                    logger.info("Whisper auto-detect lang: %s (prob=%.2f)",
+                                detected_lang, info.language_probability)
+                except Exception as e:
+                    logger.warning("Lang auto-detect fail: %s — sẽ chạy không initial_prompt", e)
+                    detected_lang = ""
+
             def _run(vad: bool):
                 # Anti-hallucination cho Chinese drama / video có nhạc nền:
                 # condition_on_previous_text=True (default) khiến model dùng
@@ -193,19 +214,18 @@ class GPUManager:
                 # nhiều YouTube Trung outro → khi audio không rõ, default
                 # về pattern này. Initial prompt với từ vựng drama đẩy
                 # nó về context phim.
-                lang_code = (language or "").lower() if language else ""
                 init_prompt = None
-                if lang_code in ("zh", "chinese"):
+                if detected_lang in ("zh", "chinese"):
                     init_prompt = (
                         "这是一段中文电视剧对白，包含家庭、爱情、商业、"
                         "古装等情节。请准确转写每个角色的台词。"
                     )
-                elif lang_code in ("ja", "japanese"):
+                elif detected_lang in ("ja", "japanese"):
                     init_prompt = (
                         "これは日本のドラマの会話です。"
                         "登場人物のセリフを正確に書き起こしてください。"
                     )
-                elif lang_code in ("ko", "korean"):
+                elif detected_lang in ("ko", "korean"):
                     init_prompt = (
                         "이것은 한국 드라마의 대화입니다. "
                         "등장인물의 대사를 정확하게 받아쓰기해 주세요."
@@ -239,7 +259,12 @@ class GPUManager:
                         "speech_pad_ms": 500,            # pad rộng hơn (cũ 400)
                         "threshold": 0.2,                # nhạy hơn (cũ 0.3, Silero default 0.5)
                     }
-                if language:
+                # Dùng detected_lang nếu có (đã auto-detect ở trên) → force
+                # Whisper transcribe theo lang đó thay vì để decide per-segment
+                # (giảm hallucinate khi chuyển language giữa chừng).
+                if detected_lang:
+                    kwargs["language"] = detected_lang
+                elif language and language != "auto":
                     kwargs["language"] = language
                 segments_gen, info = self._fw_model.transcribe(audio_path, **kwargs)
                 segs = []
