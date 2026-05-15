@@ -487,13 +487,11 @@ def build_speaker_analysis_prompt(
         third = max_lines // 3
         picked = valid[:third] + valid[n // 2 - third // 2 : n // 2 + third // 2] + valid[-third:]
 
-    # Gắn line index để LLM có thể tham chiếu khi reassign speaker mislabel.
     sample_lines = []
     for seg in picked:
         text = (seg.get("original_text") or "").strip()
         spk = seg.get("speaker") or "?"
-        idx = seg.get("index", 0)
-        sample_lines.append(f"[L{idx}] {spk}: {text}")
+        sample_lines.append(f"{spk}: {text}")
 
     genre_hint = ""
     if film_genre and film_genre != "auto":
@@ -682,30 +680,6 @@ này như nguồn duy nhất — mọi line đều phải dùng đúng từ ng�
 nhân vật chính. Đừng nhét những từ dịch máy bình thường (KHÔNG cần
 "老婆" → "em" vì đã xử lý bằng pronoun mapping).
 
-🔧 LINE-LEVEL SPEAKER VALIDATION (QUAN TRỌNG):
-
-Diarization audio không phải lúc nào cũng đúng — đặc biệt với utterance NGẮN
-(1-3 giây) hoặc khi voice tone tương tự (vd vợ-chồng nói nhỏ → bị gộp 1 cluster).
-
-Đọc TỪNG LINE format "[L<idx>] SPEAKER_XX: text". Nếu phát hiện SPEAKER_XX
-diarization GÁN SAI (text rõ là speaker khác nói), output reassignment.
-
-DẤU HIỆU MISLABEL:
-• Line "[L24] SPEAKER_00: Phải, ba không bắt nạt..." nhưng SPEAKER_00 đã được
-  xác định là MẸ ở các line khác → line này thật ra là BỐ (self-ref "ba").
-• Line có vocative "Mẹ ơi, …" nhưng tag là SPEAKER (mẹ) → ngược lại, phải là CON.
-• Line dùng "anh + verb" self-ref nhưng tag là SPEAKER_NỮ → phải là SPEAKER_NAM.
-
-CHỈ reassign khi CHẮC CHẮN có evidence cụ thể trong CHÍNH line đó:
-✅ self-pronoun rõ ("ba/mẹ/anh/em" làm chủ ngữ + verb)
-✅ vocative match speaker khác (vd "Em," addressing wife → speaker là chồng)
-✅ context conversation: line response phải khác speaker với line gốc
-
-❌ KHÔNG reassign khi:
-   • Text trung tính (không có pronoun cá nhân rõ)
-   • Chỉ vài chữ "Hả?"/"Dạ"/"Tuyệt lắm." — short reactions, để diarization tự lo
-   • Bạn không chắc 100%
-
 OUTPUT JSON duy nhất:
 {{
   "scene_context": "Mô tả ngắn bối cảnh + quan hệ chính của các speakers",
@@ -738,21 +712,11 @@ OUTPUT JSON duy nhất:
       "third_person_label": "con bé",
       "evidence": "Line 1: 'Mẹ ơi, con muốn...'"
     }}
-  }},
-  "line_reassignments": [
-    {{"line": 23, "from": "SPEAKER_00", "to": "SPEAKER_01",
-      "reason": "self-ref 'ba' nhưng SPEAKER_00 là mẹ → phải là SPEAKER_01 (bố)"}},
-    {{"line": 24, "from": "SPEAKER_00", "to": "SPEAKER_01",
-      "reason": "tiếp nối line 23 — speaker giải thích về chính mình"}}
-  ]
+  }}
 }}
 
-QUY TẮC:
-• mỗi SPEAKER có 1 entry, tiếng Việt, không đủ evidence → "unsure".
-• character_name + age là field bắt buộc. age default = "adult" nếu không chắc.
-• line_reassignments có thể rỗng [] nếu diarization có vẻ đúng hoàn toàn.
-• line_reassignments CHỈ chứa line bạn CHẮC CHẮN bị mislabel — bỏ qua line trung tính.
-• Field "line" phải khớp với số idx trong "[L<idx>]" của input.
+QUY TẮC: mỗi SPEAKER có 1 entry, tiếng Việt, không đủ evidence → "unsure".
+character_name + age là field bắt buộc. age default = "adult" nếu không chắc.
 """
     user_input = "HỘI THOẠI:\n\n" + "\n".join(sample_lines)
     return {"system": system, "user": user_input}
@@ -849,37 +813,6 @@ def parse_speaker_analysis(response_text: str) -> dict:
         "place_map": _clean_glossary_map(glossary_raw.get("place_map"), 15, 30, 40),
     }
 
-    # Per-line speaker reassignments — chỉ accept entry có shape đúng + speaker
-    # match format SPEAKER_XX. Tránh hallucination (LLM tự bịa speaker_id).
-    line_reassignments: list[dict] = []
-    raw_reassign = parsed.get("line_reassignments") or []
-    if isinstance(raw_reassign, list):
-        valid_speakers_set = set(speakers.keys())
-        spk_re = __import__("re").compile(r"^SPEAKER_\d+$")
-        for item in raw_reassign:
-            if not isinstance(item, dict):
-                continue
-            try:
-                line_idx = int(item.get("line"))
-            except (TypeError, ValueError):
-                continue
-            if line_idx < 0:
-                continue
-            to_spk = str(item.get("to") or "").strip()
-            if not spk_re.match(to_spk):
-                continue
-            # Bỏ qua reassign tới speaker LLM chưa định nghĩa (LLM bịa)
-            if valid_speakers_set and to_spk not in valid_speakers_set:
-                continue
-            from_spk = str(item.get("from") or "").strip()
-            reason = str(item.get("reason") or "").strip()[:200]
-            line_reassignments.append({
-                "line": line_idx,
-                "from": from_spk,
-                "to": to_spk,
-                "reason": reason,
-            })
-
     return {
         "scene_context": (parsed.get("scene_context") or "").strip()[:300],
         "register": (parsed.get("register") or "").strip()[:40],
@@ -890,7 +823,6 @@ def parse_speaker_analysis(response_text: str) -> dict:
         "genre_signals": signals,
         "glossary": glossary,
         "speakers": speakers,
-        "line_reassignments": line_reassignments,
     }
 
 

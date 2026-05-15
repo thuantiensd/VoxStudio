@@ -114,38 +114,6 @@ def _translate_uncached(
                 _store_llm_genders(ENGINE, full_info)
             except Exception:
                 pass
-
-        # Apply per-line speaker reassignments (LLM phát hiện diarize mislabel).
-        reassigns = relationships.get("line_reassignments") or []
-        if reassigns:
-            seg_by_idx: dict[int, dict] = {}
-            for s in segments:
-                idx_val = s.get("index")
-                if isinstance(idx_val, int):
-                    seg_by_idx[idx_val] = s
-            applied = 0
-            for r in reassigns:
-                line_idx = r.get("line")
-                target_spk = r.get("to")
-                if not isinstance(line_idx, int) or not target_spk:
-                    continue
-                seg = seg_by_idx.get(line_idx)
-                if not seg:
-                    continue
-                old_spk = seg.get("speaker")
-                if old_spk == target_spk:
-                    continue
-                seg["speaker"] = target_spk
-                seg["speaker_gender"] = None
-                applied += 1
-                logger.info(
-                    "Gemini reassign line %d: %s → %s (%s)",
-                    line_idx, old_spk, target_spk,
-                    (r.get("reason") or "")[:80],
-                )
-            if applied:
-                logger.info("Gemini applied %d/%d LLM line reassignments",
-                             applied, len(reassigns))
     except Exception as e:
         logger.warning("Gemini Pass-0 fail: %s — Pass-1/2 chạy không anchor", e)
 
