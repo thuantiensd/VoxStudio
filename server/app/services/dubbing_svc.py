@@ -453,6 +453,18 @@ _PHRASE_FIXES: list[tuple[str, str, str]] = [
         lambda m: f"{m.group(1)} {m.group(2)}, mời.",
         "Title + Name + xin hỏi → mời (请吧 chứ không 请问)",
     ),
+    # CỔ TRANG IDIOM — Hán-Việt dịch literal nghe ngơ. Thay bằng phrasing tự nhiên.
+    (r"\bmột mối búp bê\b", "đính ước trẻ con", "娃娃亲 — không phải 'búp bê'"),
+    (r"\bmối búp bê\b", "đính ước trẻ con", "娃娃亲 đứng riêng"),
+    (r"\bsong túc song phi\b", "trọn đời bên nhau", "双宿双飞"),
+    (r"\btĩnh tĩnh mà cười\b", "yên ổn cùng nhau", "静静相处 — không phải cười"),
+    (r"\btĩnh tĩnh tương xứ\b", "yên ổn cùng nhau", "静静相处 Hán-Việt thuần"),
+    # 应该的 đứng riêng = "phải vậy / tất nhiên" KHÔNG phải "nên mà"
+    (r"^Nên mà, nên mà\.?$", "Phải vậy, phải vậy.", "应该的应该的"),
+    (r"^Nên mà\.?$", "Phải vậy.", "应该的"),
+    # Whisper transcribe nhầm khiến câu mở đầu vô nghĩa
+    (r"^Có án nhân tạo\.?$", "", "Whisper noise — bỏ"),
+
     # PLATFORM WATERMARK — outro/credits jingle bị Whisper bắt nhầm thành dialogue.
     # Bỏ hoàn toàn (trả "" để TTS skip, không ghi vào sub/dub).
     (r"^YoYo Television Series.*$", "", "YoYo TV outro jingle"),
