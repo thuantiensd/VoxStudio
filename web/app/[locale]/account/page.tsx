@@ -1200,20 +1200,24 @@ type VdHistory = {
 };
 
 const VD_PLATFORMS: { name: string; host: string; gradient: string }[] = [
-  { name: "YouTube",   host: "youtube.com",  gradient: "from-red-500 to-rose-600" },
-  { name: "TikTok",    host: "tiktok.com",   gradient: "from-zinc-900 to-zinc-700" },
-  { name: "Facebook",  host: "facebook.com", gradient: "from-blue-600 to-indigo-600" },
-  { name: "Instagram", host: "instagram.com",gradient: "from-pink-500 via-rose-500 to-amber-500" },
-  { name: "Twitter/X", host: "x.com",        gradient: "from-sky-500 to-blue-700" },
-  { name: "Bilibili",  host: "bilibili.com", gradient: "from-cyan-400 to-sky-600" },
-  { name: "Douyin",    host: "douyin.com",   gradient: "from-fuchsia-500 to-pink-600" },
-  { name: "Vimeo",     host: "vimeo.com",    gradient: "from-cyan-500 to-teal-600" },
+  { name: "YouTube",      host: "youtube.com",  gradient: "from-red-500 to-rose-600" },
+  { name: "TikTok",       host: "tiktok.com",   gradient: "from-zinc-900 to-zinc-700" },
+  { name: "Facebook",     host: "facebook.com", gradient: "from-blue-600 to-indigo-600" },
+  { name: "Instagram",    host: "instagram.com",gradient: "from-pink-500 via-rose-500 to-amber-500" },
+  { name: "Twitter/X",    host: "x.com",        gradient: "from-sky-500 to-blue-700" },
+  { name: "Bilibili",     host: "bilibili.com", gradient: "from-cyan-400 to-sky-600" },
+  { name: "Bilibili Intl",host: "bilibili.tv",  gradient: "from-cyan-300 to-blue-500" },
+  { name: "Douyin",       host: "douyin.com",   gradient: "from-fuchsia-500 to-pink-600" },
+  { name: "Vimeo",        host: "vimeo.com",    gradient: "from-cyan-500 to-teal-600" },
 ];
 
 function detectPlatform(url: string): typeof VD_PLATFORMS[number] | null {
   if (!url) return null;
   const u = url.toLowerCase();
+  // Bilibili.tv phải check TRƯỚC bilibili.com (vì "bilibili" chung).
+  if (u.includes("bilibili.tv")) return VD_PLATFORMS.find((p) => p.host === "bilibili.tv") || null;
   for (const p of VD_PLATFORMS) {
+    if (p.host === "bilibili.tv") continue; // đã check ở trên
     if (u.includes(p.host)) return p;
   }
   if (u.includes("vt.tiktok") || u.includes("vm.tiktok")) return VD_PLATFORMS[1];

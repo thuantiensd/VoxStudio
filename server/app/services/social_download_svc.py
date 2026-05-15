@@ -82,6 +82,9 @@ def _classify(url: str) -> str:
     if "youtube" in host or host == "youtu.be": return "youtube"
     if "facebook" in host or "fb.watch" in host: return "facebook"
     if "instagram" in host: return "instagram"
+    # Bilibili có 2 site: bilibili.com (Trung) vs bilibili.tv (quốc tế).
+    # DT scraper chỉ support .com; .tv phải đi yt-dlp + Referer riêng.
+    if "bilibili.tv" in host: return "bilibili_intl"
     if "bilibili" in host or host == "b23.tv": return "bilibili"
     if host in ("twitter.com", "x.com", "t.co"): return "twitter"
     return "generic"
@@ -116,9 +119,13 @@ async def fetch_info(url: str, engine: str = "auto",
                 "Hãy chuyển sang chế độ Toàn năng."
             )
         if platform not in ("douyin", "bilibili"):
+            extra = ""
+            if platform == "bilibili_intl":
+                extra = (" Bilibili.tv (quốc tế) phải dùng chế độ Toàn năng "
+                         "— Chế độ Nhanh chỉ hỗ trợ Bilibili.com (Trung).")
             raise RuntimeError(
-                "Chế độ Nhanh chỉ hỗ trợ Douyin, Bilibili. "
-                "Với link khác hãy dùng chế độ Toàn năng."
+                "Chế độ Nhanh chỉ hỗ trợ Douyin, Bilibili.com. "
+                "Với link khác hãy dùng chế độ Toàn năng." + extra
             )
         try:
             info = await _fetch_via_scraper(url, platform)
@@ -435,6 +442,8 @@ def download_to_file_generator(info: InfoResult, dest_path: Path,
                 headers["Referer"] = "https://www.douyin.com/"
             elif info.platform == "bilibili":
                 headers["Referer"] = "https://www.bilibili.com/"
+            elif info.platform == "bilibili_intl":
+                headers["Referer"] = "https://www.bilibili.tv/"
 
             import time
             with httpx.stream("GET", info.video_url, headers=headers,
