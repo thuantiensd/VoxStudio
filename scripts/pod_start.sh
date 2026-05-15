@@ -34,13 +34,24 @@ echo "════════════════════════�
 echo "  VoxStudio Pod Start  ($(date '+%Y-%m-%d %H:%M:%S'))"
 echo "═══════════════════════════════════════════════════════"
 
-# ── 0. System deps — ffmpeg (cần cho Whisper / Demucs / TTS export) ──
-# Pod restart đôi khi mất ffmpeg (container disk reset). Tự cài nếu thiếu.
-if ! command -v ffprobe >/dev/null 2>&1 || ! command -v ffmpeg >/dev/null 2>&1; then
-    echo "→ ffmpeg/ffprobe missing — installing..."
+# ── 0. System deps — ffmpeg + fonts CJK (cần cho subtitle multi-lang) ──
+# Pod restart đôi khi mất system packages (container disk reset).
+NEED_INSTALL=()
+command -v ffprobe >/dev/null 2>&1 || NEED_INSTALL+=(ffmpeg libsndfile1 libsox-fmt-all sox)
+
+# Fonts — Noto CJK cho Korean/Japanese/Chinese, Noto Sans general cho Latin/VN/Thai/etc
+# Subtitle render sẽ ra □□□ cho Hangul/Hiragana/Han nếu thiếu Noto CJK.
+if ! fc-list 2>/dev/null | grep -qi "noto sans cjk"; then
+    NEED_INSTALL+=(fonts-noto-cjk fonts-noto fonts-noto-extra)
+fi
+
+if [ ${#NEED_INSTALL[@]} -gt 0 ]; then
+    echo "→ System packages missing: ${NEED_INSTALL[*]}"
     apt-get update -qq
-    apt-get install -y --no-install-recommends ffmpeg libsndfile1 libsox-fmt-all sox
-    echo "  ✓ ffmpeg installed: $(ffmpeg -version 2>&1 | head -1)"
+    apt-get install -y --no-install-recommends "${NEED_INSTALL[@]}"
+    # Refresh fontconfig cache để libass thấy font mới ngay
+    fc-cache -f 2>/dev/null || true
+    echo "  ✓ System deps ready"
 fi
 
 # ── 1. Activate venv ──────────────────────────────────────────────

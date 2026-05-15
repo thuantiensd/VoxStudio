@@ -3966,6 +3966,40 @@ def _split_segment_for_subtitle(seg: dict, max_chars: int = 50) -> list[dict]:
     return out
 
 
+def _pick_subtitle_font(target_lang: str, user_font: str) -> str:
+    """Auto-pick font theo ngôn ngữ đích — tránh hiện □□□ cho CJK/Thai/etc.
+
+    User config "Arial" mặc định không có Hangul/Hiragana/Han glyph →
+    libass render □ chữ bị hỏng. Map ngôn ngữ sang font universal
+    (Noto Sans CJK / Noto Sans) đã cài sẵn trên pod.
+
+    Nếu user explicit pick font khác Arial → respect (assume họ biết
+    font đó có support glyph cần thiết).
+    """
+    if user_font and user_font.lower() not in ("arial", "default", ""):
+        return user_font  # user explicit choice — keep
+
+    lang = (target_lang or "").lower().strip()
+    cjk_map = {
+        "korean": "Noto Sans CJK KR",
+        "ko": "Noto Sans CJK KR",
+        "japanese": "Noto Sans CJK JP",
+        "ja": "Noto Sans CJK JP",
+        "jp": "Noto Sans CJK JP",
+        "chinese": "Noto Sans CJK SC",
+        "zh": "Noto Sans CJK SC",
+        "zh_cn": "Noto Sans CJK SC",
+        "zh_tw": "Noto Sans CJK TC",
+        "thai": "Noto Sans Thai",
+        "th": "Noto Sans Thai",
+        "arabic": "Noto Sans Arabic",
+        "ar": "Noto Sans Arabic",
+        "hindi": "Noto Sans Devanagari",
+        "hi": "Noto Sans Devanagari",
+    }
+    return cjk_map.get(lang, "Noto Sans")  # default Noto Sans hỗ trợ Latin+Cyrillic+VN
+
+
 def generate_ass(project_id: str, use_translated: bool = True) -> str:
     """Generate ASS subtitle with styling."""
     project = _load_meta(project_id)
@@ -3973,7 +4007,9 @@ def generate_ass(project_id: str, use_translated: bool = True) -> str:
         raise ValueError("Project not found")
 
     style = project.get("subtitle_style", {})
-    font = style.get("font_family", "Arial")
+    user_font = style.get("font_family", "Arial")
+    target_lang = project.get("target_language", "vi")
+    font = _pick_subtitle_font(target_lang, user_font)
     size = style.get("font_size", 24)
     bold = -1 if style.get("font_bold", False) else 0
     italic = -1 if style.get("font_italic", False) else 0
