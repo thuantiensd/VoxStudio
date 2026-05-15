@@ -4567,38 +4567,6 @@ class _Canceled(Exception):
     pass
 
 
-_step_throttle: dict[str, float] = {}  # project_id → last write timestamp
-
-
-def _mark_project_step(project_id: str, label: str) -> None:
-    """Persist current step label vào meta để FE đọc qua /dubbing/projects.
-    Mỗi yield trong pipeline gọi cái này → user thấy live label trên card.
-
-    Throttle: tối đa 1 ghi đĩa/giây/project (TTS yield 4×/s sẽ ghi quá nhiều).
-    Bỏ qua nếu label TRÙNG label cuối — không tốn write.
-    Idempotent + safe (skip nếu meta missing/done/error).
-    """
-    if not label:
-        return
-    import time as _t
-    now = _t.time()
-    last = _step_throttle.get(project_id, 0)
-    # Throttle: chỉ ghi nếu cách lần trước ≥ 1s
-    if now - last < 1.0:
-        return
-    try:
-        meta = _load_meta(project_id)
-        if not meta or meta.get("status") in ("done", "error", "canceled"):
-            return
-        # Chỉ update nếu thay đổi để giảm I/O
-        if meta.get("current_step") != label:
-            meta["current_step"] = label[:200]
-            _save_meta(meta)
-            _step_throttle[project_id] = now
-    except Exception:
-        pass  # never block pipeline vì status persist fail
-
-
 def _mark_project_error(project_id: str, error_msg: str) -> None:
     """Set project.status = 'error' + project.error = msg. FE poll thấy
     status='error' → hiện thị "Thất bại" thay vì "đang chạy" giả lập.

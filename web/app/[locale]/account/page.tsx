@@ -3913,12 +3913,6 @@ function DubProjectCard({
             />
             {isRunning && <div className="dub-progress-shimmer" />}
           </div>
-          {/* Live label từ pipeline — show current step user-friendly */}
-          {isRunning && (project.meta as { current_step?: string })?.current_step && (
-            <div className="mt-1 truncate text-[10.5px] text-primary/80 italic">
-              {(project.meta as { current_step?: string }).current_step}
-            </div>
-          )}
         </div>
       )}
 

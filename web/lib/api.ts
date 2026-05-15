@@ -187,9 +187,7 @@ export type DubbingListProject = {
   target_language?: string | null;
   status?: string | null;
   created_at?: string | null;
-  // Live progress label persist vào meta khi đang chạy pipeline
-  // (vd "Đang chuyển giọng câu 12/40 (còn ~2p15s)...")
-  meta?: Record<string, unknown> & { current_step?: string };
+  meta?: Record<string, unknown>;
 };
 
 export type Job = {
