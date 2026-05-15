@@ -453,6 +453,18 @@ _PHRASE_FIXES: list[tuple[str, str, str]] = [
         lambda m: f"{m.group(1)} {m.group(2)}, mời.",
         "Title + Name + xin hỏi → mời (请吧 chứ không 请问)",
     ),
+    # PLATFORM WATERMARK — outro/credits jingle bị Whisper bắt nhầm thành dialogue.
+    # Bỏ hoàn toàn (trả "" để TTS skip, không ghi vào sub/dub).
+    (r"^YoYo Television Series.*$", "", "YoYo TV outro jingle"),
+    (r"^WeTV.*Exclusive.*$", "", "WeTV outro"),
+    (r"^iQiyi.*$", "", "iQiyi outro"),
+    (r"^Tencent (?:Video|Pictures).*$", "", "Tencent outro"),
+    (r"^Mango TV.*$|^MGTV.*$", "", "Mango TV outro"),
+    (r"^Youku.*$", "", "Youku outro"),
+    (r"^Bilibili.*$", "", "Bilibili outro"),
+    (r"^Netflix.*Original.*$", "", "Netflix outro"),
+    (r"^.*All Rights? Reserved.*$", "", "Copyright text"),
+    (r"^.*Television Series Exclusive.*$", "", "Generic TV exclusive watermark"),
 ]
 
 
