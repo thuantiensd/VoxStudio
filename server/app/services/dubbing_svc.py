@@ -2931,6 +2931,33 @@ def generate_segment(project_id: str, seg_id: str) -> dict:
                                    seg.get("id", "?"), MAX_SPEED_FACTOR,
                                    (actual_dur / MAX_SPEED_FACTOR - target_duration) * 1000)
             elif actual_dur < target_duration * 0.9:
+                # Text ngắn (≤ 10 chars) + slot dài (> 1.5s, audio < 60% slot)
+                # → cho phép gentle slowdown 0.88-0.95x để voice đọc dramatic
+                # hơn thay vì cụt + silence pad. KHÔNG dùng slowdown cho text
+                # dài (muddy quality khi atempo < 1.0 cho audio > 2s).
+                n_chars = len(tts_text.strip())
+                if (n_chars <= 12 and target_duration > 1.5
+                        and actual_dur < target_duration * 0.65):
+                    # Tính slowdown factor để audio fill ~85% slot, vẫn còn
+                    # silence pad nhỏ cuối (tránh sounds packed-out)
+                    desired_dur = target_duration * 0.85
+                    slow_factor = actual_dur / desired_dur  # < 1.0
+                    slow_factor = max(0.88, slow_factor)    # KHÔNG slow quá 0.88
+                    if slow_factor < 0.97:
+                        logger.info("[dub] short-text gentle slowdown: %d chars · "
+                                    "actual=%.2fs target=%.2fs speed=%.2fx",
+                                    n_chars, actual_dur, target_duration, slow_factor)
+                        seg_dir = _segments_dir(project_id)
+                        raw_wav = seg_dir / f"{seg_id}_raw.wav"
+                        stretched_wav = seg_dir / f"{seg_id}_stretched.wav"
+                        sf.write(str(raw_wav), audio_np, sr)
+                        try:
+                            _atempo_stretch(raw_wav, stretched_wav, slow_factor)
+                            audio_np, sr = sf.read(str(stretched_wav))
+                            actual_dur = len(audio_np) / sr
+                        finally:
+                            raw_wav.unlink(missing_ok=True)
+                            stretched_wav.unlink(missing_ok=True)
                 logger.info("Vox Premium short-fill: actual=%.2fs target=%.2fs (silence padding)",
                             actual_dur, target_duration)
 
