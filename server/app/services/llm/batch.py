@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 # Số batch concurrent theo engine. Default conservative để safe với free tier.
 # User Pro có thể tăng qua env var sau.
 CONCURRENT_BATCHES = {
-    "gemini": 3,    # Conservative — free tier 15 RPM
+    "gemini": 4,    # Tier 1+ paid (60+ RPM) — bump từ 3 cho phim dài
     "openai": 6,    # Tier 1 (500 RPM) — plenty headroom
     "claude": 4,    # Tier 1 (50 RPM)
 }
@@ -32,19 +32,28 @@ CONCURRENT_BATCHES = {
 def adaptive_batch_size(n_segments: int) -> int:
     """Pick batch size tối ưu theo tổng segment count.
 
-    Bump 2026-05: flagship LLM (gpt-5/opus-4-5/gemini-2.5-pro) có context
-    256K-1M → batch lớn hơn giúp giữ pronoun + name consistency xuyên suốt.
-    Batch quá nhỏ → LLM mất context → name drift / pronoun slip.
+    Trade-off: batch lớn → ít overhead, context tốt hơn (đỡ name drift)
+    NHƯNG response time scale linear → dễ timeout. Cap ở 80/batch để
+    response < 120s (vừa khít timeout 240s, có headroom retry 1 lần).
+
+    Tuning 2026-05-15: hạ ngưỡng "1 batch" từ 150 → 80 vì user test
+    video 5-10 phút (50-100 segs) hay vượt timeout 90s với Gemini Pro.
+    Sau bump timeout 240s + cap batch 80 → an toàn cho phim < 60 phút.
+
+    Concurrency vẫn handle context cross-batch qua context_before
+    (overlap 10 lines giữa batch).
     """
-    if n_segments < 150:
-        return n_segments  # 1 batch — full context, ideal
-    if n_segments < 400:
-        return 60
-    if n_segments < 800:
-        return 50
-    if n_segments < 1500:
-        return 40
-    return 30  # very long film — vẫn lớn hơn batch cũ
+    if n_segments <= 80:
+        return n_segments  # 1 batch — full context, ideal cho phim ngắn (≤ 8 phút)
+    if n_segments <= 200:
+        return 70  # 2-3 batches cho phim 10-20 phút
+    if n_segments <= 500:
+        return 60  # 4-9 batches cho phim 20-50 phút
+    if n_segments <= 1000:
+        return 50  # 10-20 batches cho phim 50-100 phút
+    if n_segments <= 2000:
+        return 40  # 25-50 batches cho phim 100-200 phút
+    return 30  # very long film/series — vẫn lớn hơn batch cũ
 
 
 T = TypeVar("T")

@@ -4692,9 +4692,12 @@ def auto_dub(
             },
             start_pct=r_transl[0], end_pct=r_transl[1],
             label="Đang dịch thuật...", estimated_sec=20,
-            # GPT-5 reasoning batch lớn có thể 60-90s/batch × 3+ batches +
-            # Pass-0 analyze → tổng dễ vượt default timeout 200s. Cho 10 phút.
-            hard_timeout_sec=600,
+            # Translate phase tổng = Pass-0 + N batches × thời gian/batch.
+            # Phim 60-100 phút có 50-100 batches, dù chạy 4 concurrent thì
+            # vẫn 25 waves × 90s = 37 phút. Cho 30 phút phase timeout
+            # an toàn cho phim ≤ 90 phút. Phim siêu dài bypass timeout
+            # qua hard_timeout_sec arg explicit.
+            hard_timeout_sec=1800,
         ):
             if tick.get("step") == "error":
                 _mark_project_error(project_id, tick.get("label") or "Pipeline thất bại")
