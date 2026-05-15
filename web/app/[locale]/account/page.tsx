@@ -51,6 +51,11 @@ import {
   Heart,
   Plus,
   Globe,
+  Clipboard,
+  Link2,
+  ExternalLink,
+  Sliders,
+  Eye,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/lib/auth-context";
@@ -67,6 +72,8 @@ import {
   startDubbingAutoDub,
   getDubbingResourceUrl,
   downloadToProject,
+  downloadToFile,
+  absUrl,
   fetchCreditPacks,
   fetchDownloadInfo,
   generateCloudTts,
@@ -1025,7 +1032,7 @@ export default function AccountPage() {
           {activeTab === "home" && (
             <HomeTab user={user} setActiveTab={setActiveTab} />
           )}
-          {activeTab === "video-download" && <VideoDownloadTab />}
+          {activeTab === "video-download" && <VideoDownloadTab setActiveTab={setActiveTab} />}
           {activeTab === "tts" && <TtsTab setActiveTab={setActiveTab} />}
           {activeTab === "subtitle" && <SubtitleTab />}
           {activeTab === "dubbing" && <DubbingTab setActiveTab={setActiveTab} />}
@@ -1172,50 +1179,240 @@ function HomeTab({
 }
 
 // ── VIDEO DOWNLOAD TAB ─────────────────────────────────────────────────
-function VideoDownloadTab() {
+// ── VIDEO DOWNLOAD TAB ─────────────────────────────────────────────────
+// 2 actions: Tải MP4 về máy / Tạo dự án dubbing.
+// SSE progress, history localStorage, preview card với thumb + metadata.
+const VD_HISTORY_KEY = "voxstudio:web:download:history";
+const VD_MAX_HISTORY = 12;
+
+type VdHistory = {
+  url: string;
+  title?: string;
+  thumbnail?: string;
+  platform?: string;
+  duration?: number;
+  at: number;
+  kind: "file" | "project";
+  file_url?: string;
+  project_id?: string;
+  filename?: string;
+};
+
+const VD_PLATFORMS: { name: string; host: string; gradient: string }[] = [
+  { name: "YouTube",   host: "youtube.com",  gradient: "from-red-500 to-rose-600" },
+  { name: "TikTok",    host: "tiktok.com",   gradient: "from-zinc-900 to-zinc-700" },
+  { name: "Facebook",  host: "facebook.com", gradient: "from-blue-600 to-indigo-600" },
+  { name: "Instagram", host: "instagram.com",gradient: "from-pink-500 via-rose-500 to-amber-500" },
+  { name: "Twitter/X", host: "x.com",        gradient: "from-sky-500 to-blue-700" },
+  { name: "Bilibili",  host: "bilibili.com", gradient: "from-cyan-400 to-sky-600" },
+  { name: "Douyin",    host: "douyin.com",   gradient: "from-fuchsia-500 to-pink-600" },
+  { name: "Vimeo",     host: "vimeo.com",    gradient: "from-cyan-500 to-teal-600" },
+];
+
+function detectPlatform(url: string): typeof VD_PLATFORMS[number] | null {
+  if (!url) return null;
+  const u = url.toLowerCase();
+  for (const p of VD_PLATFORMS) {
+    if (u.includes(p.host)) return p;
+  }
+  if (u.includes("vt.tiktok") || u.includes("vm.tiktok")) return VD_PLATFORMS[1];
+  if (u.includes("b23.tv")) return VD_PLATFORMS[5];
+  if (u.includes("fb.com") || u.includes("fb.watch")) return VD_PLATFORMS[2];
+  if (u.includes("youtu.be")) return VD_PLATFORMS[0];
+  return null;
+}
+
+function formatDuration(sec?: number): string {
+  if (!sec || sec <= 0) return "";
+  const m = Math.floor(sec / 60);
+  const s = Math.round(sec % 60);
+  return `${m}:${s.toString().padStart(2, "0")}`;
+}
+
+function VideoDownloadTab({ setActiveTab }: { setActiveTab: (t: Tab) => void }) {
   const [url, setUrl] = useState("");
   const [info, setInfo] = useState<DownloadInfo | null>(null);
   const [busyInfo, setBusyInfo] = useState(false);
-  const [busyProject, setBusyProject] = useState(false);
-  const [message, setMessage] = useState("");
+  const [busy, setBusy] = useState<null | "file" | "project">(null);
+  const [progress, setProgress] = useState(0);
+  const [progressLabel, setProgressLabel] = useState("");
+  const [progressDetail, setProgressDetail] = useState("");
   const [error, setError] = useState("");
-  const platforms = [
-    { name: "YouTube", color: "bg-red-500" },
-    { name: "Facebook", color: "bg-blue-600" },
-    { name: "TikTok", color: "bg-foreground" },
-    { name: "Instagram", color: "bg-gradient-to-br from-pink-500 to-yellow-500" },
-    { name: "Twitter", color: "bg-sky-400" },
-    { name: "Vimeo", color: "bg-cyan-500" },
-    { name: "LinkedIn", color: "bg-blue-700" },
-    { name: "Twitch", color: "bg-purple-600" },
-  ];
-
-  async function inspectUrl() {
-    setError("");
-    setMessage("");
-    setInfo(null);
-    if (!url.trim()) {
-      setError("Dán link video trước khi kiểm tra.");
-      return;
+  const [success, setSuccess] = useState<null | { kind: "file" | "project"; file_url?: string; filename?: string; project_id?: string; title?: string }>(null);
+  const [showSettings, setShowSettings] = useState(false);
+  const [maxHeight, setMaxHeight] = useState(1080);
+  const [preferNoWM, setPreferNoWM] = useState(true);
+  const [history, setHistory] = useState<VdHistory[]>(() => {
+    if (typeof window === "undefined") return [];
+    try {
+      const raw = window.localStorage.getItem(VD_HISTORY_KEY);
+      return raw ? (JSON.parse(raw) as VdHistory[]) : [];
+    } catch {
+      return [];
     }
+  });
+  const inputRef = useRef<HTMLTextAreaElement | null>(null);
+  const debounceRef = useRef<number | null>(null);
+
+  // Auto-fetch info when URL looks valid (debounce 600ms). State reset
+  // (clear error/info) được làm ngay trong onChange của textarea — không
+  // dùng setState trong effect để tránh cascading renders (React 19 strict).
+  useEffect(() => {
+    if (debounceRef.current) window.clearTimeout(debounceRef.current);
+    const trimmed = url.trim();
+    if (!/^https?:\/\/\S+$/i.test(trimmed)) return;
+    debounceRef.current = window.setTimeout(() => {
+      void inspectUrlSilent(trimmed);
+    }, 600);
+    return () => {
+      if (debounceRef.current) window.clearTimeout(debounceRef.current);
+    };
+  }, [url]);
+
+  async function inspectUrlSilent(target: string) {
     setBusyInfo(true);
     try {
-      setInfo(await fetchDownloadInfo({ url: url.trim() }));
+      const data = await fetchDownloadInfo({ url: target });
+      setInfo(data);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Không đọc được thông tin video.");
+      // silent — chỉ show khi user bấm action chính (Tải/Tạo dự án)
+      const msg = e instanceof Error ? e.message : "Không đọc được thông tin video.";
+      // Nếu lỗi do platform yêu cầu login → vẫn show ở error bar
+      if (/login|đăng nhập|cookies|sign in/i.test(msg)) setError(msg);
     } finally {
       setBusyInfo(false);
     }
   }
 
-  async function createProject() {
+  function pushHistory(entry: VdHistory) {
+    setHistory((cur) => {
+      const next = [entry, ...cur.filter((x) => x.url !== entry.url)].slice(0, VD_MAX_HISTORY);
+      try { localStorage.setItem(VD_HISTORY_KEY, JSON.stringify(next)); } catch {}
+      return next;
+    });
+  }
+
+  function clearHistory() {
+    setHistory([]);
+    try { localStorage.removeItem(VD_HISTORY_KEY); } catch {}
+  }
+
+  async function handlePaste() {
+    try {
+      const text = await navigator.clipboard.readText();
+      if (text) {
+        setUrl(text.trim());
+        inputRef.current?.focus();
+      } else {
+        toast.error("Clipboard trống — copy link video trước rồi bấm Dán.");
+      }
+    } catch {
+      toast.error("Trình duyệt chặn đọc clipboard — Cmd/Ctrl+V vào ô link.");
+    }
+  }
+
+  async function readSse(res: Response, onEvent: (p: Record<string, unknown>) => void) {
+    const reader = res.body?.getReader();
+    if (!reader) return;
+    const decoder = new TextDecoder();
+    let buf = "";
+    while (true) {
+      const chunk = await reader.read();
+      if (chunk.done) break;
+      buf += decoder.decode(chunk.value, { stream: true });
+      const events = buf.split("\n\n");
+      buf = events.pop() || "";
+      for (const raw of events) {
+        const line = raw.split("\n").find((l) => l.startsWith("data: "));
+        if (!line) continue;
+        try {
+          const payload = JSON.parse(line.slice(6)) as Record<string, unknown>;
+          onEvent(payload);
+        } catch {}
+      }
+    }
+  }
+
+  async function startToFile() {
     setError("");
-    setMessage("");
+    setSuccess(null);
+    if (!url.trim()) {
+      setError("Dán link video trước khi tải.");
+      return;
+    }
+    setBusy("file");
+    setProgress(0);
+    setProgressLabel("Đang phân tích URL…");
+    setProgressDetail("");
+    try {
+      const res = await downloadToFile({
+        url: url.trim(),
+        max_height: maxHeight,
+        use_watermark: !preferNoWM,
+      });
+      let doneFileUrl = "";
+      let doneFilename = "";
+      let doneTitle = "";
+      await readSse(res, (p) => {
+        const step = String(p.step || "");
+        const lbl = typeof p.label === "string" ? p.label : "";
+        const det = typeof p.detail === "string" ? p.detail : "";
+        const pct = typeof p.progress === "number" ? p.progress : null;
+        if (lbl) setProgressLabel(lbl);
+        if (det) setProgressDetail(det);
+        if (pct !== null && pct >= 0) setProgress(pct);
+        if (step === "meta" && typeof p.thumbnail === "string") {
+          setInfo((cur) => cur || ({ thumbnail: p.thumbnail as string, title: p.title as string, platform: p.platform as string } as DownloadInfo));
+        }
+        if (step === "error") setError(lbl || "Không tải được video.");
+        if (step === "done") {
+          doneFileUrl = typeof p.file_url === "string" ? p.file_url : "";
+          doneFilename = typeof p.filename === "string" ? p.filename : "video.mp4";
+          doneTitle = typeof p.title === "string" ? p.title : "";
+          setProgress(100);
+        }
+      });
+      if (doneFileUrl) {
+        const fullUrl = absUrl(doneFileUrl);
+        setSuccess({ kind: "file", file_url: fullUrl, filename: doneFilename, title: doneTitle });
+        pushHistory({
+          url: url.trim(),
+          title: doneTitle || info?.title,
+          thumbnail: info?.thumbnail,
+          platform: info?.platform,
+          duration: info?.duration,
+          at: Date.now(),
+          kind: "file",
+          file_url: fullUrl,
+          filename: doneFilename,
+        });
+        // Auto-trigger browser download
+        const a = document.createElement("a");
+        a.href = fullUrl;
+        a.download = doneFilename;
+        a.rel = "noopener";
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Không tải được video.");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function startToProject() {
+    setError("");
+    setSuccess(null);
     if (!url.trim()) {
       setError("Dán link video trước khi tạo dự án.");
       return;
     }
-    setBusyProject(true);
+    setBusy("project");
+    setProgress(0);
+    setProgressLabel("Đang phân tích URL…");
+    setProgressDetail("");
     try {
       const res = await downloadToProject({
         url: url.trim(),
@@ -1223,130 +1420,469 @@ function VideoDownloadTab() {
         source_language: "auto",
         enable_dubbing: true,
         enable_subtitle: true,
+        use_watermark: !preferNoWM,
+        max_height: maxHeight,
       });
-      const reader = res.body?.getReader();
-      if (!reader) {
-        setMessage("Đã gửi yêu cầu tạo dự án tải video.");
-        return;
-      }
-      const decoder = new TextDecoder();
-      let buffer = "";
-      let doneLabel = "";
-      while (true) {
-        const chunk = await reader.read();
-        if (chunk.done) break;
-        buffer += decoder.decode(chunk.value, { stream: true });
-        const events = buffer.split("\n\n");
-        buffer = events.pop() || "";
-        for (const raw of events) {
-          const line = raw.split("\n").find((item) => item.startsWith("data: "));
-          if (!line) continue;
-          const payload = JSON.parse(line.slice(6)) as { label?: string; project_id?: string; step?: string };
-          doneLabel = payload.project_id
-            ? `Đã tạo dự án ${payload.project_id}. Mở tab Dự án để xem.`
-            : payload.label || doneLabel;
-          setMessage(doneLabel);
+      let doneProjectId = "";
+      let doneTitle = "";
+      await readSse(res, (p) => {
+        const step = String(p.step || "");
+        const lbl = typeof p.label === "string" ? p.label : "";
+        const det = typeof p.detail === "string" ? p.detail : "";
+        const pct = typeof p.progress === "number" ? p.progress : null;
+        if (lbl) setProgressLabel(lbl);
+        if (det) setProgressDetail(det);
+        if (pct !== null && pct >= 0) setProgress(pct);
+        if (step === "error") setError(lbl || "Không tạo được dự án.");
+        if (step === "meta" && typeof p.thumbnail === "string") {
+          setInfo((cur) => cur || ({ thumbnail: p.thumbnail as string, title: p.title as string, platform: p.platform as string } as DownloadInfo));
         }
+        if (typeof p.project_id === "string") {
+          doneProjectId = p.project_id;
+          doneTitle = typeof p.title === "string" ? p.title : "";
+        }
+      });
+      if (doneProjectId) {
+        setSuccess({ kind: "project", project_id: doneProjectId, title: doneTitle });
+        setProgress(100);
+        pushHistory({
+          url: url.trim(),
+          title: doneTitle || info?.title,
+          thumbnail: info?.thumbnail,
+          platform: info?.platform,
+          duration: info?.duration,
+          at: Date.now(),
+          kind: "project",
+          project_id: doneProjectId,
+        });
       }
-      if (!doneLabel) setMessage("Đã tạo yêu cầu tải video.");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Không tạo được dự án từ link.");
     } finally {
-      setBusyProject(false);
+      setBusy(null);
     }
   }
 
+  const platform = info?.platform
+    ? VD_PLATFORMS.find((p) => p.name.toLowerCase().startsWith(info.platform!.toLowerCase())) || null
+    : detectPlatform(url);
+  const canAct = !!url.trim() && busy === null;
+  const isWorking = busy !== null;
+
   return (
-    <div className="grid min-h-[calc(100vh-88px)] gap-4 xl:grid-cols-[minmax(0,1fr)_370px]">
-      <section className="flex flex-col rounded-2xl border border-border/60 bg-card/60 p-4 shadow-sm sm:p-6">
-        <div className="mb-4 flex items-center justify-between gap-3">
-          <div className="inline-flex items-center gap-2 text-xs font-bold text-muted-foreground">
-            <Film className="h-4 w-4 text-primary" />
-            Tải video từ URL
-          </div>
-          <span className="rounded-full border border-border/60 bg-background/50 px-3 py-1 text-[11px] font-semibold text-muted-foreground">
-            YouTube · TikTok · Facebook
-          </span>
+    <div className="grid min-h-[calc(100vh-88px)] gap-4 xl:grid-cols-[minmax(0,1fr)_380px]">
+      {/* ── LEFT — hero input + actions + progress ───────────────────── */}
+      <section className="relative flex flex-col overflow-hidden rounded-3xl border border-border/60 bg-gradient-to-b from-card/80 via-card/60 to-card/40 p-5 shadow-sm sm:p-7">
+        {/* glow blobs */}
+        <div aria-hidden className="pointer-events-none absolute inset-0 -z-0 opacity-70">
+          <div className="blob-glow-purple absolute -top-32 left-1/4 h-72 w-[400px] rounded-full" />
+          <div className="blob-glow-magenta absolute bottom-0 right-0 h-60 w-72 rounded-full" />
         </div>
 
-        <div className="flex min-h-[54vh] flex-1 flex-col rounded-2xl border border-primary/50 bg-background p-5">
-          <label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
-            Link video
-          </label>
-          <textarea
-            value={url}
-            onChange={(e) => setUrl(e.target.value)}
-            placeholder="Dán link video cần tải hoặc tạo project dubbing..."
-            className="mt-3 min-h-40 flex-1 resize-none rounded-xl border border-border/60 bg-card/40 px-4 py-4 text-sm font-semibold leading-6 outline-none placeholder:text-muted-foreground/55 focus:border-primary/60"
-          />
+        <div className="relative z-10 flex items-center justify-between gap-3">
+          <div className="inline-flex items-center gap-2.5">
+            <div className="grid h-10 w-10 place-items-center rounded-xl bg-primary/15 text-primary ring-1 ring-primary/30">
+              <Download className="h-5 w-5" />
+            </div>
+            <div>
+              <h1 className="text-base font-black tracking-tight sm:text-lg">Tải video đa nền tảng</h1>
+              <p className="text-[11px] font-medium text-muted-foreground">
+                Dán link → tải MP4 về máy hoặc tạo project lồng tiếng AI
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => setShowSettings((v) => !v)}
+            className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-border/60 bg-background/60 px-3 text-[11px] font-bold text-muted-foreground hover:border-primary/40 hover:text-foreground"
+          >
+            <Sliders className="h-3.5 w-3.5" />
+            Tuỳ chọn
+          </button>
+        </div>
 
-          <div className="mt-5 grid gap-2 sm:grid-cols-4">
-            {platforms.slice(0, 8).map((p) => (
+        {/* Settings panel — slide in */}
+        {showSettings && (
+          <div className="relative z-10 mt-4 grid gap-3 rounded-2xl border border-border/60 bg-background/50 p-4 sm:grid-cols-2">
+            <div>
+              <label className="text-[10px] font-black uppercase tracking-wider text-muted-foreground">
+                Độ phân giải tối đa
+              </label>
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {[360, 480, 720, 1080, 1440, 2160].map((h) => (
+                  <button
+                    key={h}
+                    type="button"
+                    onClick={() => setMaxHeight(h)}
+                    className={`h-8 rounded-lg border px-3 text-[11px] font-bold transition ${
+                      maxHeight === h
+                        ? "border-primary/60 bg-primary/15 text-primary"
+                        : "border-border/60 bg-background/50 text-muted-foreground hover:border-primary/30"
+                    }`}
+                  >
+                    {h}p
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div>
+              <label className="text-[10px] font-black uppercase tracking-wider text-muted-foreground">
+                Watermark (chỉ TikTok/Douyin)
+              </label>
+              <div className="mt-2 flex gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setPreferNoWM(true)}
+                  className={`h-8 flex-1 rounded-lg border px-3 text-[11px] font-bold transition ${
+                    preferNoWM
+                      ? "border-primary/60 bg-primary/15 text-primary"
+                      : "border-border/60 bg-background/50 text-muted-foreground hover:border-primary/30"
+                  }`}
+                >
+                  Không watermark
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPreferNoWM(false)}
+                  className={`h-8 flex-1 rounded-lg border px-3 text-[11px] font-bold transition ${
+                    !preferNoWM
+                      ? "border-primary/60 bg-primary/15 text-primary"
+                      : "border-border/60 bg-background/50 text-muted-foreground hover:border-primary/30"
+                  }`}
+                >
+                  Giữ watermark
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* URL input — large, with paste + clear */}
+        <div className="relative z-10 mt-5 rounded-3xl border-2 border-primary/25 bg-background/85 p-3 shadow-lg shadow-primary/5 transition focus-within:border-primary/60 focus-within:shadow-primary/10">
+          <div className="flex items-start gap-3">
+            <div className="grid h-11 w-11 flex-shrink-0 place-items-center rounded-xl bg-primary/15 text-primary">
+              <Link2 className="h-5 w-5" />
+            </div>
+            <textarea
+              ref={inputRef}
+              value={url}
+              onChange={(e) => {
+                setUrl(e.target.value);
+                setError("");
+                setInfo(null);
+                setSuccess(null);
+              }}
+              disabled={isWorking}
+              placeholder="Dán link video TikTok / YouTube / Facebook / Instagram / Bilibili…"
+              rows={3}
+              className="flex-1 resize-none bg-transparent text-sm font-semibold leading-6 outline-none placeholder:font-medium placeholder:text-muted-foreground/60 disabled:opacity-60"
+            />
+            {url ? (
               <button
-                key={p.name}
                 type="button"
-                onClick={() => setUrl((value) => value || `https://${p.name.toLowerCase()}.com/`)}
-                className="rounded-xl border border-border/60 bg-card/50 px-3 py-3 text-left text-xs font-semibold text-muted-foreground hover:border-primary/40 hover:text-foreground"
+                onClick={() => { setUrl(""); setInfo(null); setError(""); setSuccess(null); }}
+                disabled={isWorking}
+                className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-muted-foreground/70 hover:bg-muted/40 hover:text-foreground disabled:opacity-40"
+                title="Xoá"
               >
-                <span className={`mr-2 inline-block h-2.5 w-2.5 rounded-full ${p.color}`} />
-                {p.name}
+                <X className="h-4 w-4" />
               </button>
-            ))}
+            ) : (
+              <button
+                type="button"
+                onClick={handlePaste}
+                disabled={isWorking}
+                className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-primary/15 px-3 text-[11px] font-black text-primary hover:bg-primary/25 disabled:opacity-40"
+                title="Dán từ clipboard"
+              >
+                <Clipboard className="h-3.5 w-3.5" />
+                Dán
+              </button>
+            )}
           </div>
+
+          {/* platform chip detected */}
+          {(platform || busyInfo) && (
+            <div className="mt-2 flex items-center gap-2 pl-14 text-[11px] font-bold">
+              {busyInfo && (
+                <span className="inline-flex items-center gap-1.5 text-muted-foreground">
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                  Đang đọc thông tin…
+                </span>
+              )}
+              {platform && !busyInfo && (
+                <span className={`inline-flex items-center gap-1.5 rounded-full bg-gradient-to-r ${platform.gradient} px-2.5 py-0.5 text-white shadow-sm`}>
+                  <span className="h-1.5 w-1.5 rounded-full bg-white/80" />
+                  {platform.name}
+                </span>
+              )}
+              {info?.duration ? (
+                <span className="inline-flex items-center gap-1 text-muted-foreground">
+                  <Clock className="h-3 w-3" />
+                  {formatDuration(info.duration)}
+                </span>
+              ) : null}
+            </div>
+          )}
         </div>
 
-        <div className="mt-4 flex flex-wrap items-center gap-2 rounded-xl border border-border/60 bg-card/50 p-2">
-          <button onClick={inspectUrl} disabled={busyInfo} className="inline-flex h-10 items-center gap-2 rounded-lg border border-border/60 bg-background/60 px-4 text-xs font-bold text-muted-foreground hover:bg-muted/50 hover:text-foreground disabled:opacity-60">
-            {busyInfo ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
-            Kiểm tra
-          </button>
-          <button onClick={() => setUrl("")} className="inline-flex h-10 items-center gap-2 rounded-lg border border-border/60 bg-background/60 px-4 text-xs font-bold text-muted-foreground hover:bg-muted/50 hover:text-foreground">
-            <Trash2 className="h-4 w-4" />
-            Xoá
-          </button>
-          <div className="ml-auto text-xs font-semibold text-muted-foreground">
-            {url.trim() ? "Sẵn sàng tạo dự án" : "Chờ link video"}
+        {/* Platform quick-pick chips */}
+        <div className="relative z-10 mt-4 flex flex-wrap gap-1.5">
+          {VD_PLATFORMS.map((p) => (
+            <button
+              key={p.name}
+              type="button"
+              disabled={isWorking}
+              onClick={() => inputRef.current?.focus()}
+              className="group inline-flex h-8 items-center gap-1.5 rounded-full border border-border/60 bg-background/60 px-3 text-[11px] font-bold text-muted-foreground transition hover:border-primary/40 hover:text-foreground disabled:opacity-40"
+            >
+              <span className={`h-2 w-2 rounded-full bg-gradient-to-r ${p.gradient}`} />
+              {p.name}
+            </button>
+          ))}
+        </div>
+
+        {/* Error bar */}
+        {error && (
+          <div className="relative z-10 mt-4 flex items-start gap-2.5 rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2.5 text-xs font-semibold text-red-700 dark:text-red-300">
+            <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0" />
+            <div className="flex-1">{error}</div>
+            <button onClick={() => setError("")} className="text-red-500/70 hover:text-red-500">
+              <X className="h-3.5 w-3.5" />
+            </button>
           </div>
-          <button onClick={createProject} disabled={busyProject} className="inline-flex h-10 items-center gap-2 rounded-lg bg-foreground px-5 text-xs font-black text-background hover:scale-[1.01] disabled:opacity-60">
-            {busyProject ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-            Tạo dự án
-          </button>
+        )}
+
+        {/* Success bar */}
+        {success && success.kind === "file" && success.file_url && (
+          <div className="relative z-10 mt-4 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-xs">
+            <div className="flex items-center gap-2 font-bold text-emerald-700 dark:text-emerald-300">
+              <CheckCircle2 className="h-4 w-4" />
+              Đã sẵn sàng — file đang được tải xuống.
+            </div>
+            <div className="mt-1 text-muted-foreground">
+              Trình duyệt chặn? <a href={success.file_url} download={success.filename} className="font-bold text-primary underline">Bấm vào đây để tải</a>.
+            </div>
+          </div>
+        )}
+        {success && success.kind === "project" && success.project_id && (
+          <div className="relative z-10 mt-4 flex items-center justify-between gap-3 rounded-xl border border-primary/40 bg-primary/10 px-4 py-3 text-xs">
+            <div>
+              <div className="flex items-center gap-2 font-bold text-primary">
+                <CheckCircle2 className="h-4 w-4" />
+                Đã tạo dự án — sẵn sàng cấu hình lồng tiếng.
+              </div>
+              <div className="mt-0.5 text-muted-foreground">
+                {success.title || `ID ${success.project_id}`}
+              </div>
+            </div>
+            <button
+              onClick={() => setActiveTab("projects")}
+              className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-primary px-3 text-[11px] font-black text-primary-foreground hover:bg-primary/90"
+            >
+              <ArrowRight className="h-3.5 w-3.5" />
+              Mở dự án
+            </button>
+          </div>
+        )}
+
+        {/* Progress strip */}
+        {isWorking && (
+          <div className="relative z-10 mt-4 rounded-xl border border-primary/30 bg-primary/5 p-3">
+            <div className="flex items-center justify-between text-[11px] font-bold">
+              <span className="inline-flex items-center gap-1.5 text-primary">
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                {progressLabel || "Đang xử lý…"}
+              </span>
+              <span className="text-muted-foreground">{Math.round(progress)}%</span>
+            </div>
+            <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-background/60">
+              <div
+                className="h-full rounded-full bg-gradient-to-r from-primary via-fuchsia-500 to-pink-500 transition-all duration-300"
+                style={{ width: `${Math.max(2, progress)}%` }}
+              />
+            </div>
+            {progressDetail && (
+              <div className="mt-1.5 text-[10px] font-medium text-muted-foreground">{progressDetail}</div>
+            )}
+          </div>
+        )}
+
+        {/* Action buttons */}
+        <div className="relative z-10 mt-auto pt-6">
+          <div className="grid gap-2 sm:grid-cols-2">
+            <button
+              type="button"
+              onClick={startToFile}
+              disabled={!canAct}
+              className="btn-glow group inline-flex h-12 items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-primary via-fuchsia-500 to-pink-500 px-4 text-sm font-black text-white shadow-lg shadow-primary/20 transition hover:shadow-primary/40 disabled:opacity-50"
+            >
+              {busy === "file" ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Download className="h-4 w-4" />
+              )}
+              Tải MP4 về máy
+            </button>
+            <button
+              type="button"
+              onClick={startToProject}
+              disabled={!canAct}
+              className="inline-flex h-12 items-center justify-center gap-2 rounded-xl border-2 border-primary/50 bg-background/60 px-4 text-sm font-black text-foreground transition hover:border-primary/80 hover:bg-primary/10 disabled:opacity-50"
+            >
+              {busy === "project" ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Wand2 className="h-4 w-4 text-primary" />
+              )}
+              Tạo dự án lồng tiếng
+            </button>
+          </div>
+          <p className="mt-2 text-center text-[10px] font-medium text-muted-foreground">
+            File giữ tạm trên server 2 giờ · 500 MB tối đa · Mặc định loại watermark
+          </p>
         </div>
       </section>
 
-      <aside className="flex min-h-[calc(100vh-88px)] flex-col overflow-hidden rounded-2xl border border-border/60 bg-card/70 shadow-sm">
-        <div className="flex items-center justify-between border-b border-border/60 p-4">
-          <div className="inline-flex h-9 items-center gap-2 rounded-lg bg-foreground px-3 text-xs font-bold text-background">
-            <FileText className="h-3.5 w-3.5" />
-            Kết quả
+      {/* ── RIGHT — preview + history ─────────────────────────────────── */}
+      <aside className="flex min-h-[calc(100vh-88px)] flex-col overflow-hidden rounded-3xl border border-border/60 bg-card/60 shadow-sm">
+        {/* Preview card */}
+        <div className="border-b border-border/60 p-4">
+          <div className="mb-3 flex items-center justify-between">
+            <div className="inline-flex items-center gap-1.5 text-[10px] font-black uppercase tracking-wider text-muted-foreground">
+              <Eye className="h-3.5 w-3.5" />
+              Xem trước
+            </div>
+            {url.trim() && !busyInfo && (
+              <button
+                onClick={() => void inspectUrlSilent(url.trim())}
+                className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted/40 hover:text-foreground"
+                title="Làm mới"
+              >
+                <RotateCcw className="h-3 w-3" />
+              </button>
+            )}
           </div>
-          <button onClick={inspectUrl} disabled={busyInfo || !url.trim()} className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-border/60 bg-background/60 text-muted-foreground hover:bg-muted/50 hover:text-foreground disabled:opacity-40" title="Làm mới thông tin">
-            {busyInfo ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RotateCcw className="h-3.5 w-3.5" />}
-          </button>
-        </div>
-        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
-          {error && <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-700 dark:text-red-300">{error}</div>}
-          {message && <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-700 dark:text-emerald-300">{message}</div>}
+
           {info ? (
-            <div className="rounded-2xl border border-border/60 bg-background/45 p-4">
-              {info.thumbnail && (
+            <div className="overflow-hidden rounded-2xl border border-border/60 bg-background/45">
+              {info.thumbnail ? (
                 // eslint-disable-next-line @next/next/no-img-element
-                <img src={info.thumbnail} alt="" className="mb-4 aspect-video w-full rounded-xl object-cover" />
+                <img src={info.thumbnail} alt="" className="aspect-video w-full object-cover" />
+              ) : (
+                <div className="grid aspect-video w-full place-items-center bg-gradient-to-br from-primary/10 to-fuchsia-500/10">
+                  <Film className="h-10 w-10 text-muted-foreground/40" />
+                </div>
               )}
-              <h3 className="line-clamp-2 text-sm font-black">{info.title || "Video đã đọc được"}</h3>
-              <div className="mt-2 text-xs leading-5 text-muted-foreground">
-                {[info.platform, info.author, info.duration ? `${Math.round(info.duration / 60)} phút` : ""].filter(Boolean).join(" · ") || "Có thể tạo project từ link này."}
+              <div className="p-3">
+                <h3 className="line-clamp-2 text-[13px] font-black leading-snug">
+                  {info.title || "Không có tiêu đề"}
+                </h3>
+                <div className="mt-1.5 flex flex-wrap items-center gap-2 text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                  {info.platform && <span>{info.platform}</span>}
+                  {info.author && <span className="normal-case tracking-normal">· {info.author}</span>}
+                  {info.duration ? <span>· {formatDuration(info.duration)}</span> : null}
+                </div>
+              </div>
+            </div>
+          ) : busyInfo ? (
+            <div className="grid h-44 place-items-center rounded-2xl border border-dashed border-border/60 bg-background/30">
+              <div className="text-center">
+                <Loader2 className="mx-auto h-7 w-7 animate-spin text-primary" />
+                <p className="mt-2 text-[11px] font-bold text-muted-foreground">Đang đọc thông tin video…</p>
               </div>
             </div>
           ) : (
-            <div className="flex min-h-72 items-center justify-center rounded-2xl border border-dashed border-border/60 bg-background/35 p-8 text-center">
+            <div className="grid h-44 place-items-center rounded-2xl border border-dashed border-border/60 bg-background/30 p-6 text-center">
               <div>
-                <Download className="mx-auto h-9 w-9 text-muted-foreground/50" />
-                <p className="mt-3 text-sm font-bold">Chưa kiểm tra video</p>
-                <p className="mt-1 text-xs text-muted-foreground">Dán link rồi bấm Kiểm tra để xem metadata.</p>
+                <div className="mx-auto grid h-12 w-12 place-items-center rounded-2xl bg-primary/10 text-primary">
+                  <Eye className="h-6 w-6" />
+                </div>
+                <p className="mt-2 text-[12px] font-bold">Chưa có video</p>
+                <p className="mt-0.5 text-[10px] text-muted-foreground">Dán link để xem thumbnail + thời lượng</p>
               </div>
             </div>
           )}
+        </div>
+
+        {/* History */}
+        <div className="flex min-h-0 flex-1 flex-col">
+          <div className="flex items-center justify-between border-b border-border/60 p-4">
+            <div className="inline-flex items-center gap-1.5 text-[10px] font-black uppercase tracking-wider text-muted-foreground">
+              <Clock className="h-3.5 w-3.5" />
+              Lịch sử gần đây
+            </div>
+            {history.length > 0 && (
+              <button
+                onClick={clearHistory}
+                className="inline-flex h-7 items-center gap-1 rounded-lg px-2 text-[10px] font-bold text-muted-foreground hover:bg-red-500/10 hover:text-red-500"
+              >
+                <Trash2 className="h-3 w-3" />
+                Xoá hết
+              </button>
+            )}
+          </div>
+          <div className="min-h-0 flex-1 space-y-2 overflow-y-auto p-3">
+            {history.length === 0 ? (
+              <div className="grid h-32 place-items-center text-center">
+                <p className="text-[11px] font-medium text-muted-foreground">
+                  Chưa có lịch sử. Tải video xong sẽ xuất hiện ở đây.
+                </p>
+              </div>
+            ) : (
+              history.map((h, i) => (
+                <div
+                  key={i}
+                  className="group flex gap-2.5 rounded-xl border border-border/50 bg-background/50 p-2 transition hover:border-primary/30 hover:bg-background/80"
+                >
+                  {h.thumbnail ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={h.thumbnail} alt="" className="h-14 w-20 flex-shrink-0 rounded-lg object-cover" />
+                  ) : (
+                    <div className="grid h-14 w-20 flex-shrink-0 place-items-center rounded-lg bg-primary/10">
+                      <Film className="h-5 w-5 text-primary/60" />
+                    </div>
+                  )}
+                  <div className="flex min-w-0 flex-1 flex-col justify-between">
+                    <div>
+                      <p className="line-clamp-1 text-[11px] font-bold">{h.title || h.url}</p>
+                      <p className="line-clamp-1 text-[10px] text-muted-foreground">
+                        {h.platform || ""}{h.duration ? ` · ${formatDuration(h.duration)}` : ""}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={() => setUrl(h.url)}
+                        className="inline-flex h-6 items-center gap-1 rounded-md bg-muted/50 px-2 text-[9px] font-bold text-muted-foreground hover:bg-muted hover:text-foreground"
+                      >
+                        <RotateCcw className="h-2.5 w-2.5" />
+                        Tải lại
+                      </button>
+                      {h.kind === "file" && h.file_url && (
+                        <a
+                          href={h.file_url}
+                          download={h.filename}
+                          className="inline-flex h-6 items-center gap-1 rounded-md bg-primary/15 px-2 text-[9px] font-bold text-primary hover:bg-primary/25"
+                        >
+                          <Download className="h-2.5 w-2.5" />
+                          Tải MP4
+                        </a>
+                      )}
+                      {h.kind === "project" && h.project_id && (
+                        <button
+                          onClick={() => setActiveTab("projects")}
+                          className="inline-flex h-6 items-center gap-1 rounded-md bg-primary/15 px-2 text-[9px] font-bold text-primary hover:bg-primary/25"
+                        >
+                          <ExternalLink className="h-2.5 w-2.5" />
+                          Mở
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
         </div>
       </aside>
     </div>

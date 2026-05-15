@@ -134,12 +134,17 @@ async def lifespan(app: FastAPI):
     # ngay khi boot để dọn rác từ phiên trước.
     import asyncio
     from app.core.storage import cleanup_audio_output
+    from app.services.social_download_svc import cleanup_video_cache
     async def _cleanup_loop():
         while True:
             try:
                 cleanup_audio_output()
             except Exception as e:
                 logger.warning("audio cleanup loop error: %s", e)
+            try:
+                cleanup_video_cache()
+            except Exception as e:
+                logger.warning("video cache cleanup loop error: %s", e)
             await asyncio.sleep(3600)  # 1h
     cleanup_task = asyncio.create_task(_cleanup_loop())
 

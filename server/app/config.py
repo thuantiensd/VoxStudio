@@ -19,10 +19,14 @@ BASE_DIR = Path(__file__).resolve().parent.parent  # server/
 VOICES_DIR = Path(os.getenv("VOICES_DIR") or BASE_DIR / "voices")
 AUDIO_OUTPUT_DIR = Path(os.getenv("AUDIO_OUTPUT_DIR") or BASE_DIR / "audio_output")
 DUBBING_DIR = Path(os.getenv("DUBBING_PROJECTS_DIR") or BASE_DIR / "dubbing_projects")
+# Cache video tải từ URL (TikTok/YouTube/…) chờ user tải về máy. TTL ngắn —
+# cleanup định kỳ giống audio_output. Tách dir để không lẫn với output TTS.
+VIDEO_CACHE_DIR = Path(os.getenv("VIDEO_CACHE_DIR") or BASE_DIR / "video_cache")
 
 VOICES_DIR.mkdir(parents=True, exist_ok=True)
 AUDIO_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 DUBBING_DIR.mkdir(parents=True, exist_ok=True)
+VIDEO_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 # Device
 DEVICE = os.getenv("DEVICE", _best_device())

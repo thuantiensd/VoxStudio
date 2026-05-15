@@ -701,6 +701,112 @@ def _safe_filename(name: str) -> str:
     return keep[:80]
 
 
+def download_video_only_generator(url: str,
+                                  engine: str = "auto",
+                                  max_height: int = 1080,
+                                  use_watermark: bool = False):
+    """Tải URL về VIDEO_CACHE_DIR (chỉ MP4, không tạo dubbing project).
+
+    Dùng cho user web bấm "Tải về máy". SSE yield progress, event cuối có
+    {step:'done', file_id, filename, title, ...} — frontend gọi tiếp
+    /download/file/{file_id}?sig=… để stream MP4 về browser.
+
+    File trong VIDEO_CACHE_DIR được cleanup theo TTL (xem main.py).
+    """
+    from app.config import VIDEO_CACHE_DIR
+
+    cache_dir = VIDEO_CACHE_DIR
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    file_id = uuid.uuid4().hex[:16]
+    final_path = cache_dir / f"{file_id}.mp4"
+
+    # 1) Resolve metadata
+    yield {"step": "resolving", "progress": 2, "label": "Đang phân tích URL…"}
+    try:
+        loop = asyncio.new_event_loop()
+        try:
+            info = loop.run_until_complete(fetch_info(url, engine=engine))
+        finally:
+            loop.close()
+    except Exception as e:
+        yield {"step": "error", "progress": -1, "label": str(e)[:280]}
+        return
+
+    if use_watermark and info.watermark_url:
+        info.video_url = info.watermark_url
+
+    yield {
+        "step": "meta", "progress": 5,
+        "label": (info.title or "")[:80] or "video",
+        "detail": (info.author or "") + (f" · {int(info.duration)}s" if info.duration else ""),
+        "thumbnail": info.thumbnail,
+        "title": info.title,
+        "author": info.author,
+        "platform": info.platform,
+        "duration": info.duration,
+    }
+
+    # 2) Download — chọn engine theo source (yt-dlp tự merge DASH; httpx
+    #    stream cho TikTok/Douyin URL combined).
+    if info.source == "ytdlp":
+        for tick in _download_via_ytdlp(url, cache_dir, final_path, max_height=max_height):
+            if tick.get("step") == "error":
+                final_path.unlink(missing_ok=True)
+                yield tick
+                return
+            yield tick
+    else:
+        for tick in download_to_file_generator(info, final_path):
+            if tick.get("step") == "error":
+                final_path.unlink(missing_ok=True)
+                yield tick
+                return
+            yield tick
+
+    if not final_path.exists():
+        yield {"step": "error", "progress": -1,
+               "label": "Không tải được file. Vui lòng thử URL khác."}
+        return
+
+    safe_title = _safe_filename(info.title or "video")
+    yield {
+        "step": "done", "progress": 100,
+        "label": "Tải xong, sẵn sàng lưu về máy.",
+        "file_id": file_id,
+        "filename": f"{safe_title}.mp4",
+        "title": info.title,
+        "author": info.author,
+        "platform": info.platform,
+        "thumbnail": info.thumbnail,
+        "duration": info.duration,
+        "size_bytes": final_path.stat().st_size,
+    }
+
+
+def cleanup_video_cache(ttl_sec: int = 2 * 60 * 60) -> int:
+    """Xoá file .mp4 trong VIDEO_CACHE_DIR cũ hơn ttl_sec giây. TTL mặc định
+    2 giờ — đủ thời gian user click link → tải xong, không giữ lâu vì
+    file lớn (≥100MB/video). Trả về số file đã xoá."""
+    import time as _time
+    from app.config import VIDEO_CACHE_DIR
+
+    now = _time.time()
+    deleted = 0
+    try:
+        for f in VIDEO_CACHE_DIR.glob("*.mp4"):
+            try:
+                if now - f.stat().st_mtime > ttl_sec:
+                    f.unlink()
+                    deleted += 1
+            except Exception as e:
+                logger.warning("cleanup_video_cache skip %s: %s", f.name, e)
+    except Exception as e:
+        logger.warning("cleanup_video_cache scan failed: %s", e)
+    if deleted:
+        logger.info("cleanup_video_cache: deleted %d expired file(s)", deleted)
+    return deleted
+
+
 def _transcode_to_h264(path: Path):
     """Re-encode video sang H.264 + AAC để tương thích QuickTime / iOS /
     Windows Media Player. Giữ original nếu transcode fail."""

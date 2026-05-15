@@ -3,12 +3,16 @@
 import asyncio
 import json
 import logging
+import re
 import threading
+from typing import Optional
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Request
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
+from fastapi.responses import FileResponse, StreamingResponse
 
+from app.auth.audio_sig import sign as sign_url, verify as verify_sig
 from app.auth.rate_limit import require_download_quota
+from app.config import VIDEO_CACHE_DIR
 from app.db.models import User
 from app.db.session import AsyncSessionLocal
 from app.services import audit_svc, dubbing_project_svc, dubbing_svc, social_download_svc, usage_svc
@@ -143,3 +147,123 @@ async def download_to_project(
             yield f"data: {json.dumps(item, ensure_ascii=False)}\n\n"
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+
+@router.post("/to-file")
+async def download_to_file(
+    request: Request,
+    url: str = Body(..., embed=True),
+    engine: str = Body("auto", embed=True),
+    max_height: int = Body(1080, embed=True),
+    use_watermark: bool = Body(False, embed=True),
+    ctx: dict = Depends(require_download_quota()),
+):
+    """Tải URL về cache server → SSE progress → final event chứa signed URL
+    /download/file/{id} để browser GET stream MP4 về máy user.
+
+    Flow:
+      1. SSE bắn progress (resolving → meta → downloading → processing → done).
+      2. Khi step='done', payload có {file_url, filename, ...}.
+      3. Frontend dùng <a href={file_url} download={filename}> hoặc fetch().
+
+    Cache file có TTL ~2h, cleanup tự động (xem cleanup_video_cache).
+    """
+    user: User = ctx["user"]
+
+    async def event_generator():
+        loop = asyncio.get_running_loop()
+        q: asyncio.Queue = asyncio.Queue()
+        SENTINEL = object()
+
+        def producer():
+            try:
+                for update in social_download_svc.download_video_only_generator(
+                    url,
+                    engine=engine,
+                    max_height=max_height,
+                    use_watermark=use_watermark,
+                ):
+                    loop.call_soon_threadsafe(q.put_nowait, update)
+            except Exception as e:
+                loop.call_soon_threadsafe(q.put_nowait,
+                    {"step": "error", "label": str(e)[:280], "progress": -1})
+            finally:
+                loop.call_soon_threadsafe(q.put_nowait, SENTINEL)
+
+        threading.Thread(target=producer, daemon=True).start()
+        recorded = False
+        while True:
+            item = await q.get()
+            if item is SENTINEL: break
+            # Khi worker bắn step='done', gắn signed URL + ghi audit ownership
+            if not recorded and item.get("step") == "done" and item.get("file_id"):
+                recorded = True
+                file_id = item["file_id"]
+                params = sign_url(file_id, user.id, ttl_seconds=3600)
+                qs = "&".join(f"{k}={v}" for k, v in params.items())
+                item["file_url"] = f"/api/v1/download/file/{file_id}?{qs}"
+                try:
+                    async with AsyncSessionLocal() as db:
+                        await usage_svc.record(
+                            db, user_id=user.id, feature="download",
+                        )
+                        await audit_svc.log(
+                            db, user_id=user.id, action="download.to_file",
+                            ip=_client_ip(request),
+                            user_agent=request.headers.get("user-agent"),
+                            metadata={
+                                "file_id": file_id,
+                                "url": url[:120],
+                                "platform": item.get("platform"),
+                                "size_bytes": item.get("size_bytes"),
+                                "duration_sec": item.get("duration"),
+                            },
+                        )
+                except Exception as e:
+                    logger.warning("download.to_file usage log failed: %s", e)
+            yield f"data: {json.dumps(item, ensure_ascii=False)}\n\n"
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+
+_FILE_ID_RE = re.compile(r"^[a-f0-9]{8,32}$")
+
+
+@router.get("/file/{file_id}")
+async def get_video_file(
+    file_id: str,
+    sig: Optional[str] = Query(None),
+    u: Optional[str] = Query(None),
+    exp: Optional[str] = Query(None),
+    name: Optional[str] = Query(None),
+):
+    """Stream MP4 đã tải về cache với HMAC sig auth (giống /tts/audio/...).
+
+    Auth qua signed URL vì <a download> không gắn được Bearer header.
+    File_id phải là hex string (path traversal protection).
+    """
+    if not _FILE_ID_RE.match(file_id):
+        raise HTTPException(status_code=400, detail="Invalid file_id")
+    if not sig or not u or not exp:
+        raise HTTPException(status_code=403, detail="Missing signature")
+    try:
+        u_int = int(u)
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=403, detail="Invalid signature")
+    verify_sig(file_id, user_id_request=u_int, sig=sig, u=u, exp=exp)
+
+    path = VIDEO_CACHE_DIR / f"{file_id}.mp4"
+    if not path.exists():
+        raise HTTPException(
+            status_code=410,
+            detail="File đã hết hạn cache, vui lòng tải lại.",
+        )
+
+    safe_name = (name or f"{file_id}.mp4").strip()
+    safe_name = re.sub(r"[^\w\s.\-]", "_", safe_name)[:120] or f"{file_id}.mp4"
+
+    return FileResponse(
+        str(path),
+        media_type="video/mp4",
+        filename=safe_name,
+    )

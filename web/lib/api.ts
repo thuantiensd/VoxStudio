@@ -782,6 +782,54 @@ export async function downloadToProject(body: {
   return res;
 }
 
+/**
+ * downloadToFile — tải video về cache server, KHÔNG tạo dubbing project.
+ * Trả về Response chứa SSE stream. Khi step='done', payload có file_url
+ * (signed, TTL 1h). Frontend dùng <a href={file_url} download> để browser
+ * stream MP4 về máy user.
+ */
+export async function downloadToFile(body: {
+  url: string;
+  engine?: string;
+  max_height?: number;
+  use_watermark?: boolean;
+}) {
+  const token = getToken();
+  const res = await fetch(`${API_BASE}/download/to-file`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify({
+      url: body.url,
+      engine: body.engine || "auto",
+      max_height: body.max_height || 1080,
+      use_watermark: body.use_watermark ?? false,
+    }),
+  });
+  if (!res.ok) {
+    let detail = res.statusText;
+    try {
+      const data = await res.json();
+      detail = data?.detail || data?.message || detail;
+    } catch {}
+    throw new ApiError(res.status, detail);
+  }
+  return res;
+}
+
+/**
+ * Trả URL tuyệt đối từ file_url tương đối server gửi xuống (vd
+ * "/api/v1/download/file/abc?sig=..."). API_URL có thể là localhost
+ * trong dev hoặc domain prod — wrapper này gắn host đúng để <a href>.
+ */
+export function absUrl(relative: string): string {
+  if (!relative) return relative;
+  if (/^https?:\/\//i.test(relative)) return relative;
+  return `${API_URL}${relative.startsWith("/") ? "" : "/"}${relative}`;
+}
+
 /* ────────────────────────────────────────────────────────────────
  * User API Keys (BYOK, server-side encrypted)
  * ──────────────────────────────────────────────────────────────── */
