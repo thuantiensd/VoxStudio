@@ -4632,10 +4632,10 @@ def auto_dub(
             raise _Canceled()
 
     steps = [
-        ("transcribing", "Đang nhận diện giọng nói..."),
-        ("translating", "Đang dịch thuật..."),
-        ("generating_tts", "Đang lồng tiếng..."),
-        ("exporting", "Đang xuất video..."),
+        ("transcribing", "Đang nhận diện giọng nói (Whisper large-v3)..."),
+        ("translating", "Đang dịch thuật (LLM cao cấp)..."),
+        ("generating_tts", "Đang chuyển giọng cho từng câu..."),
+        ("exporting", "Đang ghép video + phụ đề + audio..."),
     ]
 
     # Tính range động: phân bổ % cho các bước sẽ chạy, tổng 0→100 mượt.
@@ -4681,6 +4681,26 @@ def auto_dub(
         # Step 2: Translate — engine + key đến từ caller (worker payload).
         # Engine hợp lệ: google_free / google_cloud / deepl / gemini /
         # openai / claude / qwen. "google" là alias legacy.
+        # Pre-translate: show user engine + count info để biết đang đợi gì
+        try:
+            _proj = _load_meta(project_id)
+            n_segs = len(_proj.get("segments", []))
+            eng_label = {
+                "gemini": "Google Gemini 2.5 Pro",
+                "openai": "OpenAI GPT-5",
+                "claude": "Anthropic Claude Opus",
+                "google_free": "Google Translate",
+                "google_cloud": "Google Cloud Translate",
+                "deepl": "DeepL",
+            }.get((engine or "google_free").lower(), engine or "Google Translate")
+            yield {
+                "step": "translating",
+                "label": f"Đang phân tích {n_segs} câu thoại + ngữ cảnh nhân vật ({eng_label})...",
+                "progress": r_transl[0],
+            }
+        except Exception:
+            pass
+
         for tick in _run_step_with_progress(
             translate_project, [project_id],
             {
@@ -4691,7 +4711,8 @@ def auto_dub(
                 "visual_api_key": visual_api_key,
             },
             start_pct=r_transl[0], end_pct=r_transl[1],
-            label="Đang dịch thuật...", estimated_sec=20,
+            label=f"Đang dịch + chuẩn hoá tên & xưng hô (đảm bảo nhất quán)...",
+            estimated_sec=20,
             # Translate phase tổng = Pass-0 + N batches × thời gian/batch.
             # Phim 60-100 phút có 50-100 batches, dù chạy 4 concurrent thì
             # vẫn 25 waves × 90s = 37 phút. Cho 30 phút phase timeout
@@ -4805,7 +4826,11 @@ def auto_dub(
                 frac_seg = min(1.0, (now - t_last) / max(1.0, seg_est))
                 virtual = done + frac_seg * 0.95
                 pct = r_tts[0] + min(1.0, virtual / total_segs) * (r_tts[1] - r_tts[0])
-                yield {"step": "generating_tts", "label": steps[2][1],
+                # Label động: hiển thị câu hiện tại + ước lượng còn lại
+                eta_sec = max(0, int((total_segs - done) * seg_est))
+                eta_str = f"~{eta_sec//60}p{eta_sec%60:02d}s" if eta_sec >= 60 else f"~{eta_sec}s"
+                live_label = f"Đang chuyển giọng câu {done+1}/{total_segs} (còn {eta_str})..."
+                yield {"step": "generating_tts", "label": live_label,
                        "progress": round(pct, 1),
                        "detail": f"{done}/{total_segs}"}
                 time.sleep(0.25)
