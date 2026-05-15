@@ -873,74 +873,10 @@ def _build_speaker_voice_assignments(project: dict, voice_slots: list, voice_cou
     return assignments
 
 
-# Verb cue chung — Vietnamese aux/modal/common verbs sau pronoun.
-_VERB_CUES = (
-    r"sẽ|đã|đang|không|cũng|chỉ|còn|phải|cần|muốn|biết|hiểu|nghĩ|đi|về|"
-    r"làm|nói|nhờ|định|tin|thấy|nghe|mong|nhớ|yêu|hứa|thề|là|có|nên|"
-    r"ngồi|đứng|cho|với|từng|đáng|đây|buộc|được|cứ|vẫn|chưa|đành|"
-    r"sắp|vừa|mới|gọi|hỏi|đáp|đi|về|đứng|đi|đến|gặp|xin|chịu|"
-    r"sao|sống|chết|ăn|uống|ngủ|làm|ráng|cố"
-)
-_MALE_TEXT_RE = __import__("re").compile(
-    # Self-reference rõ ràng: "ba/bố/cha [verb]" KHÔNG sau vocative
-    rf"(?:^|[\.!?,…]\s)(ba|bố|cha)\s+(?:{_VERB_CUES})\b",
-    __import__("re").IGNORECASE,
-)
-_FEMALE_TEXT_RE = __import__("re").compile(
-    rf"(?:^|[\.!?,…]\s)(mẹ|má)\s+(?:{_VERB_CUES})\b",
-    __import__("re").IGNORECASE,
-)
-# Vợ chồng pattern: "Em, … anh [verb]" → male husband; "Chồng/Anh yêu" → female
-_HUSBAND_VOC_RE = __import__("re").compile(
-    rf"^(?:Em|Vợ|Bà xã|Em yêu)\s*[,!]\s+.*?\banh\s+(?:{_VERB_CUES})\b",
-)
-_WIFE_VOC_RE = __import__("re").compile(
-    # "Chồng ơi"/"Anh yêu" → vợ chắc chắn. "Anh," alone không đủ (có thể chị-em)
-    r"^(?:Chồng|Ông xã|Anh yêu)\s*[,!ơi]",
-)
-
-
-def _infer_segment_gender_from_text(text: str) -> tuple[str | None, str]:
-    """Infer speaker gender từ TEXT của segment.
-
-    Dùng làm safety net khi diarization merge speaker (vd dad có ít utterance
-    ngắn bị gộp vào female cluster). Khi text có pattern rõ ràng (self-ref
-    "ba/mẹ + verb", vocative vợ-chồng), override speaker_voice_map per-segment.
-
-    Conservative: chỉ trả ("male"/"female", reason) khi pattern KHÔNG ambiguous.
-    Trả (None, "") khi không xác định được hoặc text quá ngắn.
-
-    Returns (gender, reason). Reason để log debug.
-    """
-    if not text:
-        return None, ""
-    t = text.strip()
-    if len(t) < 6:
-        return None, "text quá ngắn"
-    # Father self-reference
-    if _MALE_TEXT_RE.search(t):
-        return "male", 'self-ref "ba/bố/cha + verb"'
-    # Mother self-reference
-    if _FEMALE_TEXT_RE.search(t):
-        return "female", 'self-ref "mẹ/má + verb"'
-    # Husband vocative pattern (Em, … anh + verb)
-    if _HUSBAND_VOC_RE.search(t):
-        return "male", 'voc "Em," + self "anh + verb"'
-    # Wife unambiguous vocative
-    if _WIFE_VOC_RE.search(t):
-        return "female", 'voc "Chồng/Anh yêu"'
-    return None, ""
-
-
 def _pick_edge_voice_for_segment(seg: dict, project: dict) -> str | None:
     """Choose an Edge TTS voice for this segment.
 
     Priority:
-      0. PER-SEGMENT TEXT GENDER (multi-voice mode only): nếu text có pattern
-         male/female rõ ràng (vd "ba sẽ đi"/"Em, anh phải đi") và voice_slots
-         có male slot (0) + female slot (1) → override voice_map. Đây là
-         safety net cho case diarization gộp speaker sai (dad bị merge vào
-         female cluster → toàn dub female).
       1. speaker_voice_map[speaker_id] — explicit mapping từ analyze-speakers.
       2. voice_count > 1 + voice_slots: cycle qua slots theo thứ tự xuất hiện
          speaker (đảm bảo mỗi speaker có voice riêng).
@@ -956,17 +892,6 @@ def _pick_edge_voice_for_segment(seg: dict, project: dict) -> str | None:
     voice_count = int(project.get("voice_count") or 1)
     voice_slots = project.get("voice_slots") or []
     target_lang = project.get("target_language")
-
-    # ── Priority 0: Per-segment text gender override (multi-voice only) ──
-    # Chỉ apply khi voice_count >= 2 và có ít nhất 2 voice_slots khác nhau
-    # (1 male slot + 1 female slot theo UI convention slot 0=male, 1=female).
-    if voice_count >= 2 and len(voice_slots) >= 2 and voice_slots[0] and voice_slots[1]:
-        text = (seg.get("speech_text") or seg.get("translated_text") or "").strip()
-        inferred, reason = _infer_segment_gender_from_text(text)
-        if inferred == "male" and voice_slots[0]:
-            return voice_slots[0]
-        if inferred == "female" and voice_slots[1]:
-            return voice_slots[1]
 
     # ── Priority 1: speaker_voice_map (analyze-speakers result) ──
     speaker_voice_map = project.get("speaker_voice_map") or {}
@@ -3221,20 +3146,13 @@ def _group_segments_into_batches(segments: list[dict]) -> list[list[dict]]:
     - Combine adjacent segments until batch duration > MAX_BATCH_DURATION
     - Or segment count > MAX_BATCH_SEGMENTS
     - Or gap between segments > MIN_SEGMENT_GAP (scene change)
-    - Or text-inferred gender mismatch (vd "ba không bắt nạt" → male
-      khác với speaker_gender mặc định → split để mỗi batch dùng 1 voice)
     """
     batches = []
     current_batch = []
 
     def seg_speaker(s):
-        # Group by (speaker, EFFECTIVE gender) — effective = text-inferred
-        # OR speaker_gender. Đảm bảo segment có text-override gender không bị
-        # gộp chung batch với segment khác gender → mỗi batch chỉ 1 voice.
-        text = (s.get("speech_text") or s.get("translated_text") or "").strip()
-        text_g, _ = _infer_segment_gender_from_text(text)
-        eff_gender = text_g or s.get("speaker_gender")
-        return (s.get("speaker"), eff_gender)
+        # Group by (speaker, gender) so each batch uses one Edge voice
+        return (s.get("speaker"), s.get("speaker_gender"))
 
     for seg in segments:
         text = (seg.get("speech_text") or seg["translated_text"] or "").strip()
