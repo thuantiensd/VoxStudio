@@ -97,10 +97,12 @@ def _cleanup_job_tmp(job_id: str) -> None:
         logger.debug("[worker] cleanup tmp %s skip: %s", job_id, e)
 
 
-async def _run_sync_generator(gen_factory, progress_cb):
+async def _run_sync_generator(gen_factory, progress_cb, persist_project_id: str | None = None):
     """Chạy sync generator trong thread, bridge progress qua asyncio.Queue.
 
     progress_cb(progress, step) là async function do worker cung cấp.
+    persist_project_id: nếu truyền → lưu current step label vào meta để
+    FE poll qua /dubbing/projects API → live label trên card.
     """
     loop = asyncio.get_running_loop()
     queue: asyncio.Queue = asyncio.Queue()
@@ -129,6 +131,15 @@ async def _run_sync_generator(gen_factory, progress_cb):
         progress = item.get("progress")
         if progress is not None and progress < 0:
             progress = None  # -1 sentinel nghĩa là state change, không phải %
+        # Persist label vào project meta để FE poll thấy live progress text
+        if persist_project_id:
+            label = item.get("label", "")
+            if label:
+                try:
+                    from app.services.dubbing_svc import _mark_project_step
+                    _mark_project_step(persist_project_id, label)
+                except Exception:
+                    pass
         await progress_cb(progress=progress, step=item.get("step") or item.get("label"))
         if item.get("step") == "error":
             if item.get("_exception"):
@@ -168,7 +179,7 @@ async def dubbing_handler(payload: dict, *, job_id: str, progress_cb) -> dict:
             visual_api_key=visual_api_key,
         )
 
-    last = await _run_sync_generator(gen_factory, progress_cb)
+    last = await _run_sync_generator(gen_factory, progress_cb, persist_project_id=project_id)
 
     # Ước tính thời lượng audio/video để tính usage (phút)
     minutes = 0.0
