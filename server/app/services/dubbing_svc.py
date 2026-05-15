@@ -492,6 +492,14 @@ _PHRASE_FIXES: list[tuple[str, str, str]] = [
     (r"^Netflix.*Original.*$", "", "Netflix outro"),
     (r"^.*All Rights? Reserved.*$", "", "Copyright text"),
     (r"^.*Television Series Exclusive.*$", "", "Generic TV exclusive watermark"),
+    (r"^.*独播剧场.*$", "", "优优独播剧场 — kênh Trung độc quyền"),
+    (r"\b优优独播剧场\b", "", "优优独播剧场 inline"),
+
+    # UNTRANSLATED CHINESE LEAKED — LLM bỏ sót, output còn Hán tự.
+    # Trong dub VN, output PHẢI là Việt thuần (Hán-Việt cho tên).
+    # Nếu còn ≥ 2 ký tự Trung CJK liền → dòng đó LLM không dịch → drop.
+    # 1 chữ Trung lẻ có thể là tên (vd 妈) — KHÔNG match; 2+ chữ là chắc câu untranslated.
+    (r"[一-鿿]{2,}", "", "Hán tự ≥2 chars liền — LLM bỏ sót dịch"),
 ]
 
 
