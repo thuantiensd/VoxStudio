@@ -186,6 +186,30 @@ class GPUManager:
                 # hypothesis trước làm context → loop output cùng text khi
                 # gặp silence/music. Tắt + thêm hallucination_silence_threshold
                 # + no_repeat_ngram để chặn repeat ngay tại generation.
+                #
+                # initial_prompt: prime Whisper với context phim drama để
+                # giảm xác suất fallback về YouTube outro pattern
+                # ("请订阅点赞") khi gặp nhạc nền. Whisper train trên RẤT
+                # nhiều YouTube Trung outro → khi audio không rõ, default
+                # về pattern này. Initial prompt với từ vựng drama đẩy
+                # nó về context phim.
+                lang_code = (language or "").lower() if language else ""
+                init_prompt = None
+                if lang_code in ("zh", "chinese"):
+                    init_prompt = (
+                        "这是一段中文电视剧对白，包含家庭、爱情、商业、"
+                        "古装等情节。请准确转写每个角色的台词。"
+                    )
+                elif lang_code in ("ja", "japanese"):
+                    init_prompt = (
+                        "これは日本のドラマの会話です。"
+                        "登場人物のセリフを正確に書き起こしてください。"
+                    )
+                elif lang_code in ("ko", "korean"):
+                    init_prompt = (
+                        "이것은 한국 드라마의 대화입니다. "
+                        "등장인물의 대사를 정확하게 받아쓰기해 주세요."
+                    )
                 kwargs = {
                     "beam_size": 5,
                     "vad_filter": vad,
@@ -201,6 +225,8 @@ class GPUManager:
                     # câu thoại tự nhiên có lặp tiểu từ "à/nhỉ/thế").
                     "compression_ratio_threshold": 2.4,
                 }
+                if init_prompt:
+                    kwargs["initial_prompt"] = init_prompt
                 if vad:
                     # VAD nhạy hơn cho phim Trung — Whisper hay bỏ sót dialogue
                     # khi có nhạc nền mixed vào speech (gap 19s+ giữa phim
