@@ -1111,8 +1111,64 @@ def _resolve_addressee(
     return None
 
 
+def _kinship_self_pronoun(target_role: str, speaker_gender: str = "",
+                           speaker_age: str = "") -> Optional[str]:
+    """Auto-pick self_pronoun BẮT BUỘC theo kinship của target.
+
+    Khi speaker nói với target có role kinship rõ ràng (mẹ/bố/chồng/vợ/…),
+    self_pronoun KHÔNG còn ambiguous — phải dùng đúng theo quy tắc xưng hô VN.
+    Override mọi self_pronoun field Pass-0 trả về (đôi khi LLM ghi sai cho
+    character có nhiều quan hệ, vd "em (with bf) / con (with mom)" → khi
+    target là mẹ thì phải là "con", không phải "em").
+
+    Trả None nếu target_role không khớp kinship pattern → caller fallback
+    self_pronoun gốc của speaker map.
+    """
+    if not target_role:
+        return None
+    r = target_role.lower().strip()
+    gender = (speaker_gender or "").lower()
+    age = (speaker_age or "").lower()
+    # Cha mẹ → con
+    if any(k in r for k in ("mẹ", "má", "mommy", "mom", "mother", "bố", "ba", "cha", "papa", "dad", "father")):
+        return "con"
+    # Ông bà → cháu
+    if any(k in r for k in ("ông nội", "bà nội", "ông ngoại", "bà ngoại",
+                             "ông", "bà", "grandpa", "grandma", "grandfather", "grandmother")):
+        return "cháu"
+    # Vợ → chồng: speaker xưng "anh"
+    if any(k in r for k in ("vợ", "wife", "phu nhân")):
+        return "anh"
+    # Chồng → vợ: speaker xưng "em"
+    if any(k in r for k in ("chồng", "husband", "phu quân")):
+        return "em"
+    # Con → cha/mẹ: speaker xưng theo gender (ba/mẹ). Nếu unknown → giữ raw role.
+    if any(k in r for k in ("con gái", "con trai", "con", "child", "son", "daughter")):
+        if "female" in gender or "nữ" in gender:
+            return "mẹ"
+        if "male" in gender or "nam" in gender:
+            return "ba"
+        return None  # caller decide
+    # Anh trai (target) → speaker là em
+    if r == "anh" or r.startswith("anh trai") or "older brother" in r:
+        return "em"
+    # Chị (target) → speaker là em
+    if r == "chị" or r.startswith("chị gái") or "older sister" in r:
+        return "em"
+    # Em trai/em gái (target) → speaker là anh hoặc chị tuỳ gender
+    if r == "em" or r.startswith("em trai") or r.startswith("em gái") \
+            or "younger brother" in r or "younger sister" in r:
+        if "female" in gender or "nữ" in gender:
+            return "chị"
+        if "male" in gender or "nam" in gender:
+            return "anh"
+        return None
+    return None
+
+
 def _per_segment_anchor(seg: dict, relationships: dict) -> str:
-    """Anchor inline — PRE-RESOLVE 你 từ vocative trong text.
+    """Anchor inline — PRE-RESOLVE 你 từ vocative trong text + AUTO-PICK self_pronoun
+    theo kinship của addressee (khi xác định được).
 
     Anchor format:
       [Vợ → Chồng | 我="em", 你="anh"]
@@ -1132,6 +1188,7 @@ def _per_segment_anchor(seg: dict, relationships: dict) -> str:
     role = info.get("role", "")
     name = info.get("character_name") or ""
     age = info.get("age", "")
+    gender = info.get("gender", "")
     addr = info.get("addresses") or {}
     if not self_p:
         return ""
@@ -1139,12 +1196,28 @@ def _per_segment_anchor(seg: dict, relationships: dict) -> str:
     text = (seg.get("original_text") or "").strip()
     resolved = _resolve_addressee(spk, relationships, text)
 
+    # AUTO-OVERRIDE self_pronoun khi resolve được addressee + addressee là
+    # kinship role rõ ràng. Tránh case Pass-0 ghi "em (with bf) / con (with mom)"
+    # và LLM phải đoán — ta tự pick "con" khi target là mẹ.
+    self_p_effective = self_p
+    target_role_kinship = ""
+    if resolved:
+        target_id, _ = resolved
+        target_role_kinship = relationships["speakers"].get(target_id, {}).get("role", "")
+    elif len(addr) == 1:
+        target_id = next(iter(addr.keys()))
+        target_role_kinship = relationships["speakers"].get(target_id, {}).get("role", "")
+    if target_role_kinship:
+        kp = _kinship_self_pronoun(target_role_kinship, gender, age)
+        if kp:
+            self_p_effective = kp
+
     speaker_label = role or spk
     if name:
         speaker_label = f"{name}({role})" if role else name
     if age and age != "adult":
         speaker_label += f"[{age}]"
-    parts = [f'{speaker_label}: 我="{self_p}"']
+    parts = [f'{speaker_label}: 我="{self_p_effective}"']
 
     if resolved:
         target_id, target_pn = resolved
@@ -1252,18 +1325,48 @@ BƯỚC 2 — Suy luận ai nói line nào từ tín hiệu sau:
 
 BƯỚC 3 — Sau khi suy luận, ASSIGN pronoun NHẤT QUÁN:
    • Đánh nhãn nội bộ: SPEAKER A, SPEAKER B, SPEAKER C, ...
-   • Mỗi speaker chỉ dùng 1 self_pronoun XUYÊN SUỐT batch
+   • Mỗi speaker chỉ dùng 1 self_pronoun cho CÙNG addressee xuyên suốt batch
    • Mỗi cặp speaker chỉ dùng 1 cách xưng hô lẫn nhau
-   • Ví dụ: nếu A là vợ → A luôn xưng "em" gọi B là "anh", B luôn xưng "anh" gọi A là "em"
-   • KHÔNG được đầu batch "anh/em" cuối batch "tôi/cô" cho CÙNG cặp người
 
-BƯỚC 4 — TRƯỚC KHI XUẤT OUTPUT, đọc lại line 1 và line cuối:
-   • Nếu pronoun của cùng 1 speaker khác nhau → SỬA về thống nhất
-   • Default cho vợ chồng / yêu nhau / mới cưới: "anh/em" (xem rule cứng bên dưới)
+🚨 KINSHIP HARD RULES (BẮT BUỘC — ưu tiên TUYỆT ĐỐI cao hơn mọi default):
+   Khi source có vocative kinship → speaker bị KHOÁ pronoun theo bảng:
 
-⚡ Nếu KHÔNG xác định được context (chỉ có 1-2 line ngắn không vocative):
-   → MẶC ĐỊNH coi là vợ chồng/yêu nhau → DÙNG "anh/em".
-   → KHÔNG bao giờ dùng "tôi/cô" làm default khi chưa rõ.
+   • Vocative "妈/妈妈/娘/老妈" (Trung) HOẶC "Mẹ/Má/Mẹ ơi" (Việt)
+     → speaker là CON → tự xưng "con", gọi addressee "mẹ"/"má".
+     → KHÔNG được xưng "em"/"tôi"/"con gái" làm self.
+
+   • Vocative "爸/爸爸/爹/老爸" HOẶC "Bố/Ba/Cha/Bố ơi"
+     → speaker là CON → tự xưng "con", gọi addressee "bố"/"ba"/"cha".
+
+   • Vocative "儿子/女儿/孩子" HOẶC "Con/Con yêu/Con ơi"
+     → speaker là CHA/MẸ → tự xưng "ba"/"mẹ" theo gender, gọi addressee "con".
+     → KHÔNG được xưng "tôi"/"em" làm self khi rõ là cha mẹ.
+
+   • Vocative "老公/相公" HOẶC "Chồng/Anh ơi" (từ vợ)
+     → speaker là VỢ → tự xưng "em", gọi addressee "anh".
+
+   • Vocative "老婆/媳妇/夫人" HOẶC "Vợ/Em ơi" (từ chồng)
+     → speaker là CHỒNG → tự xưng "anh", gọi addressee "em".
+
+   • Vocative "爷爷/奶奶/外公/外婆" HOẶC "Ông/Bà"
+     → speaker là CHÁU → tự xưng "cháu".
+
+   • Vocative "哥/哥哥" HOẶC "Anh + tên" (gọi anh trai/anh lớn tuổi)
+     → speaker là EM → tự xưng "em", gọi addressee "anh".
+   • Vocative "姐/姐姐" HOẶC "Chị + tên"
+     → speaker là EM → tự xưng "em", gọi addressee "chị".
+
+⚡ Default khi KHÔNG có vocative kinship + KHÔNG xác định được quan hệ:
+   • Có chỉ dấu romance (1 cặp speaker, tone tình cảm, lời thoại mật thiết)
+     → "anh/em".
+   • Không có chỉ dấu romance, formal/business context → "tôi/anh/chị".
+   • KHÔNG mặc định "anh/em" cho mọi case — phải kiểm tra vocative trước.
+
+BƯỚC 4 — TRƯỚC KHI XUẤT OUTPUT:
+   • Quét lại từng line: nếu có "Mẹ"/"Bố"/"Cha"/"Má" làm vocative
+     → speaker line đó BẮT BUỘC xưng "con" (không "em"/"tôi").
+   • Nếu có "Vợ"/"Em yêu"/"Bà xã" vocative → speaker xưng "anh".
+   • Nếu có "Chồng"/"Anh yêu"/"Ông xã" vocative → speaker xưng "em".
 """
     else:
         # Non-Vietnamese, no speaker map: ask LLM to self-detect & keep

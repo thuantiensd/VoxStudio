@@ -152,19 +152,35 @@ def crossfade_concat(prev: np.ndarray, cur: np.ndarray, fade_samples: int) -> np
     return out
 
 
-def fade_edges(audio: np.ndarray, sr: int, fade_ms: float = 30.0) -> np.ndarray:
-    """Apply linear fade-in + fade-out cho audio (default 30ms mỗi đầu).
-    Dùng khi place batch vào silent track — tránh click khi voice start/end abrupt."""
+def fade_edges(audio: np.ndarray, sr: int, fade_ms: float = 30.0,
+                fade_in_ms: Optional[float] = None,
+                fade_out_ms: Optional[float] = None) -> np.ndarray:
+    """Apply asymmetric fade-in/fade-out cho audio.
+
+    fade_in: tránh pop khi voice bắt đầu — ngắn (15-20ms) đủ rồi.
+    fade_out: làm mềm kết thúc — DÀI hơn (60-100ms) + cosine để decay tự
+    nhiên, không cảm giác "cụt"/"đứt". Listener cảm thấy mượt khi gap
+    giữa batch nhỏ.
+
+    Default: fade_in=15ms, fade_out=80ms (asymmetric). Truyền fade_ms để
+    giữ behavior cũ symmetric.
+    """
     if audio.size == 0:
         return audio
-    fade_samples = min(int(sr * fade_ms / 1000), len(audio) // 4)
-    if fade_samples <= 0:
-        return audio
+    fi_ms = fade_in_ms if fade_in_ms is not None else min(fade_ms, 15.0)
+    fo_ms = fade_out_ms if fade_out_ms is not None else max(fade_ms, 80.0)
+    fi_samples = min(int(sr * fi_ms / 1000), len(audio) // 4)
+    fo_samples = min(int(sr * fo_ms / 1000), len(audio) // 4)
     out = audio.astype(np.float32).copy()
-    fade_in = np.linspace(0.0, 1.0, fade_samples, dtype=np.float32)
-    fade_out = np.linspace(1.0, 0.0, fade_samples, dtype=np.float32)
-    out[:fade_samples] *= fade_in
-    out[-fade_samples:] *= fade_out
+    if fi_samples > 0:
+        fade_in = np.linspace(0.0, 1.0, fi_samples, dtype=np.float32)
+        out[:fi_samples] *= fade_in
+    if fo_samples > 0:
+        # Cosine fade-out: tự nhiên hơn linear, không cảm giác cut-off
+        # f(t) = (1 + cos(pi * t)) / 2  với t = 0..1
+        t = np.linspace(0.0, 1.0, fo_samples, dtype=np.float32)
+        fade_out = (1.0 + np.cos(np.pi * t)) * 0.5
+        out[-fo_samples:] *= fade_out
     return out
 
 

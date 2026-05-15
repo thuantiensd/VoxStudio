@@ -503,6 +503,44 @@ _PHRASE_FIXES: list[tuple[str, str, str]] = [
 ]
 
 
+def _enforce_kinship_pronoun(text: str) -> str:
+    """Fix mẹ-con/bố-con xưng hô khi LLM dịch nhầm "em" thay vì "con".
+
+    Pattern bị nhắm: segment bắt đầu bằng vocative cha mẹ ("Mẹ,", "Bố ơi,",
+    "Cha…") → speaker là CON → mọi "em" làm chủ ngữ trong segment phải là "con".
+
+    Conservative: chỉ swap khi:
+      • Line bắt đầu bằng vocative cha/mẹ rõ ràng (đầu segment hoặc sau dấu .!?)
+      • "em" là standalone (không "em ơi"/"em trai"/"em gái"/"em này"/…)
+      • "em" đứng trước verb cue (sẽ/đã/không/đang/…)
+
+    KHÔNG đụng nếu vocative ambiguous (vd "Anh ơi" có thể là gọi anh trai/người yêu).
+    """
+    import re as _re
+    if not text:
+        return text
+    parent_voc_re = _re.compile(
+        r"(?:^|[\.!?…]\s+)(?:Mẹ|Má|Bố|Ba|Cha|Mom|Mommy|Papa|Daddy)(?:\s+ơi)?\s*[,!\.…]",
+        _re.IGNORECASE,
+    )
+    if not parent_voc_re.search(text):
+        return text
+    verb_cues = (
+        r"sẽ|đã|đang|không|cũng|chỉ|còn|chưa|phải|cần|muốn|biết|hiểu|"
+        r"nghĩ|đi|về|làm|nói|hỏi|nhờ|định|tin|thấy|nghe|mong|mới|vừa|"
+        r"có|nên|đáng|từng|sao|gì"
+    )
+    # "em" làm subject → "con". Negative lookahead chặn "em ơi"/"em trai"/...
+    # Group capture chữ đầu để preserve capitalization ("Em" → "Con").
+    pat = _re.compile(
+        rf"\b([Ee])m\b(?!\s+(?:ơi|trai|gái|út|nhỏ|của|hai|này|đây|mình|nó|ấy|ạ))\s+(?={verb_cues}\b)"
+    )
+    def _swap(m: "_re.Match") -> str:
+        first = m.group(1)
+        return ("C" if first == "E" else "c") + "on "
+    return pat.sub(_swap, text)
+
+
 def _phrase_post_fix(text: str) -> str:
     """Sửa các phrase mistranslation LLM hay mắc (Trung → Việt drama)."""
     if not text:
@@ -511,6 +549,8 @@ def _phrase_post_fix(text: str) -> str:
     out = text
     for pat, repl, _desc in _PHRASE_FIXES:
         out = re.sub(pat, repl, out)
+    # Kinship pronoun guard — chạy SAU regex post-fix để vocative đã chuẩn hoá.
+    out = _enforce_kinship_pronoun(out)
 
     # Fix all-uppercase Vietnamese word (LLM hay viết "KHÔNG."/"VÂNG.") →
     # Title case ("Không."/"Vâng."). Chỉ apply cho từ Việt có dấu hoặc
@@ -3554,6 +3594,8 @@ def _generate_all_batched(project_id: str, project: dict):
     # ── Phase C: Sequential placement in full track ──
     # Phải sequential vì có overlap detection + np.pad có thể realloc array.
     # Sort theo batch_idx để placement đúng thứ tự thời gian.
+    # GIỮ batch_start nguyên — không shift để không lệch lip-sync. Smoothness
+    # đến từ cosine fade-out (80ms) ở cuối mỗi batch, đủ làm mềm transition.
     for bi in pending_indices:
         res = results.get(bi)
         if not res or not res.get("ok"):
@@ -3565,7 +3607,9 @@ def _generate_all_batched(project_id: str, project: dict):
         end_sample = start_sample + len(batch_audio)
         if end_sample > len(full_track):
             full_track = np.pad(full_track, (0, end_sample - len(full_track)))
-        # Mix additive (consistent with old behavior)
+        # Mix additive (consistent with old behavior). Trường hợp prev batch
+        # overflow vào start_sample (rare khi MAX_SPEED_FACTOR=1.30 đã trim),
+        # additive mix tạo blend tự nhiên với cosine fade-out của prev.
         full_track[start_sample:start_sample + len(batch_audio)] += batch_audio
         logger.info("Batch %d placed: %d segs, dur=%.1fs",
                     bi + 1, len(res["segments"]), res.get("target_duration", 0))
