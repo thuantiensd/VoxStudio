@@ -238,12 +238,14 @@ def _fetch_via_ytdlp(url: str, platform: str,
     # Ưu tiên cookie user paste (cho web); fallback đọc Chrome local (chỉ desktop).
     from tempfile import gettempdir
     cookie_file = _write_cookies_file(cookies_txt, Path(gettempdir()) / "voxstudio_cookies")
+    has_user_cookies = cookie_file is not None
     if cookie_file:
         opts["cookiefile"] = str(cookie_file)
     else:
         _attach_chrome_cookies(opts)
     try:
-        return _fetch_via_ytdlp_inner(url, platform, opts)
+        return _fetch_via_ytdlp_inner(url, platform, opts,
+                                       has_user_cookies=has_user_cookies)
     finally:
         if cookie_file:
             try:
@@ -252,7 +254,24 @@ def _fetch_via_ytdlp(url: str, platform: str,
                 pass
 
 
-def _fetch_via_ytdlp_inner(url: str, platform: str, opts: dict) -> InfoResult:
+def _login_required_msg(has_user_cookies: bool, platform: str = "") -> str:
+    """Build error message hợp ngữ cảnh — web (paste cookie) vs desktop (Chrome)."""
+    site = platform.capitalize() if platform and platform != "generic" else "trang web"
+    if has_user_cookies:
+        return (
+            f"Cookie đã paste vẫn không tải được — có thể đã hết hạn hoặc "
+            f"thiếu cookie cho {site}. Mở extension cookies.txt → Export "
+            f"lại trang đã đăng nhập → paste mới."
+        )
+    return (
+        f"Video cần đăng nhập để xem. Bấm \"Tuỳ chọn\" → mục "
+        f"\"Cookie trình duyệt\" → cài extension Get cookies.txt LOCALLY "
+        f"→ export cookie từ {site} đã đăng nhập → paste vào ô."
+    )
+
+
+def _fetch_via_ytdlp_inner(url: str, platform: str, opts: dict,
+                            has_user_cookies: bool = False) -> InfoResult:
     try:
         with yt_dlp.YoutubeDL(opts) as y:
             info = y.extract_info(url, download=False)
@@ -260,10 +279,7 @@ def _fetch_via_ytdlp_inner(url: str, platform: str, opts: dict) -> InfoResult:
         msg = str(e).replace("yt-dlp:", "").replace("[yt-dlp]", "").strip()
         # Dịch các lỗi phổ biến sang tiếng Việt dễ hiểu
         if "Log in for access" in msg or "login" in msg.lower():
-            raise RuntimeError(
-                "Video cần ĐĂNG NHẬP để xem. Mở Chrome → login TikTok/YouTube/… "
-                "→ Cmd+Q Chrome → thử lại."
-            )
+            raise RuntimeError(_login_required_msg(has_user_cookies, platform))
         if "IP address is blocked" in msg:
             raise RuntimeError(
                 "IP bị TikTok chặn. Thử dùng video không age-restricted, hoặc "
@@ -272,14 +288,11 @@ def _fetch_via_ytdlp_inner(url: str, platform: str, opts: dict) -> InfoResult:
         if "Private video" in msg or "Video unavailable" in msg:
             raise RuntimeError("Video private hoặc đã bị xoá.")
         if "Sign in to confirm your age" in msg:
-            raise RuntimeError(
-                "Video giới hạn độ tuổi. Login YouTube trong Chrome (Cmd+Q Chrome) "
-                "rồi thử lại."
-            )
+            raise RuntimeError(_login_required_msg(has_user_cookies, platform))
         if "HTTP Error 404" in msg:
             raise RuntimeError("URL không tồn tại (404). Kiểm tra lại link.")
         if "HTTP Error 403" in msg:
-            raise RuntimeError("Server chặn (403). Login vào site trong Chrome rồi thử lại.")
+            raise RuntimeError(_login_required_msg(has_user_cookies, platform))
         if "DRM" in msg or "widevine" in msg.lower():
             raise RuntimeError("Video có DRM protection — không tải được.")
         if "geo" in msg.lower() and "block" in msg.lower():
