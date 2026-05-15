@@ -321,10 +321,12 @@ def _call_gemini_sdk(prompt: dict, model: Optional[str] = None) -> str:
 
     t = threading.Thread(target=_worker, daemon=True)
     t.start()
+    # Gemini 2.5 Pro có thể chậm 60-120s với batch lớn — dùng timeout dài
+    sdk_timeout = TIMEOUT_REASONING_S if "pro" in (model or "").lower() else TIMEOUT_S
     try:
-        kind, value = result_q.get(timeout=TIMEOUT_S)
+        kind, value = result_q.get(timeout=sdk_timeout)
     except _queue.Empty:
-        raise TimeoutError(f"Gemini timeout {TIMEOUT_S}s")
+        raise TimeoutError(f"Gemini timeout {sdk_timeout}s")
     if kind == "err":
         raise value
     return value
@@ -341,7 +343,10 @@ def _call_gemini_http(prompt: dict, api_key: Optional[str], model: Optional[str]
         "contents": [{"parts": [{"text": full}]}],
         "generationConfig": {"temperature": 0.2},
     }
-    with httpx.Client(timeout=TIMEOUT_S) as c:
+    # Gemini 2.5 Pro có thể chậm với batch lớn (26+ segs) — 60-120s/call.
+    # Cũ TIMEOUT_S=90s → fail mid-response. Dùng REASONING timeout 240s.
+    timeout = TIMEOUT_REASONING_S if "pro" in m.lower() else TIMEOUT_S
+    with httpx.Client(timeout=timeout) as c:
         r = c.post(url, params={"key": api_key}, json=payload,
                     headers={"Content-Type": "application/json"})
         _check_llm_http_response("gemini_http", r)
