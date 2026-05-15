@@ -494,6 +494,116 @@ def _apply_translation_post_fixes(project: dict) -> None:
     if n_phrase:
         logger.info("Post-fix phrase Trung→Việt drama: %d segments", n_phrase)
 
+    # Name unify: catch drift do Whisper transcribe inconsistent
+    # (vd "Tô Thiên Long / Tô Điền Long / Tô Đình Long" = 1 nhân vật)
+    n_unified = _unify_name_drift(project.get("segments", []))
+    if n_unified:
+        logger.info("Post-fix name unify: %d segments fixed", n_unified)
+
+
+# Hán-Việt surname + title prefixes — pattern detect "Prefix + Name" trong text
+_NAME_PREFIXES = (
+    # Họ Hán-Việt phổ biến
+    "Tô", "Trần", "Vương", "Lâm", "Lý", "Hồ", "Lưu", "Mã", "Quách",
+    "Trương", "Đinh", "Hoàng", "Tống", "Điền", "Đỗ", "Phùng", "Đặng",
+    "Tưởng", "Châu", "Tiền", "Tôn", "Hứa", "Tạ", "Cao", "Lương", "Tống",
+    "Diệp", "Phương", "Tăng", "Bành", "La", "Mạnh", "Khúc", "Cố", "Tiêu",
+    # Title cổ trang / drama
+    "Tiểu", "Đại", "Lão",
+    # Compound surnames hai chữ
+    "Âu Dương", "Tư Mã", "Thượng Quan", "Mộ Dung", "Gia Cát",
+)
+
+
+def _unify_name_drift(segments: list[dict]) -> int:
+    """Whisper transcribe tên Trung không nhất quán giữa segments
+    (vd 苏天龙/苏田龙/苏庭龙 → "Tô Thiên Long / Điền Long / Đình Long").
+    LLM dịch literal mỗi lần → cùng nhân vật có 3-8 spelling khác nhau.
+
+    Logic:
+      1. Scan tất cả segments cho pattern "<Prefix> <Name>"
+      2. Group theo prefix (vd: tất cả "Tô X")
+      3. Trong cluster thời gian ≤ 60s, nếu có ≥2 variants:
+         pick variant phổ biến nhất → unify cả cluster về spelling đó
+      4. Cluster cách xa thời gian (> 60s) → có thể là nhân vật khác,
+         giữ riêng để tránh false-positive
+
+    Returns: số segments đã sửa.
+    """
+    if not segments:
+        return 0
+    import re
+    from collections import Counter
+
+    # Pattern: "<Prefix> <Capitalized_Name>" (single word, có thể có dấu Việt)
+    # Compound prefixes (Âu Dương) cần escape space trong alternation
+    # Explicit char sets — [À-Ỵ] range gồm cả lowercase Việt → false positive.
+    _U = "A-ZÀÁẢÃẠĂẰẮẲẴẶÂẦẤẨẪẬÈÉẺẼẸÊỀẾỂỄỆÌÍỈĨỊÒÓỎÕỌÔỒỐỔỖỘƠỜỚỞỠỢÙÚỦŨỤƯỪỨỬỮỰỲÝỶỸỴĐ"
+    _L = "a-zàáảãạăằắẳẵặâầấẩẫậèéẻẽẹêềếểễệìíỉĩịòóỏõọôồốổỗộơờớởỡợùúủũụưừứửữựỳýỷỹỵđ"
+    prefix_alt = "|".join(re.escape(p) for p in _NAME_PREFIXES)
+    name_pat = re.compile(
+        rf"\b({prefix_alt})\s+([{_U}][{_L}]+(?:\s+[{_U}][{_L}]+){{0,2}})\b"
+    )
+
+    # Per prefix: list of (seg_idx, sub_name, full_name, time_start)
+    by_prefix: dict[str, list[tuple]] = {}
+    for i, seg in enumerate(segments):
+        text = seg.get("translated_text", "") or ""
+        for m in name_pat.finditer(text):
+            prefix, sub = m.group(1), m.group(2)
+            full = f"{prefix} {sub}"
+            t = float(seg.get("start", 0) or 0)
+            by_prefix.setdefault(prefix, []).append((i, sub, full, t))
+
+    n_fixed = 0
+    for prefix, occurrences in by_prefix.items():
+        if len(occurrences) < 2:
+            continue
+        # Sort theo thời gian
+        sorted_occ = sorted(occurrences, key=lambda x: x[3])
+        # Cluster: gap > 60s = cluster mới (có thể nhân vật khác cùng họ)
+        clusters: list[list[tuple]] = []
+        cur = [sorted_occ[0]]
+        for occ in sorted_occ[1:]:
+            if occ[3] - cur[-1][3] <= 60:
+                cur.append(occ)
+            else:
+                clusters.append(cur)
+                cur = [occ]
+        clusters.append(cur)
+
+        for cluster in clusters:
+            sub_names = [o[1] for o in cluster]
+            unique = set(sub_names)
+            if len(unique) < 2:
+                continue
+            # Pick variant phổ biến nhất; tie → giữ tên đầu tiên xuất hiện
+            counter = Counter(sub_names)
+            canonical_sub = counter.most_common(1)[0][0]
+            canonical_full = f"{prefix} {canonical_sub}"
+
+            for seg_idx, sub, full, _t in cluster:
+                if sub == canonical_sub:
+                    continue
+                old_full = f"{prefix} {sub}"
+                seg_text = segments[seg_idx].get("translated_text", "") or ""
+                if old_full in seg_text:
+                    segments[seg_idx]["translated_text"] = seg_text.replace(
+                        old_full, canonical_full,
+                    )
+                    n_fixed += 1
+                    logger.info(
+                        "Name unify: '%s' → '%s' at seg %d",
+                        old_full, canonical_full, seg_idx,
+                    )
+                # Cũng sửa speech_text nếu có
+                sp = segments[seg_idx].get("speech_text") or ""
+                if old_full in sp:
+                    segments[seg_idx]["speech_text"] = sp.replace(
+                        old_full, canonical_full,
+                    )
+    return n_fixed
+
 
 def _default_edge_voice(target_lang: str | None, gender: str | None) -> str | None:
     """Trả Edge voice default cho ngôn ngữ + giới tính. None nếu không match."""
