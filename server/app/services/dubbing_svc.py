@@ -4632,8 +4632,8 @@ def auto_dub(
             raise _Canceled()
 
     steps = [
-        ("transcribing", "Đang nhận diện giọng nói (Whisper large-v3)..."),
-        ("translating", "Đang dịch thuật (LLM cao cấp)..."),
+        ("transcribing", "Đang nhận diện giọng nói gốc..."),
+        ("translating", "Đang dịch thuật..."),
         ("generating_tts", "Đang chuyển giọng cho từng câu..."),
         ("exporting", "Đang ghép video + phụ đề + audio..."),
     ]
@@ -4681,21 +4681,13 @@ def auto_dub(
         # Step 2: Translate — engine + key đến từ caller (worker payload).
         # Engine hợp lệ: google_free / google_cloud / deepl / gemini /
         # openai / claude / qwen. "google" là alias legacy.
-        # Pre-translate: show user engine + count info để biết đang đợi gì
+        # Pre-translate: show user count info để biết đang đợi gì
         try:
             _proj = _load_meta(project_id)
             n_segs = len(_proj.get("segments", []))
-            eng_label = {
-                "gemini": "Google Gemini 2.5 Pro",
-                "openai": "OpenAI GPT-5",
-                "claude": "Anthropic Claude Opus",
-                "google_free": "Google Translate",
-                "google_cloud": "Google Cloud Translate",
-                "deepl": "DeepL",
-            }.get((engine or "google_free").lower(), engine or "Google Translate")
             yield {
                 "step": "translating",
-                "label": f"Đang phân tích {n_segs} câu thoại + ngữ cảnh nhân vật ({eng_label})...",
+                "label": f"Đang phân tích {n_segs} câu thoại + bối cảnh nhân vật...",
                 "progress": r_transl[0],
             }
         except Exception:
@@ -4711,7 +4703,7 @@ def auto_dub(
                 "visual_api_key": visual_api_key,
             },
             start_pct=r_transl[0], end_pct=r_transl[1],
-            label=f"Đang dịch + chuẩn hoá tên & xưng hô (đảm bảo nhất quán)...",
+            label="Đang dịch + chuẩn hoá tên & xưng hô (đảm bảo nhất quán)...",
             estimated_sec=20,
             # Translate phase tổng = Pass-0 + N batches × thời gian/batch.
             # Phim 60-100 phút có 50-100 batches, dù chạy 4 concurrent thì
