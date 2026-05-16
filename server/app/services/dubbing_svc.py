@@ -2174,6 +2174,12 @@ def transcribe_project(project_id: str) -> dict:
     # Set default {} ở scope outer để safe khi pyannote try/except fail trước
     # khi set gender_confidences ở line 2252.
     gender_confidences: dict[str, float] = {}
+    # Init Phase 4: track sp_result + fusion outcome cho voice_map unified
+    # build sau character labels determined (CHAR_XX nếu fusion ran, else
+    # SPEAKER_XX từ pyannote). Đảm bảo build_speaker_voice_map CHỈ CHẠY 1 LẦN
+    # và SAU khi character_id stable (fix CRIT-2: voice map trước character_registry).
+    sp_result = None  # set bởi pyannote analyze nếu thành công
+    fusion_ran = False  # True nếu face fusion produced char_voice_map
 
     # Skip speaker pipeline khi:
     # 1. User explicit skip qua env (VOX_SKIP_SPEAKER_PIPELINE=true)
@@ -2194,9 +2200,11 @@ def transcribe_project(project_id: str) -> dict:
         logger.info("Skip speaker_pipeline (reason=%s) — saves 60-180s", reason)
     else:
         try:
+            # Phase 4: KHÔNG import build_speaker_voice_map ở đây nữa.
+            # Voice map build chỉ làm 1 lần ở "Unified voice_map build" block
+            # sau khi character labels stable. Xem CRIT-2 audit fix.
             from app.services.speaker_pipeline import (
                 analyze_speakers as run_speaker_pipeline,
-                build_speaker_voice_map,
             )
             import threading, queue as _queue
             logger.info("Running speaker_pipeline (Phase 3-11)...")
@@ -2249,33 +2257,26 @@ def transcribe_project(project_id: str) -> dict:
                 seg["audio_speaker_gender"] = speaker_genders.get(best_spk) if best_spk else None
                 seg["speaker_gender"] = speaker_genders.get(best_spk) if best_spk else None
 
-            # Build voice_map theo gender (slot 0=nam, slot 1=nữ) — chỉ khi
-            # gender confidence ≥ 0.7. Confidence thấp → cycle slot (an toàn).
-            voice_slots = project_for_count.get("voice_slots") or []
-            user_overrides = project_for_count.get("speaker_voice_map") or {}
+            # Phase 4 refactor (fix CRIT-2): KHÔNG build voice_map ở đây.
+            # Voice map ĐƯỢC BUILD 1 LẦN DUY NHẤT sau khi character labels
+            # determined (fusion CHAR_XX nếu face ran, fallback SPEAKER_XX
+            # nếu chỉ pyannote). Xem block "Unified voice_map build" cuối.
             gender_confidences = (sp_result.stats or {}).get("gender_confidences") or {}
-            voice_map = build_speaker_voice_map(
-                speakers=sp_result.speakers,
-                voice_slots=voice_slots,
-                user_overrides=user_overrides,
-                speaker_genders=speaker_genders,
-                gender_confidences=gender_confidences,
-            )
 
-            # Reload meta + persist analysis (in-memory project might be stale)
+            # Reload meta + persist analysis (in-memory project might be stale).
+            # Lưu speaker_analysis + gender_confs ngay để partial state survive
+            # nếu pipeline crash trước khi build voice_map.
             project_meta = _load_meta(project_id) or {}
             project_meta["speaker_analysis"] = sp_result.to_json()
-            project_meta["speaker_voice_map"] = voice_map
-            # Persist gender_confidences để LLM-correction step dùng — pipeline
-            # detect conf cao → tin pipeline; conf thấp → tin LLM Pass-0 context.
             project_meta["speaker_gender_confs"] = gender_confidences
             _save_meta(project_meta)
 
             from collections import Counter as _Counter
             spk_dist = _Counter(s.get("speaker") for s in merged)
             logger.info(
-                "Speaker pipeline: %d speakers %s | voice_map=%s | seg distribution: %s",
-                len(sp_result.speakers), sp_result.speakers, voice_map, dict(spk_dist),
+                "Speaker pipeline: %d speakers %s | seg distribution: %s "
+                "(voice_map deferred to unified build — Phase 4 fix CRIT-2)",
+                len(sp_result.speakers), sp_result.speakers, dict(spk_dist),
             )
         except Exception as e:
             logger.warning("speaker_pipeline failed (%s) — segments without speaker info", e)
@@ -2409,7 +2410,10 @@ def transcribe_project(project_id: str) -> dict:
                         gender_confidences=char_gender_confs,
                     )
                     project["speaker_voice_map"] = char_voice_map
-                    logger.info("Multimodal voice_map: %s (genders=%s)",
+                    # Phase 4: mark fusion ran successfully để fallback block sau
+                    # face hook biết KHÔNG cần build lại voice_map với SPEAKER_XX.
+                    fusion_ran = True
+                    logger.info("Multimodal voice_map (CHAR_XX): %s (genders=%s)",
                                  char_voice_map, fusion.char_genders)
                 except Exception as e2:
                     logger.warning("Multimodal fusion failed: %s", e2)
@@ -2427,6 +2431,47 @@ def transcribe_project(project_id: str) -> dict:
         except Exception as e:
             logger.warning("face_speaker failed (%s) — fallback pyannote speaker", e)
             logger.exception("face_speaker full traceback:")
+
+    # ═══════════════════════════════════════════════════════════════════
+    # PHASE 4: UNIFIED VOICE MAP BUILD (fix CRIT-2)
+    # ═══════════════════════════════════════════════════════════════════
+    # voice_map CHỈ ĐƯỢC BUILD 1 LẦN, SAU khi character labels stable:
+    #   • Nếu fusion ran (face + audio đã merge → CHAR_XX): face hook
+    #     đã build char_voice_map → skip ở đây.
+    #   • Nếu face skipped/failed + pyannote OK: build voice_map dùng
+    #     SPEAKER_XX (audio-only). Đây là fallback path.
+    #   • Nếu cả pyannote + face fail: không có voice_map → TTS dùng defaults.
+    #
+    # Trước Phase 4: voice_map build 2 lần (1 sau pyannote, 1 sau fusion)
+    # → race condition + overwrite. Phase 4 đảm bảo single build path.
+    if not fusion_ran:
+        if sp_result is not None and getattr(sp_result, "speakers", None):
+            try:
+                from app.services.speaker_pipeline import build_speaker_voice_map
+                voice_slots_fallback = project.get("voice_slots") or []
+                # KHÔNG dùng project["speaker_voice_map"] làm user_overrides ở
+                # đây — đó là output của pipeline trước, không phải user choice.
+                # User override sẽ wire ở Phase 8 (UI panel).
+                voice_map_fallback = build_speaker_voice_map(
+                    speakers=list(sp_result.speakers),
+                    voice_slots=voice_slots_fallback,
+                    user_overrides={},
+                    speaker_genders=speaker_genders,
+                    gender_confidences=gender_confidences,
+                )
+                project["speaker_voice_map"] = voice_map_fallback
+                logger.info(
+                    "Phase 4 fallback voice_map (pyannote SPEAKER_XX, "
+                    "face skipped/failed): %s",
+                    voice_map_fallback,
+                )
+            except Exception as e:
+                logger.warning("Phase 4 fallback voice_map fail: %s", e)
+        else:
+            logger.info(
+                "Phase 4: no voice_map built — cả pyannote + face đều skip/fail. "
+                "TTS sẽ dùng default voice cho mọi segment.",
+            )
 
     segments = []
     for i, seg in enumerate(merged):

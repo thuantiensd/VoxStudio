@@ -62,6 +62,9 @@ REASON_AUDIO_MID_NO_FACE = "audio_mid_no_face"
 REASON_FACE_WINS_WEAK_AUDIO = "face_wins_audio_weak"
 REASON_FACE_ONLY_NO_AUDIO = "face_only_no_audio"
 REASON_FACE_WEAK_FALLBACK = "face_weak_fallback"
+# Phase 4 tách tier G: audio weak + no face → reason riêng (tránh dùng nhầm
+# REASON_AUDIO_MID_NO_FACE cho case audio thực sự weak).
+REASON_AUDIO_WEAK_FALLBACK = "audio_weak_fallback"
 REASON_NO_SIGNAL = "no_signal"
 
 
@@ -248,8 +251,7 @@ def _decide_segment(
             active_speaker_conf,
         )
 
-    # ── Tier G: WEAK both → fallback ──
-    # Ưu tiên face_id nếu có (visual hint), không thì audio_only nếu có audio.
+    # ── Tier G1: WEAK both → fallback face (face_id có) ──
     if face_int is not None:
         # Cap ownership ở OWNERSHIP_LOW vì weak signal
         weak_conf = min(active_speaker_conf, OWNERSHIP_LOW)
@@ -258,10 +260,13 @@ def _decide_segment(
             REASON_FACE_WEAK_FALLBACK,
             weak_conf,
         )
+    # ── Tier G2: audio weak + no face → fallback audio_only ──
+    # Reason riêng REASON_AUDIO_WEAK_FALLBACK (không phải MID — audio thực sự weak)
     if audio_spk:
         char_id = audio_unmatched_to_char.get(audio_spk)
         if char_id:
-            return (char_id, REASON_AUDIO_MID_NO_FACE, audio_conf)
+            # Cap ownership ở OWNERSHIP_LOW vì weak signal
+            return (char_id, REASON_AUDIO_WEAK_FALLBACK, min(audio_conf, OWNERSHIP_LOW))
 
     # ── Tier H: no signal ──
     return (None, REASON_NO_SIGNAL, 0.0)
