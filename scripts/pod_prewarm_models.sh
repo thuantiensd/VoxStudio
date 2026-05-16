@@ -6,7 +6,8 @@
 #   • Server start nhanh hơn (model load thẳng từ disk local)
 #   • Dub job đầu tiên không phải đợi download
 #
-# Tổng dung lượng ~15-25 GB (~17 GB với Qwen, ~14 GB không Qwen).
+# Tổng dung lượng ~24 GB (essentials, 7 ngôn ngữ alignment) hoặc ~38 GB
+# nếu kèm Qwen 7B LLM local (--with-qwen).
 # Lần đầu mất 15-30 phút tuỳ tốc độ mạng + license.
 # Idempotent — chạy lại bỏ qua model đã tải.
 #
@@ -68,8 +69,8 @@ echo "════════════════════════�
 
 # ── Disk space check trước khi download ──
 AVAILABLE_GB=$(df -BG "$WS" | awk 'NR==2 {gsub("G",""); print $4}')
-NEEDED_GB=20
-[ $WITH_QWEN -eq 1 ] && NEEDED_GB=35
+NEEDED_GB=26
+[ $WITH_QWEN -eq 1 ] && NEEDED_GB=40
 if [ "$AVAILABLE_GB" -lt "$NEEDED_GB" ]; then
     echo "⚠ Còn ${AVAILABLE_GB}GB trên /workspace, cần ${NEEDED_GB}GB."
     echo "  Xoá bớt file hoặc nâng volume size."
@@ -98,11 +99,17 @@ essentials = [
     ('pyannote/embedding',                            'Speaker embedding ~17MB'),
     ('pyannote/wespeaker-voxceleb-resnet34-LM',       'WeSpeaker resnet ~25MB'),
 
-    # WhisperX alignment cho Vietnamese (lựa chọn high-quality dub)
+    # WhisperX alignment cho từng ngôn ngữ phổ biến.
+    # Whisper detect language → WhisperX load alignment model tương ứng để
+    # word-level timestamp ~20ms accuracy. Thiếu model = timing kém chính xác
+    # (vẫn dub được nhưng segment boundary lệch).
     ('nguyenvulebinh/wav2vec2-base-vietnamese-250h',  'WAV2VEC2 VN alignment ~360MB'),
-
-    # WhisperX alignment cho English (fallback common)
     ('jonatasgrosman/wav2vec2-large-xlsr-53-english', 'WAV2VEC2 EN alignment ~1.2GB'),
+    ('jonatasgrosman/wav2vec2-large-xlsr-53-chinese-zh-cn', 'WAV2VEC2 ZH alignment ~1.2GB'),
+    ('jonatasgrosman/wav2vec2-large-xlsr-53-japanese', 'WAV2VEC2 JA alignment ~1.2GB'),
+    ('kresnik/wav2vec2-large-xlsr-korean',            'WAV2VEC2 KO alignment ~1.2GB'),
+    ('jonatasgrosman/wav2vec2-large-xlsr-53-spanish', 'WAV2VEC2 ES alignment ~1.2GB'),
+    ('jonatasgrosman/wav2vec2-large-xlsr-53-french',  'WAV2VEC2 FR alignment ~1.2GB'),
 ]
 
 failed = []
