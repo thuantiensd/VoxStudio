@@ -18,16 +18,18 @@ resemblyzer
 silero-vad
 scikit-learn
 # Face detection cho speaker mapping chính xác (Phase 1 HeyGen-style).
-# mediapipe FaceMesh: 468 landmarks/face, lip-activity scoring để detect
-# người nào đang nói trong frame → ground truth speaker ID.
-# Pin 0.10.21 vì các build mới hơn đôi khi thiếu legacy `solutions` namespace
-# (face_speaker_svc dùng mp.solutions.face_mesh — chưa migrate sang Tasks API).
+# mediapipe FaceMesh: 468 landmarks/face, lip-activity scoring → ground
+# truth speaker ID. Pin 0.10.21 vì build mới đôi khi thiếu legacy
+# `solutions` namespace.
 mediapipe==0.10.21
 opencv-python-headless    # video frame I/O cho face_speaker_svc
-# insightface: CNN gender + age model ONNX (~50MB, accuracy 95%+) — thay
-# geometry heuristic kém chính xác. onnxruntime-gpu cho RTX 4090 pod.
-insightface
-onnxruntime-gpu          # CPU only setup → đổi sang `onnxruntime`
+# insightface CNN gender — OPTIONAL (KHÔNG trong requirements vì kéo
+# numba/llvmlite/scikit-image chain gây resolution-too-deep với pip-25+).
+# Bật bằng cách install thủ công 1 lần trên pod:
+#   pip install --no-deps insightface
+#   pip install onnxruntime onnx easydict
+# face_speaker_svc fallback geometry heuristic (~75% gender accuracy) nếu
+# insightface không có — vẫn chạy bình thường, chỉ CNN gender không apply.
 yt-dlp[default,curl-cffi]
 douyin-tiktok-scraper
 httpx<0.28  # Pin để tương thích với Douyin_TikTok_Download_API khi tích hợp sidecar
