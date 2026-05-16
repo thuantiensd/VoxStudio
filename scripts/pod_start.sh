@@ -79,14 +79,22 @@ if [ "$NO_PULL" = "0" ]; then
 fi
 
 # ── 3. Pip install nếu requirements.txt đổi ───────────────────────
+# Strategy "only-if-needed": pip CHỈ install/upgrade package mới hoặc
+# có pin version cao hơn installed — KHÔNG re-resolve toàn bộ dep tree.
+# Tránh "resolution-too-deep" khi resolver search hàng trăm version
+# combinations (vd kiwisolver, numba, llvmlite, opentelemetry).
 NEW_HASH=$(sha256sum "$REPO/server/requirements.txt" | cut -d' ' -f1)
 OLD_HASH=$(cat "$REQ_HASH_FILE" 2>/dev/null || echo "")
 if [ "$NEW_HASH" != "$OLD_HASH" ]; then
-    echo "→ requirements.txt đổi → pip install..."
+    echo "→ requirements.txt đổi → pip install (only-if-needed)..."
     cd "$REPO/server"
-    pip install --no-cache-dir -r requirements.txt
-    echo "$NEW_HASH" > "$REQ_HASH_FILE"
-    echo "  ✓ Deps updated"
+    if pip install --no-cache-dir --upgrade-strategy only-if-needed -r requirements.txt; then
+        echo "$NEW_HASH" > "$REQ_HASH_FILE"
+        echo "  ✓ Deps updated"
+    else
+        echo "  ⚠ pip install fail — dùng deps hiện tại, KHÔNG update hash"
+        echo "  (server vẫn start được nếu deps cốt lõi đã có sẵn)"
+    fi
 else
     echo "→ requirements.txt OK (skip pip install)"
 fi
