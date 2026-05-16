@@ -322,8 +322,12 @@ def test_check4_pronoun_with_ay_marker_keeps_original():
 # ── Dispatcher helper ────────────────────────────────────────────
 
 def test_dispatcher_helper_builds_registry_block():
-    """_build_registry_block_for_translate returns block from project meta."""
-    from app.services.dubbing_svc import _build_registry_block_for_translate
+    """build_registry_block_for_translate returns block from project meta.
+    Phase 11 — import từ helper module (không phụ thuộc dubbing_svc /
+    ffmpeg) để test chạy được trên env minimal."""
+    from app.services.translation_character_helper import (
+        build_registry_block_for_translate,
+    )
     project = {
         "id": "p1",
         "character_registry_summary": {
@@ -342,7 +346,7 @@ def test_dispatcher_helper_builds_registry_block():
             "SPEAKER_01": {"character_name": "Lin Xiao", "role": "love_interest"},
         },
     }
-    block = _build_registry_block_for_translate(project)
+    block = build_registry_block_for_translate(project)
     assert block is not None
     assert "CHAR_000" in block
     assert "CHAR_001" in block
@@ -354,9 +358,11 @@ def test_dispatcher_helper_builds_registry_block():
 
 def test_dispatcher_helper_returns_none_when_no_registry():
     """No character_registry_summary in project → None."""
-    from app.services.dubbing_svc import _build_registry_block_for_translate
+    from app.services.translation_character_helper import (
+        build_registry_block_for_translate,
+    )
     project = {"id": "p1"}  # no registry
-    block = _build_registry_block_for_translate(project)
+    block = build_registry_block_for_translate(project)
     assert block is None
     print("✓ test_dispatcher_helper_returns_none_when_no_registry")
 

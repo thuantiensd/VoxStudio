@@ -1,4 +1,8 @@
-"""Translation character helper (Phase 9 refactor).
+"""Translation character helper (Phase 9 + 11 refactor).
+
+Phase 11 NOTE: function `build_registry_block_for_translate(project)` đã
+được move từ `dubbing_svc` xuống đây để giảm dep weight cho test env (pod
+fresh thiếu ffmpeg-python sẽ vẫn run helper unit tests OK).
 
 Utilities cho character-aware translation flow. Tách khỏi gemini_translate_svc
 / cloud_translate_svc / llm_translate_svc để 3 engines đều consume cùng API.
@@ -509,3 +513,51 @@ def validate_locked_character_translations(
         )
 
     return warnings
+
+
+# ── Phase 11: dispatcher helper ──────────────────────────────────
+
+def build_registry_block_for_translate(project: dict) -> Optional[str]:
+    """Reconstruct CharacterRegistry từ project meta + format thành prompt
+    block cho LLM translate engines.
+
+    Returns: block string nếu registry available, None nếu face-only / no registry.
+
+    Moved từ dubbing_svc → here ở Phase 11 để giảm import weight (dubbing_svc
+    import ffmpeg, không có trên test env). Unit tests có thể import helper
+    này độc lập.
+    """
+    try:
+        from app.models.character_schemas import CharacterProfile, CharacterRegistry
+    except ImportError:
+        return None
+
+    reg_summary = (project.get("character_registry_summary") or {}).get("characters") or []
+    if not reg_summary:
+        return None
+    reconstructed: dict = {}
+    for c in reg_summary:
+        cid = c.get("character_id")
+        if not cid:
+            continue
+        try:
+            reconstructed[cid] = CharacterProfile(
+                character_id=cid,
+                source_speakers=c.get("source_speakers") or [],
+                gender=c.get("gender", "unknown"),
+                gender_confidence=float(c.get("gender_confidence") or 0.0),
+                line_count=int(c.get("line_count") or 0),
+                merge_confidence=float(c.get("merge_confidence") or 1.0),
+                locked=bool(c.get("locked") or False),
+            )
+        except Exception:
+            continue
+    if not reconstructed:
+        return None
+    registry = CharacterRegistry(
+        project_id=project.get("id", ""),
+        characters=reconstructed,
+    )
+    chars_meta = project.get("speaker_characters") or {}
+    block = build_character_registry_prompt_block(registry, chars_meta=chars_meta)
+    return block or None

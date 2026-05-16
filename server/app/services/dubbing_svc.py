@@ -2893,45 +2893,15 @@ def transcribe_project(project_id: str) -> dict:
 # ── Translate ──────────────────────────────────────
 
 def _build_registry_block_for_translate(project: dict) -> str | None:
-    """Phase 11 helper: reconstruct CharacterRegistry từ project meta +
-    format thành prompt block cho LLM translate engines.
-
-    Returns: block string nếu registry available, None nếu face-only / no registry.
+    """Phase 11 wrapper — delegate to translation_character_helper.
+    Real logic ở `translation_character_helper.build_registry_block_for_translate`
+    để test env nhẹ (dubbing_svc cần ffmpeg-python, helper module thì không).
     """
     try:
-        from app.models.character_schemas import CharacterProfile, CharacterRegistry
         from app.services.translation_character_helper import (
-            build_character_registry_prompt_block,
+            build_registry_block_for_translate as _impl,
         )
-        reg_summary = (project.get("character_registry_summary") or {}).get("characters") or []
-        if not reg_summary:
-            return None
-        reconstructed = {}
-        for c in reg_summary:
-            cid = c.get("character_id")
-            if not cid:
-                continue
-            try:
-                reconstructed[cid] = CharacterProfile(
-                    character_id=cid,
-                    source_speakers=c.get("source_speakers") or [],
-                    gender=c.get("gender", "unknown"),
-                    gender_confidence=float(c.get("gender_confidence") or 0.0),
-                    line_count=int(c.get("line_count") or 0),
-                    merge_confidence=float(c.get("merge_confidence") or 1.0),
-                    locked=bool(c.get("locked") or False),
-                )
-            except Exception:
-                continue
-        if not reconstructed:
-            return None
-        registry = CharacterRegistry(
-            project_id=project.get("id", ""),
-            characters=reconstructed,
-        )
-        chars_meta = project.get("speaker_characters") or {}
-        block = build_character_registry_prompt_block(registry, chars_meta=chars_meta)
-        return block or None
+        return _impl(project)
     except Exception as e:
         logger.warning("_build_registry_block_for_translate fail: %s", e)
         return None
