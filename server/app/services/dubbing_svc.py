@@ -2170,6 +2170,10 @@ def transcribe_project(project_id: str) -> dict:
     project_for_count = _load_meta(project_id) or {}
     voice_count_meta = int(project_for_count.get("voice_count") or 1)
     speaker_genders: dict[str, str] = {}
+    # Init Phase 3: face_speaker hook gọi fuse_speakers cần audio confs.
+    # Set default {} ở scope outer để safe khi pyannote try/except fail trước
+    # khi set gender_confidences ở line 2252.
+    gender_confidences: dict[str, float] = {}
 
     # Skip speaker pipeline khi:
     # 1. User explicit skip qua env (VOX_SKIP_SPEAKER_PIPELINE=true)
@@ -2324,17 +2328,28 @@ def transcribe_project(project_id: str) -> dict:
                     face_result.stats,
                 )
                 try:
-                    # ── MULTIMODAL FUSION: combine audio + face → canonical CHAR_XX ──
+                    # ── MULTIMODAL FUSION (Phase 3 audit fix CRIT-1): ──
+                    # AUDIO-FIRST decision tree — audio chắc (>= AUDIO_STRONG)
+                    # → face KHÔNG được override. Face chỉ thắng khi audio yếu
+                    # và face active_speaker (MAR variance) đủ mạnh.
                     from app.services.multimodal_speaker_svc import fuse_speakers
+                    # audio_speaker_confidences: gender_confidences từ pipeline
+                    # gender F0 (per SPEAKER_XX). Dùng làm proxy cho audio speaker
+                    # labelling confidence (Phase 6 sẽ replace bằng ownership_confidence
+                    # proper từ speaker embedding similarity).
+                    # Empty dict {} nếu pyannote failed → fuse_speakers default 0.5/speaker.
+                    audio_confs_for_fusion: dict[str, float] = dict(gender_confidences)
                     fusion = fuse_speakers(
                         segments=merged,
                         face_genders=face_result.face_genders,
                         face_gender_confs=face_result.face_gender_confs,
-                        audio_speaker_genders=speaker_genders,  # từ pyannote
-                        face_conf_threshold=0.6,
+                        audio_speaker_genders=speaker_genders,
+                        audio_speaker_confidences=audio_confs_for_fusion,
+                        # Thresholds dùng default từ config (ACTIVE_SPEAKER_STRONG=0.80,
+                        # AUDIO_STRONG=0.85, OWNERSHIP_KEEP=0.70).
                     )
                     # fuse_speakers mutates merged: set seg["speaker"] = CHAR_XX,
-                    # seg["fusion_reason"], seg["speaker_gender"]
+                    # seg["fusion_reason"], seg["ownership_confidence"], seg["speaker_gender"]
 
                     # Update speaker_genders dict với canonical chars cho downstream
                     speaker_genders.update(fusion.char_genders)
