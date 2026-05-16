@@ -3042,33 +3042,47 @@ def generate_segment(project_id: str, seg_id: str) -> dict:
                                    seg.get("id", "?"), MAX_SPEED_FACTOR,
                                    (actual_dur / MAX_SPEED_FACTOR - target_duration) * 1000)
             elif actual_dur < target_duration * 0.9:
-                # Text ngắn (≤ 10 chars) + slot dài (> 1.5s, audio < 60% slot)
-                # → cho phép gentle slowdown 0.88-0.95x để voice đọc dramatic
-                # hơn thay vì cụt + silence pad. KHÔNG dùng slowdown cho text
-                # dài (muddy quality khi atempo < 1.0 cho audio > 2s).
+                # Audio ngắn hơn slot rõ rệt → gentle slowdown để khớp timing
+                # thay vì cụt + silence pad gây cảm giác "đứt" giữa câu.
+                # Tier theo độ dài text — text càng dài, slowdown càng nhẹ để
+                # tránh muddy (atempo < 0.92 cho text dài → voice méo).
                 n_chars = len(tts_text.strip())
+                slow_factor = 1.0
+                # Tier 1: text RẤT ngắn (≤12 chars) + slot dài → slow aggressive
                 if (n_chars <= 12 and target_duration > 1.5
                         and actual_dur < target_duration * 0.65):
-                    # Tính slowdown factor để audio fill ~85% slot, vẫn còn
-                    # silence pad nhỏ cuối (tránh sounds packed-out)
                     desired_dur = target_duration * 0.85
-                    slow_factor = actual_dur / desired_dur  # < 1.0
-                    slow_factor = max(0.88, slow_factor)    # KHÔNG slow quá 0.88
-                    if slow_factor < 0.97:
-                        logger.info("[dub] short-text gentle slowdown: %d chars · "
-                                    "actual=%.2fs target=%.2fs speed=%.2fx",
-                                    n_chars, actual_dur, target_duration, slow_factor)
-                        seg_dir = _segments_dir(project_id)
-                        raw_wav = seg_dir / f"{seg_id}_raw.wav"
-                        stretched_wav = seg_dir / f"{seg_id}_stretched.wav"
-                        sf.write(str(raw_wav), audio_np, sr)
-                        try:
-                            _atempo_stretch(raw_wav, stretched_wav, slow_factor)
-                            audio_np, sr = sf.read(str(stretched_wav))
-                            actual_dur = len(audio_np) / sr
-                        finally:
-                            raw_wav.unlink(missing_ok=True)
-                            stretched_wav.unlink(missing_ok=True)
+                    slow_factor = max(0.88, actual_dur / desired_dur)
+                # Tier 2 (MỚI): text MEDIUM (13-40 chars) + slot khá dài
+                # → slow nhẹ hơn (floor 0.92) để fill timing không bị đứt
+                elif (13 <= n_chars <= 40 and target_duration > 2.0
+                        and actual_dur < target_duration * 0.75):
+                    desired_dur = target_duration * 0.88
+                    slow_factor = max(0.92, actual_dur / desired_dur)
+                # Tier 3 (MỚI): text DÀI (41-80 chars) + slot dài hơn nhiều
+                # → slow rất nhẹ (floor 0.95) — tránh muddy nhưng vẫn fill
+                elif (41 <= n_chars <= 80 and target_duration > 3.5
+                        and actual_dur < target_duration * 0.80):
+                    desired_dur = target_duration * 0.92
+                    slow_factor = max(0.95, actual_dur / desired_dur)
+
+                if slow_factor < 0.97:
+                    logger.info("[dub] gentle slowdown tier %s: %d chars · "
+                                "actual=%.2fs target=%.2fs speed=%.2fx",
+                                ("short" if n_chars <= 12 else
+                                 "medium" if n_chars <= 40 else "long"),
+                                n_chars, actual_dur, target_duration, slow_factor)
+                    seg_dir = _segments_dir(project_id)
+                    raw_wav = seg_dir / f"{seg_id}_raw.wav"
+                    stretched_wav = seg_dir / f"{seg_id}_stretched.wav"
+                    sf.write(str(raw_wav), audio_np, sr)
+                    try:
+                        _atempo_stretch(raw_wav, stretched_wav, slow_factor)
+                        audio_np, sr = sf.read(str(stretched_wav))
+                        actual_dur = len(audio_np) / sr
+                    finally:
+                        raw_wav.unlink(missing_ok=True)
+                        stretched_wav.unlink(missing_ok=True)
                 logger.info("Vox Premium short-fill: actual=%.2fs target=%.2fs (silence padding)",
                             actual_dur, target_duration)
 
@@ -3267,16 +3281,30 @@ def _trim_trailing_silence(audio: np.ndarray, sr: int, threshold_db: float = -40
 
 
 def _atempo_stretch(in_path: Path, out_path: Path, tempo: float):
-    """Time-stretch audio with ffmpeg atempo (chỉ SPEEDUP, không slowdown).
+    """Time-stretch audio với ffmpeg atempo. Support cả speedup VÀ slowdown.
 
-    Slowdown (tempo < 1.0) làm voice timbre nghe lờ đờ + giả tạo.
-    Caller phải đảm bảo tempo ≥ 1.0. Nếu tempo < 1.0 → guard về 1.0.
+    Caller responsibility chọn tempo trong range an toàn:
+      • Speedup: 1.0 → 2.0+ (atempo phải chain nếu > 2.0, hàm tự handle)
+      • Slowdown: 0.5 → 1.0 (ffmpeg native range; < 0.85 nghe muddy)
+
+    Trước đây hàm guard slowdown về copy file — bug khiến mọi caller gọi
+    với tempo < 1.0 (gentle slowdown cho text ngắn để fill slot) bị no-op
+    silently → audio vẫn ngắn → silence pad đáng kể → cảm giác "đứt đứt".
+
+    Clamp ngoài range vẫn áp dụng cho an toàn (avoid ffmpeg error).
     """
-    if tempo < 1.0:
-        # Safety guard — không bao giờ slow down audio.
+    # Clamp range an toàn của atempo filter
+    if tempo < 0.5:
+        tempo = 0.5
+    elif tempo > 4.0:
+        tempo = 4.0
+    # Nếu sát 1.0 (no change) → copy file để tránh re-encode loss
+    if abs(tempo - 1.0) < 0.01:
         import shutil
         shutil.copy(str(in_path), str(out_path))
         return
+    # ffmpeg atempo native range 0.5-2.0. Speedup > 2.0 phải chain (2.0 * 2.0...).
+    # Slowdown < 0.5 không cần chain (caller đã clamp).
     filters = []
     t = tempo
     while t > 2.0:
@@ -3294,20 +3322,21 @@ def _atempo_stretch(in_path: Path, out_path: Path, tempo: float):
 
 
 # ── TTS speed matching ──
-# Speedup tối đa 1.25x (Edge TTS giữ chất lượng tốt đến ~1.30x), atempo
-# tối đa 1.25x. Nếu vẫn không đủ (cao trào, batch ngắn vs dài), trim
-# trailing silence + cap cứng overflow để KHÔNG overlap batch sau.
+# Speedup tối đa 1.40x (Edge TTS giữ chất lượng tốt đến ~1.30x, push lên
+# 1.40 cho overflow nặng — nghe hơi nhanh nhưng không chipmunk).
+# Nếu vẫn không đủ, trim trailing silence + cap cứng để KHÔNG bleed.
 SPEED_TOLERANCE = 0.05      # 5% — chỉ skip atempo nếu lệch < 5%
-# 1.30x: kinh nghiệm thực tế phim Trung — câu Việt thường +25-30% dài hơn
-# tiếng Trung do thừa các tiểu từ ("đó", "nhỉ", "thế..."). Cap 1.25 cũ
-# khiến 50-60% segments overflow (bleed sang câu sau). 1.30 vẫn nghe
-# tự nhiên không chipmunk, giảm overflow đáng kể.
-MAX_SPEED_FACTOR = 1.30     # speedup tối đa (atempo)
-# KHÔNG slowdown — câu Việt ngắn hơn slot Trung → để silence tự nhiên fill,
-# KHÔNG kéo dài audio (kéo nghe muddy + giả tạo).
-MIN_SPEED_FACTOR = 1.0      # KHÔNG slowdown (trước: 0.92 — gây kéo dài audio)
-MAX_EDGE_SPEED = 1.30       # Edge TTS rate max (đồng bộ với atempo)
-MIN_EDGE_SPEED = 1.0        # KHÔNG slowdown Edge TTS
+# 1.40x: kinh nghiệm thực tế phim Trung — câu Việt thường +25-35% dài hơn
+# tiếng Trung do thừa các tiểu từ ("đó", "nhỉ", "thế..."). Cap 1.30 cũ
+# vẫn để overflow nhẹ (5-10% segments bleed). 1.40 chấp nhận speedup mạnh
+# hơn cho extreme case — vẫn nghe tự nhiên, không chipmunk.
+MAX_SPEED_FACTOR = 1.40     # speedup tối đa (atempo)
+# Slowdown được phép cho text ngắn/medium (fill slot dài). Floor cứng 0.85
+# vì atempo < 0.85 → voice muddy. Caller (gentle slowdown logic) chọn
+# floor riêng theo độ dài text (0.88 short / 0.92 medium / 0.95 long).
+MIN_SPEED_FACTOR = 0.85     # slowdown tối đa (atempo)
+MAX_EDGE_SPEED = 1.40       # Edge TTS rate max (đồng bộ với atempo)
+MIN_EDGE_SPEED = 1.0        # KHÔNG slowdown Edge TTS (regenerate phải tốc bình thường)
 # Sau khi đã max speed, cho phép overflow X% rồi mới hard-trim. 15% grace
 # để cuối câu không bị cụt giật khi ratio nhỏ (1.10–1.20x).
 OVERFLOW_GRACE = 1.15
@@ -3341,12 +3370,12 @@ def _emotion_speed_cap(emotion: str | None) -> float:
         return MAX_SPEED_FACTOR
     e = emotion.lower().strip()
     if e in ("angry", "argument", "shouting"):
-        return 1.37  # Cãi nhau/giận → nhanh OK (đồng bộ với neutral 1.30)
+        return 1.45  # Cãi nhau/giận → nhanh OK (cao hơn neutral 1.40)
     if e in ("whisper", "sad", "tender", "intimate"):
-        return 1.18  # Truyền cảm → giữ chậm
+        return 1.20  # Truyền cảm → giữ chậm
     if e in ("happy", "surprised", "fearful", "excited"):
-        return 1.33  # Cảm xúc tăng — nhẹ hơn neutral
-    return MAX_SPEED_FACTOR  # neutral / unknown → 1.30
+        return 1.38  # Cảm xúc tăng — nhẹ hơn neutral
+    return MAX_SPEED_FACTOR  # neutral / unknown → 1.40
 
 
 def _compute_target_speed(seg: dict, target_dur: float, dub_text: str,
