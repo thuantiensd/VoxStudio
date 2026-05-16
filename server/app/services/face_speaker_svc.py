@@ -116,10 +116,15 @@ _INSIGHTFACE_TRIED = False
 
 
 def _get_insightface_app():
-    """Lazy-load insightface FaceAnalysis với gender+age model.
+    """Lazy-load insightface FaceAnalysis với detection + gender + recognition.
 
     Cache model trong /workspace/insightface_cache (persistent volume).
     Trả None nếu insightface không cài hoặc load fail.
+
+    LƯU Ý: BẮT BUỘC include "recognition" để face_id embedding work cho
+    face re-identification (gộp cùng nhân vật qua shot changes). Trước đây
+    chỉ load ["detection", "genderage"] → face.normed_embedding luôn None
+    → re-id thất bại → 29 face tracks không gộp được.
     """
     global _INSIGHTFACE_APP, _INSIGHTFACE_TRIED
     if _INSIGHTFACE_TRIED:
@@ -135,8 +140,11 @@ def _get_insightface_app():
             "/workspace/insightface_cache" if _os.path.isdir("/workspace") else None,
         )
         kwargs = {
-            "name": "buffalo_l",  # bao gồm detection + landmark + genderage
-            "allowed_modules": ["detection", "genderage"],
+            "name": "buffalo_l",
+            # detection: face bbox + 5 keypoints (cần)
+            # genderage: gender + age CNN (cần)
+            # recognition: 512-d face embedding cho re-id (BẮT BUỘC, trước đây miss)
+            "allowed_modules": ["detection", "genderage", "recognition"],
         }
         if cache_root:
             _os.makedirs(cache_root, exist_ok=True)
