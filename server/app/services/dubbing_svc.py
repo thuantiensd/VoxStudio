@@ -2277,11 +2277,16 @@ def transcribe_project(project_id: str) -> dict:
     # Skip nếu: voice_count=1 (không cần phân biệt), video file không có
     # (audio-only), hoặc env disable.
     video_path = _project_dir(project_id) / "original.mp4"
-    skip_face = (
-        os.environ.get("VOX_SKIP_FACE_SPEAKER", "").lower() == "true"
-        or voice_count_meta == 1
-        or not video_path.exists()
-    )
+    skip_face_reason = None
+    if os.environ.get("VOX_SKIP_FACE_SPEAKER", "").lower() == "true":
+        skip_face_reason = "env VOX_SKIP_FACE_SPEAKER=true"
+    elif voice_count_meta == 1:
+        skip_face_reason = "voice_count=1 (single voice mode → không cần phân biệt speaker)"
+    elif not video_path.exists():
+        skip_face_reason = f"video file không tồn tại ({video_path.name})"
+    skip_face = skip_face_reason is not None
+    if skip_face:
+        logger.info("Skip face_speaker_svc — reason: %s", skip_face_reason)
     if not skip_face:
         try:
             from app.services.face_speaker_svc import (
