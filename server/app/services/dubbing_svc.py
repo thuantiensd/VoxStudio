@@ -2323,6 +2323,10 @@ def transcribe_project(project_id: str) -> dict:
                         f"FACE_{k:02d}": v
                         for k, v in face_result.face_genders.items()
                     }
+                    project_meta_face["face_speaker_gender_confs"] = {
+                        f"FACE_{k:02d}": v
+                        for k, v in face_result.face_gender_confs.items()
+                    }
                     # Rebuild voice_map với face IDs (override pyannote voice_map)
                     from app.services.speaker_pipeline import build_speaker_voice_map
                     face_speakers = sorted({
@@ -2330,18 +2334,25 @@ def transcribe_project(project_id: str) -> dict:
                     })
                     voice_slots_face = project_meta_face.get("voice_slots") or []
                     user_over_face = project_meta_face.get("speaker_voice_map") or {}
+                    face_genders_str = {
+                        f"FACE_{k:02d}": v
+                        for k, v in face_result.face_genders.items()
+                    }
+                    face_gender_confs_str = {
+                        f"FACE_{k:02d}": v
+                        for k, v in face_result.face_gender_confs.items()
+                    }
                     face_voice_map = build_speaker_voice_map(
                         speakers=face_speakers,
                         voice_slots=voice_slots_face,
                         user_overrides=user_over_face,
-                        speaker_genders={
-                            f"FACE_{k:02d}": v
-                            for k, v in face_result.face_genders.items()
-                        },
+                        speaker_genders=face_genders_str,
+                        gender_confidences=face_gender_confs_str,
                     )
                     project_meta_face["speaker_voice_map"] = face_voice_map
                     _save_meta(project_meta_face)
-                    logger.info("Face voice_map rebuilt: %s", face_voice_map)
+                    logger.info("Face voice_map rebuilt: %s (genders=%s, confs=%s)",
+                                 face_voice_map, face_genders_str, face_gender_confs_str)
                 except Exception as e2:
                     logger.warning("Persist face stats failed: %s", e2)
             else:

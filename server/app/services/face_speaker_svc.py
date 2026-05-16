@@ -12,19 +12,22 @@ Pipeline:
   1. Sample frames từ video tại các speech segments (4-5 FPS đủ — lip
      movement detectable trong 200ms).
   2. mediapipe FaceMesh detect 468 landmarks/face per frame.
-  3. Track faces qua frames bằng IoU bbox matching (đơn giản, đủ cho clip
-     ngắn không có shot change phức tạp).
-  4. Per-segment: tính Mouth Aspect Ratio (MAR) variance cho mỗi face track.
-     Face nào MAR variance cao nhất = đang nói = speaker của segment đó.
+     → lip activity (MAR variance) per face track.
+  3. Track faces qua frames bằng IoU bbox matching.
+  4. Per-segment: face nào MAR variance cao nhất = speaker.
   5. Cluster face tracks → unique character IDs (face_id 0, 1, 2, ...).
-  6. Gender heuristic per face_id từ landmark geometry (jaw width / face
-     height ratio — không CNN, đủ tin cậy cho việc gán slot nam/nữ).
+  6. Gender per face: 2 layer cross-validate:
+     • Layer A — insightface CNN (genderage_v1, ~95% accuracy, primary)
+     • Layer B — geometry heuristic jaw/face ratio (fallback nếu insightface
+       không có hoặc CNN trả unknown)
 
 Public API:
   detect_speakers_by_face(video_path, segments, fps_sample=4)
-    → {segments: [...], face_count, face_metadata, stats}
+    → FaceSpeakerResult{face_count, face_genders, segments_face, ...}
 
-Yêu cầu: mediapipe + opencv-python-headless.
+Yêu cầu:
+  • mediapipe + opencv-python-headless (bắt buộc)
+  • insightface + onnxruntime[-gpu] (optional — fallback heuristic nếu thiếu)
 """
 
 from __future__ import annotations
@@ -60,6 +63,8 @@ class FaceDetection:
     landmarks: np.ndarray  # (468, 2) normalized
     mar: float  # mouth aspect ratio
     confidence: float
+    cnn_gender: Optional[str] = None  # "male"/"female"/None từ insightface
+    geo_gender: Optional[str] = None  # "male"/"female"/"unknown" từ heuristic
 
 
 @dataclass
@@ -76,6 +81,7 @@ class FaceSpeakerResult:
     """Kết quả analyze."""
     face_count: int
     face_genders: dict[int, str]
+    face_gender_confs: dict[int, float]  # CNN+geo cross-validate confidence
     segments_face: dict[int, Optional[int]]  # seg_index → face_id (None nếu không detect)
     segments_confidence: dict[int, float]
     stats: dict
@@ -89,6 +95,94 @@ def _check_available() -> bool:
     except ImportError as e:
         logger.warning("face_speaker_svc unavailable: %s", e)
         return False
+
+
+# ── InsightFace CNN gender (optional, fallback geometry) ──
+_INSIGHTFACE_APP = None
+_INSIGHTFACE_TRIED = False
+
+
+def _get_insightface_app():
+    """Lazy-load insightface FaceAnalysis với gender+age model.
+
+    Cache model trong /workspace/insightface_cache (persistent volume).
+    Trả None nếu insightface không cài hoặc load fail.
+    """
+    global _INSIGHTFACE_APP, _INSIGHTFACE_TRIED
+    if _INSIGHTFACE_TRIED:
+        return _INSIGHTFACE_APP
+    _INSIGHTFACE_TRIED = True
+    try:
+        import os as _os
+        from insightface.app import FaceAnalysis  # type: ignore
+
+        # Cache trong /workspace để persistent qua pod restart
+        cache_root = _os.environ.get(
+            "INSIGHTFACE_HOME",
+            "/workspace/insightface_cache" if _os.path.isdir("/workspace") else None,
+        )
+        kwargs = {
+            "name": "buffalo_l",  # bao gồm detection + landmark + genderage
+            "allowed_modules": ["detection", "genderage"],
+        }
+        if cache_root:
+            _os.makedirs(cache_root, exist_ok=True)
+            kwargs["root"] = cache_root
+
+        app = FaceAnalysis(**kwargs)
+        # ctx_id=0 → GPU0; -1 → CPU. Auto pick.
+        import torch as _torch
+        ctx_id = 0 if _torch.cuda.is_available() else -1
+        app.prepare(ctx_id=ctx_id, det_size=(320, 320))
+        _INSIGHTFACE_APP = app
+        logger.info("insightface FaceAnalysis loaded (ctx_id=%d, root=%s)",
+                     ctx_id, cache_root or "default")
+        return app
+    except ImportError:
+        logger.info("insightface chưa cài — fallback geometry gender heuristic. "
+                     "pip install insightface onnxruntime-gpu để bật CNN gender.")
+        return None
+    except Exception as e:
+        logger.warning("insightface load failed: %s — fallback heuristic", e)
+        return None
+
+
+def _gender_via_insightface(frame_bgr, bbox: tuple) -> Optional[str]:
+    """Predict gender bằng CNN insightface trên crop face từ frame.
+
+    bbox: (x1, y1, x2, y2) normalized 0-1.
+    Trả "male" / "female" / None.
+    """
+    app = _get_insightface_app()
+    if app is None:
+        return None
+    try:
+        h, w = frame_bgr.shape[:2]
+        x1, y1, x2, y2 = bbox
+        # Mở rộng bbox 15% mỗi cạnh cho insightface (cần context xung quanh face)
+        bw = x2 - x1
+        bh = y2 - y1
+        x1 = max(0.0, x1 - bw * 0.15)
+        y1 = max(0.0, y1 - bh * 0.15)
+        x2 = min(1.0, x2 + bw * 0.15)
+        y2 = min(1.0, y2 + bh * 0.15)
+        px1, py1 = int(x1 * w), int(y1 * h)
+        px2, py2 = int(x2 * w), int(y2 * h)
+        if px2 <= px1 or py2 <= py1:
+            return None
+        crop = frame_bgr[py1:py2, px1:px2]
+        if crop.size == 0:
+            return None
+        faces = app.get(crop)
+        if not faces:
+            return None
+        # Pick face lớn nhất trong crop (nhân vật chính)
+        face = max(faces, key=lambda f: (f.bbox[2] - f.bbox[0]) * (f.bbox[3] - f.bbox[1]))
+        # insightface: gender 0=female, 1=male
+        return "male" if int(face.gender) == 1 else "female"
+    except Exception as e:
+        logger.debug("insightface predict fail: %s", e)
+        return None
 
 
 def _bbox_from_landmarks(landmarks: np.ndarray) -> tuple:
@@ -281,14 +375,30 @@ def detect_speakers_by_face(
                 )
                 bbox = _bbox_from_landmarks(lm_arr)
                 mar_val = _mar(lm_arr)
+                # Gender — 2 layer:
+                # • CNN insightface (chính xác hơn) — chỉ chạy với 1 vài frame
+                #   đầu mỗi track để tiết kiệm thời gian (~10ms/face).
+                # • Geometry heuristic luôn chạy làm fallback.
+                geo_g = _gender_from_landmarks(lm_arr)
+                cnn_g = None
+                # Heuristic: chỉ CNN-detect nếu track chưa có sample gender chắc
+                # chắn — tracks lâu sẽ thử nhiều frame để vote.
+                # Tránh overhead chạy CNN trên MỌI face/frame.
+                # Logic: chạy CNN 3 frames đầu mỗi track + thêm 2 frame sau.
+                # Decision tại assign track step (sau loop chính).
                 det = FaceDetection(
                     bbox=bbox, landmarks=lm_arr,
                     mar=mar_val, confidence=1.0,
+                    cnn_gender=None, geo_gender=geo_g,
                 )
                 tid = _match_or_create_track(det, ts)
                 # Append detection vào track
                 for tr in tracks:
                     if tr.track_id == tid:
+                        # Chạy CNN gender cho 5 frame đầu mỗi track (đủ vote tốt)
+                        if len(tr.detections) < 5:
+                            cnn_g = _gender_via_insightface(frame, bbox)
+                            det.cnn_gender = cnn_g
                         tr.detections.append((ts, det))
                         break
                 face_mar_per_track.setdefault(tid, []).append(mar_val)
@@ -331,28 +441,39 @@ def detect_speakers_by_face(
     cap.release()
     face_mesh.close()
 
-    # Compute gender per face track từ avg landmarks (across all detections).
+    # Compute gender per face track — cross-validate CNN insightface + geometry.
+    # CNN có trọng số CAO HƠN (3x) vì accuracy 95% vs heuristic 70-80%.
     face_genders: dict[int, str] = {}
+    face_gender_confs: dict[int, float] = {}
     for tr in tracks:
         if not tr.detections:
             continue
-        genders = []
-        for _, det in tr.detections[:20]:  # đủ 20 frame để vote
-            g = _gender_from_landmarks(det.landmarks)
-            if g != "unknown":
-                genders.append(g)
-        if genders:
-            # Majority vote
-            male_cnt = genders.count("male")
-            female_cnt = genders.count("female")
-            if male_cnt > female_cnt * 1.5:
-                face_genders[tr.track_id] = "male"
-            elif female_cnt > male_cnt * 1.5:
-                face_genders[tr.track_id] = "female"
-            else:
-                face_genders[tr.track_id] = "unknown"
+        cnn_votes: list[str] = []  # weight 3
+        geo_votes: list[str] = []  # weight 1
+        for _, det in tr.detections[:30]:
+            if det.cnn_gender in ("male", "female"):
+                cnn_votes.append(det.cnn_gender)
+            if det.geo_gender in ("male", "female"):
+                geo_votes.append(det.geo_gender)
+
+        male_score = cnn_votes.count("male") * 3 + geo_votes.count("male")
+        female_score = cnn_votes.count("female") * 3 + geo_votes.count("female")
+        total = male_score + female_score
+
+        if total == 0:
+            face_genders[tr.track_id] = "unknown"
+            face_gender_confs[tr.track_id] = 0.0
+            continue
+
+        if male_score > female_score * 1.3:
+            face_genders[tr.track_id] = "male"
+        elif female_score > male_score * 1.3:
+            face_genders[tr.track_id] = "female"
         else:
             face_genders[tr.track_id] = "unknown"
+        # Confidence = dominant / total (0.5-1.0)
+        dom = max(male_score, female_score)
+        face_gender_confs[tr.track_id] = round(dom / total, 2)
 
     # Filter: chỉ giữ track có >=2 detections (loại noise/false positive)
     active_tracks = [tr for tr in tracks if len(tr.detections) >= 2]
@@ -378,18 +499,29 @@ def detect_speakers_by_face(
         "fps_sample": fps_sample,
     }
 
+    # Log gender summary
+    gender_summary = ", ".join(
+        f"FACE_{tid:02d}={face_genders.get(tid, '?')}({face_gender_confs.get(tid, 0):.2f})"
+        for tid in sorted(t.track_id for t in active_tracks)
+    )
+    insightface_used = _get_insightface_app() is not None
     logger.info(
-        "face_speaker: %d/%d segments có face (%.1f%%) · %d face active · %.1fs",
+        "face_speaker: %d/%d segments có face (%.1f%%) · %d face active · "
+        "%.1fs · gender_engine=%s · [%s]",
         n_assigned, n_segments,
         stats["coverage_pct"], len(active_tracks), elapsed,
+        "CNN+heuristic" if insightface_used else "heuristic_only",
+        gender_summary,
     )
 
     return FaceSpeakerResult(
         face_count=len(active_tracks),
         face_genders=face_genders,
+        face_gender_confs=face_gender_confs,
         segments_face=segments_face,
         segments_confidence=segments_confidence,
-        stats=stats,
+        stats={**stats, "insightface_used": insightface_used,
+               "face_gender_confs": face_gender_confs},
     )
 
 
@@ -397,6 +529,7 @@ def apply_face_speakers_to_segments(
     segments: list[dict],
     result: FaceSpeakerResult,
     min_confidence: float = 0.6,
+    min_gender_confidence: float = 0.65,
     override_audio: bool = True,
 ) -> int:
     """Apply face_id từ FaceSpeakerResult vào segments[i]['speaker'] in-place.
@@ -405,6 +538,8 @@ def apply_face_speakers_to_segments(
       segments: list segment (mutated in-place).
       result: FaceSpeakerResult từ detect_speakers_by_face().
       min_confidence: threshold confidence để override speaker_id cũ.
+      min_gender_confidence: threshold riêng cho override gender (audio gender
+        từ F0 vẫn được giữ nếu face gender confidence thấp).
       override_audio: True → ghi đè 'speaker' từ pyannote (default).
                        False → chỉ thêm 'face_id' field, giữ 'speaker' nguyên.
 
@@ -428,7 +563,10 @@ def apply_face_speakers_to_segments(
         if override_audio:
             seg["speaker"] = face_speaker_id
             face_g = result.face_genders.get(face_id)
-            if face_g and face_g != "unknown":
+            face_g_conf = result.face_gender_confs.get(face_id, 0.0)
+            # CHỈ override gender khi CNN+geo vote cao. Nếu thấp, giữ
+            # gender từ audio (F0) để cross-validate sau với LLM Pass-0.
+            if face_g and face_g != "unknown" and face_g_conf >= min_gender_confidence:
                 seg["speaker_gender"] = face_g
         updated += 1
     return updated
