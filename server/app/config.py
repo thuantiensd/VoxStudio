@@ -84,3 +84,94 @@ R2_ENDPOINT_URL = os.getenv(
     "R2_ENDPOINT_URL",
     f"https://{R2_ACCOUNT_ID}.r2.cloudflarestorage.com" if R2_ACCOUNT_ID else "",
 )
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# DUB THRESHOLDS — gom toàn bộ ngưỡng quyết định speaker/character/face/LLM
+# vào 1 chỗ (Phase 1 refactor audit report fix MAJ-7, MAJ-8).
+#
+# Phase 1: CHỈ gom literal numbers từ code → constants. KHÔNG đổi giá trị.
+# Nếu giá trị code khác spec, giữ giá trị code + cờ trong báo cáo phase.
+# Phase 5-7 sẽ tune lại giá trị theo spec audio-first character-based.
+#
+# Naming convention:
+#   FACE_*       — face tracking + visual speaker
+#   FUSION_*     — multi-modal fusion audio + face
+#   GENDER_*     — gender detection per character
+#   OWNERSHIP_*  — segment ownership (audio embedding match character)
+#   LLM_*        — LLM cross-validate (gender + speaker reassign)
+#   COSINE_*     — cosine similarity (clustering raw speakers)
+#   ACTIVE_*     — active speaker detection (face mouth movement + audio sync)
+#   AUDIO_*      — audio-only signal strength
+#   EMBEDDING_*  — speaker embedding extraction
+# ═══════════════════════════════════════════════════════════════════════
+
+# === Face tracking + visual ===
+# IoU bbox matching giữa các frames trong CÙNG shot (face_speaker_svc).
+FACE_IOU_TRACK_MIN = 0.30
+# Cosine similarity giữa face embeddings để re-id CÙNG nhân vật qua các shot
+# (face_speaker_svc._reidentify_tracks). LƯU Ý: 0.45 hiện tại lỏng hơn nhiều
+# so với spec COSINE_MERGE_LOW=0.65 cho speaker clustering, nhưng face embedding
+# space khác speaker embedding space — không so sánh trực tiếp được.
+FACE_REID_COSINE_MIN = 0.45
+# Face confidence tối thiểu để USE (apply face_id vào segment HOẶC face thắng
+# trong fusion). Dùng ở 2 chỗ: face_speaker_svc.apply_face_speakers_to_segments,
+# multimodal_speaker_svc.fuse_speakers. ⚠️ MISMATCH spec: spec yêu cầu
+# ACTIVE_SPEAKER_STRONG=0.80 cho face thắng, code đang 0.60.
+FACE_USE_MIN_CONFIDENCE = 0.60
+# Face CNN gender confidence để override audio gender per segment
+# (face_speaker_svc.apply_face_speakers_to_segments).
+FACE_GENDER_OVERRIDE_MIN = 0.65
+
+# === Fusion (audio + face cross-match) ===
+# Số segment cùng chứa (audio_speaker, face_cluster) tối thiểu để match
+# (multimodal_speaker_svc._cross_match_audio_face).
+FUSION_COOCCURRENCE_MIN = 2
+
+# === Voice mapping (gender → slot) ===
+# Gender confidence tối thiểu để strict slot match (voice_mapping.build_speaker_voice_map).
+# ⚠️ MISMATCH spec: spec yêu cầu GENDER_HIGH=0.80, code đang 0.70.
+GENDER_VOICE_MATCH_MIN = 0.70
+
+# === LLM gender cross-validate (sau translate) ===
+# Pipeline confidence thresholds cho rule tree LLM override (dubbing_svc):
+#   conf < LOW  → LLM thắng vô điều kiện
+#   conf < MID  → LLM thắng nếu evidence ≥ EVIDENCE_MIN_CHARS
+#   conf < HIGH → LLM thắng nếu evidence_strong (≥ STRONG_CHARS hoặc keyword "self-ref"...)
+#   conf ≥ HIGH → giữ pipeline (audio cực mạnh)
+LLM_OVERRIDE_PIPELINE_LOW = 0.70
+LLM_OVERRIDE_PIPELINE_MID = 0.90
+LLM_OVERRIDE_PIPELINE_HIGH = 0.98
+LLM_OVERRIDE_EVIDENCE_MIN_CHARS = 5
+LLM_OVERRIDE_EVIDENCE_STRONG_CHARS = 30
+
+# ═══════════════════════════════════════════════════════════════════════
+# SPEC DEFAULTS — đặt sẵn cho Phase 3-7 sẽ dùng (character_registry,
+# segment_ownership_service, gender_detection_service). Hiện chưa wire vào
+# code. Các giá trị này theo spec audit report.
+# ═══════════════════════════════════════════════════════════════════════
+
+# === Speaker clustering (Phase 5: character_registry) ===
+COSINE_MERGE_HIGH = 0.75       # cosine sim cao → merge tự động
+COSINE_MERGE_LOW = 0.65        # < này → giữ riêng tuyệt đối
+# Vùng 0.65 ≤ sim < 0.75: không merge nếu chỉ audio, cần ≥ 2 supporting evidences.
+
+# === Gender confidence per character (Phase 7) ===
+GENDER_HIGH = 0.80             # high confidence → dùng character profile mạnh
+GENDER_MEDIUM = 0.60           # medium → dịch thận trọng, neutral-safe
+# < GENDER_MEDIUM → unknown, fallback voice + neutral translation
+
+# === Segment ownership per segment (Phase 6) ===
+OWNERSHIP_KEEP = 0.70          # ownership conf ≥ này → giữ assignment
+OWNERSHIP_REASSIGN_GAP = 0.20  # best_candidate - assigned > gap → reassign
+OWNERSHIP_LOW = 0.50           # < này → mark low_confidence, log qa_report
+
+# === Active speaker detection (Phase 7+) ===
+ACTIVE_SPEAKER_STRONG = 0.80   # active speaker conf cao → tin face cho assignment
+
+# === Audio strength (chống face override audio chắc) ===
+AUDIO_STRONG = 0.85            # audio ownership ≥ này → face KHÔNG được override
+
+# === Embedding extraction (Phase 4) ===
+MIN_EMBEDDING_DURATION = 2.0   # đoạn audio tối thiểu (giây) để extract embedding tin cậy
+MAX_EMBEDDING_DURATION = 10.0  # đoạn tối đa (tránh embedding "averaged" qua nhiều câu)
