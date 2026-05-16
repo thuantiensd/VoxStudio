@@ -2237,6 +2237,8 @@ def transcribe_project(project_id: str) -> dict:
                         best_overlap = ov
                         best_spk = sent.speaker_id
                 seg["speaker"] = best_spk
+                seg["audio_speaker"] = best_spk  # preserve cho multi-modal fusion
+                seg["audio_speaker_gender"] = speaker_genders.get(best_spk) if best_spk else None
                 seg["speaker_gender"] = speaker_genders.get(best_spk) if best_spk else None
 
             # Build voice_map theo gender (slot 0=nam, slot 1=nữ) — chỉ khi
@@ -2304,26 +2306,36 @@ def transcribe_project(project_id: str) -> dict:
                 max_faces=max(6, voice_count_meta),
             )
             if face_result and face_result.face_count > 0:
+                # KHÔNG override pyannote speaker — chỉ set face_id riêng.
+                # Multimodal fusion (dưới) sẽ decide canonical per segment.
                 n_updated = apply_face_speakers_to_segments(
                     merged, face_result,
                     min_confidence=0.6,
-                    override_audio=True,
+                    override_audio=False,  # ← giữ audio_speaker pyannote
                 )
                 logger.info(
-                    "face_speaker: %d/%d segments override speaker_id, "
+                    "face_speaker: %d/%d segments tagged face_id (KHÔNG override audio), "
                     "%d face detected · stats=%s",
                     n_updated, len(merged), face_result.face_count,
                     face_result.stats,
                 )
-                # Update speaker_genders dict từ face genders để voice_map dùng
-                for face_id_int, g in face_result.face_genders.items():
-                    if g != "unknown":
-                        face_spk = f"FACE_{face_id_int:02d}"
-                        speaker_genders[face_spk] = g
-                # Persist face info vào IN-MEMORY project dict (KHÔNG load/save
-                # disk riêng — race với end-of-function _save_meta sẽ ghi đè).
-                # End-of-function _save_meta(project) sẽ persist toàn bộ 1 lần.
                 try:
+                    # ── MULTIMODAL FUSION: combine audio + face → canonical CHAR_XX ──
+                    from app.services.multimodal_speaker_svc import fuse_speakers
+                    fusion = fuse_speakers(
+                        segments=merged,
+                        face_genders=face_result.face_genders,
+                        face_gender_confs=face_result.face_gender_confs,
+                        audio_speaker_genders=speaker_genders,  # từ pyannote
+                        face_conf_threshold=0.6,
+                    )
+                    # fuse_speakers mutates merged: set seg["speaker"] = CHAR_XX,
+                    # seg["fusion_reason"], seg["speaker_gender"]
+
+                    # Update speaker_genders dict với canonical chars cho downstream
+                    speaker_genders.update(fusion.char_genders)
+
+                    # Persist stats vào IN-MEMORY project (end-of-function save once)
                     face_genders_str = {
                         f"FACE_{k:02d}": v
                         for k, v in face_result.face_genders.items()
@@ -2335,26 +2347,38 @@ def transcribe_project(project_id: str) -> dict:
                     project["face_speaker_stats"] = face_result.stats
                     project["face_speaker_genders"] = face_genders_str
                     project["face_speaker_gender_confs"] = face_gender_confs_str
+                    project["multimodal_fusion_stats"] = fusion.stats
+                    project["multimodal_char_genders"] = fusion.char_genders
 
-                    # Rebuild voice_map với face IDs (override pyannote voice_map)
+                    # Voice_map theo canonical CHAR_XX (gộp face + audio)
                     from app.services.speaker_pipeline import build_speaker_voice_map
-                    face_speakers = sorted({
-                        f"FACE_{k:02d}" for k in face_result.face_genders.keys()
-                    })
-                    voice_slots_face = project.get("voice_slots") or []
-                    user_over_face = project.get("speaker_voice_map") or {}
-                    face_voice_map = build_speaker_voice_map(
-                        speakers=face_speakers,
-                        voice_slots=voice_slots_face,
-                        user_overrides=user_over_face,
-                        speaker_genders=face_genders_str,
-                        gender_confidences=face_gender_confs_str,
+                    char_speakers = sorted(fusion.char_genders.keys())
+                    voice_slots = project.get("voice_slots") or []
+                    user_overrides = project.get("speaker_voice_map") or {}
+                    # Dùng confidence 0.85 cho chars có face evidence (cao)
+                    # 0.6 cho chars chỉ có audio (thấp hơn)
+                    char_gender_confs = {}
+                    for char_id in fusion.char_genders:
+                        # Char có face = audio_to_face.values() ∪ unmatched_faces
+                        # Confidence dựa trên face conf nếu có, không thì audio default
+                        try:
+                            face_int = int(char_id.replace("CHAR_", ""))
+                            char_gender_confs[char_id] = face_result.face_gender_confs.get(face_int, 0.6)
+                        except (ValueError, AttributeError):
+                            char_gender_confs[char_id] = 0.5
+                    char_voice_map = build_speaker_voice_map(
+                        speakers=char_speakers,
+                        voice_slots=voice_slots,
+                        user_overrides=user_overrides,
+                        speaker_genders=fusion.char_genders,
+                        gender_confidences=char_gender_confs,
                     )
-                    project["speaker_voice_map"] = face_voice_map
-                    logger.info("Face voice_map rebuilt: %s (genders=%s, confs=%s)",
-                                 face_voice_map, face_genders_str, face_gender_confs_str)
+                    project["speaker_voice_map"] = char_voice_map
+                    logger.info("Multimodal voice_map: %s (genders=%s)",
+                                 char_voice_map, fusion.char_genders)
                 except Exception as e2:
-                    logger.warning("Persist face stats failed: %s", e2)
+                    logger.warning("Multimodal fusion failed: %s", e2)
+                    logger.exception("fusion traceback:")
             else:
                 logger.info(
                     "face_speaker: 0 face detected → giữ pyannote/whisperx speaker",
