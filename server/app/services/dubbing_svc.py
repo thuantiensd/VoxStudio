@@ -878,6 +878,9 @@ def _pick_edge_voice_for_segment(seg: dict, project: dict) -> str | None:
 
     Priority:
       1. speaker_voice_map[speaker_id] — explicit mapping từ analyze-speakers.
+         CHỈ apply khi voice_count > 1 (multi-voice mode). Khi user chọn 1
+         giọng, speaker_voice_map cũ từ analyze trước đó KHÔNG được dùng —
+         tránh bug "chọn 1 giọng vẫn ra 2 người đọc".
       2. voice_count > 1 + voice_slots: cycle qua slots theo thứ tự xuất hiện
          speaker (đảm bảo mỗi speaker có voice riêng).
       3. **Multi-voice STRICT FALLBACK**: nếu voice_count > 1 và voice_slots
@@ -885,17 +888,21 @@ def _pick_edge_voice_for_segment(seg: dict, project: dict) -> str | None:
          map → dùng slot 0 (KHÔNG ra ngoài giọng user đã chọn). Đây là rule
          "chọn 2 giọng thì chỉ đọc 2 giọng đấy thôi".
       4. Single-voice override `edge_voice`.
-      5. Default voice cho target_language (chỉ khi single-voice mode).
-      6. None.
+      5. Single-voice fallback: voice_slots[0] khi user đã chọn 1 slot
+         nhưng chưa set `edge_voice` (UI mode mới).
+      6. Default voice cho target_language (chỉ khi single-voice mode).
+      7. None.
     """
     speaker_id = seg.get("speaker")
     voice_count = int(project.get("voice_count") or 1)
     voice_slots = project.get("voice_slots") or []
     target_lang = project.get("target_language")
 
-    # ── Priority 1: speaker_voice_map (analyze-speakers result) ──
+    # ── Priority 1: speaker_voice_map (CHỈ multi-voice) ──
+    # Khi voice_count == 1: bỏ qua map cũ → đảm bảo 1 giọng duy nhất đọc
+    # mọi segment, bất kể diarization detect được bao nhiêu speaker.
     speaker_voice_map = project.get("speaker_voice_map") or {}
-    if speaker_id and speaker_id in speaker_voice_map:
+    if voice_count > 1 and speaker_id and speaker_id in speaker_voice_map:
         v = speaker_voice_map[speaker_id]
         if v:
             return v
@@ -932,18 +939,24 @@ def _pick_edge_voice_for_segment(seg: dict, project: dict) -> str | None:
             if slot_v:
                 return slot_v
 
-    # ── Priority 4: Single-voice override ──
+    # ── Priority 4: Single-voice override (legacy edge_voice field) ──
     if project.get("edge_voice"):
         return project["edge_voice"]
 
-    # ── Priority 5: Lang-based default (CHỈ khi single-voice mode) ──
+    # ── Priority 5: Single-voice slot mode ──
+    # UI mode mới: user chọn voice_count=1 + voice_slots[0]=<voice key> thay
+    # vì set edge_voice. Trả slot 0 cho mọi segment.
+    if voice_count <= 1 and voice_slots and voice_slots[0]:
+        return voice_slots[0]
+
+    # ── Priority 6: Lang-based default (CHỈ khi single-voice mode) ──
     if voice_count <= 1 and target_lang:
         lang = target_lang.lower().strip()
         pair = DEFAULT_EDGE_VOICES_BY_LANG.get(lang)
         if pair:
             return pair.get("male") or pair.get("female")
 
-    # ── Priority 6: None — Edge default ──
+    # ── Priority 7: None — Edge default ──
     return None
 
 
@@ -2641,20 +2654,35 @@ def translate_project(
                 if llm_g == pipeline_g:
                     continue
 
-                # Disagree — quyết định theo pipeline confidence:
-                # • conf < 0.70 → audio biên/yếu → LLM thắng (kể cả không evidence)
+                # Disagree — quyết định theo pipeline confidence + chất lượng evidence:
+                # • conf < 0.70 → audio yếu → LLM thắng (kể cả không evidence)
                 # • 0.70 ≤ conf < 0.90 → ambiguous → cần LLM evidence ≥ 5 chars
-                # • conf ≥ 0.90 → audio chắc chắn → giữ pipeline (LLM có thể bias text)
+                # • 0.90 ≤ conf < 0.98 → audio mạnh nhưng có thể bị nhiễu (cluster
+                #     gộp nhiều speakers) → cần LLM evidence DÀI ≥ 20 chars
+                #     (chứng tỏ LLM thấy multiple self-ref signals).
+                # • conf ≥ 0.98 → audio cực mạnh → giữ pipeline.
+                # Evidence chứa "diarization merge" hoặc "self-ref" → LLM có context
+                # mạnh → tăng priority thắng.
                 should_override = False
                 reason = ""
+                ev_len = len(evidence) if evidence else 0
+                ev_strong = bool(evidence and (
+                    "self-ref" in evidence.lower()
+                    or "diarization" in evidence.lower()
+                    or "merge" in evidence.lower()
+                    or ev_len > 30
+                ))
                 if pipeline_conf < 0.70:
                     should_override = True
                     reason = f"pipeline_conf={pipeline_conf:.2f} thấp → LLM thắng"
-                elif pipeline_conf < 0.90 and evidence and len(evidence) > 5:
+                elif pipeline_conf < 0.90 and ev_len > 5:
                     should_override = True
                     reason = f"pipeline_conf={pipeline_conf:.2f} ambiguous + LLM có evidence"
+                elif pipeline_conf < 0.98 and ev_strong:
+                    should_override = True
+                    reason = f"pipeline_conf={pipeline_conf:.2f} cao nhưng LLM evidence MẠNH ({ev_len} chars)"
                 else:
-                    reason = f"pipeline_conf={pipeline_conf:.2f} cao → giữ audio"
+                    reason = f"pipeline_conf={pipeline_conf:.2f} cao + evidence yếu → giữ audio"
 
                 if should_override:
                     overridden[spk] = llm_g

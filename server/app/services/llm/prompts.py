@@ -540,9 +540,38 @@ NHIỆM VỤ với MỖI speaker:
 • third_person_label — khi NGƯỜI KHÁC nhắc tới speaker này ở NGÔI 3 (他/她)
   VD: con trai → "con"/"thằng bé"; chồng → "anh ấy"; sếp → "ông ấy"
 
-EVIDENCE để suy:
-• Tự gọi "anh/bố/ba/chồng/ông" → NAM; "em/mẹ/má/vợ/chị/cô" → NỮ
-• Người khác gọi "anh ơi/cậu ơi/sếp ơi" → NAM; "em ơi/chị ơi" → NỮ
+EVIDENCE để suy gender (QUAN TRỌNG — phân biệt rõ 3 trường hợp):
+
+🎯 SELF-REFERENCE (CHÍNH XÁC NHẤT — speaker tự xưng):
+• Speaker SAY "ba/bố/cha + verb" làm CHỦ NGỮ → speaker NAM (cha)
+  VD: "Ba không bắt nạt ai cả" → speaker là cha → NAM
+• Speaker SAY "mẹ/má + verb" làm CHỦ NGỮ → speaker NỮ (mẹ)
+  VD: "Mẹ sẽ về sớm" → speaker là mẹ → NỮ
+• Speaker SAY "anh + verb" làm CHỦ NGỮ (vd "anh phải đi", "anh đã hứa") + addressing person "em" → speaker NAM (chồng/người yêu lớn)
+• Speaker SAY "em + verb" làm CHỦ NGỮ + addressing person "anh" → speaker NỮ (vợ/người yêu nhỏ)
+• Speaker SAY "con + verb" làm CHỦ NGỮ + vocative "Mẹ/Bố ơi" → speaker là CON, gender = nghe tone (child voice) hoặc unsure
+• Speaker SAY "tôi/ta" → gender ambiguous từ self-ref, dùng evidence khác
+
+❌ KHÔNG PHẢI self-reference (đừng đoán nhầm):
+• Vocative: "Mẹ ơi, …" → đây là CON đang gọi MẸ, NOT mẹ tự xưng. Speaker = con.
+• Talking-about: "Mẹ bảo ba sẽ về" → CON kể về cha mẹ. Speaker = con, KHÔNG phải mẹ hay ba.
+• Possession: "Ba của con" / "Mẹ tôi" → cùng analysis, speaker là người khác đang nói VỀ ba/mẹ.
+
+🔊 ADDRESSED BY OTHERS (gián tiếp):
+• Người khác gọi speaker "anh ơi/cậu ơi/sếp ơi/chồng ơi/ông xã" → speaker NAM
+• Người khác gọi speaker "em ơi/chị ơi/vợ ơi/bà xã" → speaker NỮ
+• Người khác gọi speaker "con" + child tone → speaker là CON (gender từ context khác)
+
+⚖️ XỬ LÝ KHI XUNG ĐỘT:
+• Self-ref MẠNH HƠN addressed-by. Ai tự xưng thế nào quyết định gender.
+• Nếu speaker có nhiều câu, AGGREGATE: ≥2 self-ref cùng gender → CHẮC CHẮN gender đó.
+• Nếu chỉ 1-2 câu ngắn ("Hả?"/"Dạ"/"Vâng") không có pronoun → gender = "unsure".
+
+⚠️ DIARIZATION SAI (utterance ngắn bị merge): nếu thấy SPEAKER_XX có CÂU
+TỰ XƯNG MÂU THUẪN ("Mẹ sẽ về" + "Ba phải đi" cùng SPEAKER) → cluster bị
+gộp NHẦM. Đặt evidence = "diarization merge detected" + chọn gender theo
+MAJORITY self-ref count. Output evidence dài (>20 chars) để pipeline tự
+phát hiện và xử lý.
 
 🏯 REGISTER DETECTION (TRƯỚC TIÊN — output field "register"):
 
