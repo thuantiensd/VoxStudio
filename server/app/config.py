@@ -110,9 +110,10 @@ R2_ENDPOINT_URL = os.getenv(
 # IoU bbox matching giữa các frames trong CÙNG shot (face_speaker_svc).
 FACE_IOU_TRACK_MIN = 0.30
 # Cosine similarity giữa face embeddings để re-id CÙNG nhân vật qua các shot
-# (face_speaker_svc._reidentify_tracks). LƯU Ý: 0.45 hiện tại lỏng hơn nhiều
-# so với spec COSINE_MERGE_LOW=0.65 cho speaker clustering, nhưng face embedding
-# space khác speaker embedding space — không so sánh trực tiếp được.
+# (face_speaker_svc._reidentify_tracks).
+# NOTE: Face re-identification dùng insightface w600k_r50 embedding space —
+# KHÔNG so sánh trực tiếp được với speaker COSINE_MERGE_* thresholds
+# (speaker embedding space khác model: resemblyzer/wespeaker). Giữ riêng.
 FACE_REID_COSINE_MIN = 0.45
 # Face confidence tối thiểu để USE (apply face_id vào segment HOẶC face thắng
 # trong fusion). Dùng ở 2 chỗ: face_speaker_svc.apply_face_speakers_to_segments,
@@ -126,7 +127,7 @@ FACE_GENDER_OVERRIDE_MIN = 0.65
 # === Fusion (audio + face cross-match) ===
 # Số segment cùng chứa (audio_speaker, face_cluster) tối thiểu để match
 # (multimodal_speaker_svc._cross_match_audio_face).
-FUSION_COOCCURRENCE_MIN = 2
+AUDIO_FACE_COOCCURRENCE_MIN = 2
 
 # === Voice mapping (gender → slot) ===
 # Gender confidence tối thiểu để strict slot match (voice_mapping.build_speaker_voice_map).

@@ -34,7 +34,7 @@ from typing import Optional
 
 from app.config import (
     FACE_USE_MIN_CONFIDENCE,
-    FUSION_COOCCURRENCE_MIN,
+    AUDIO_FACE_COOCCURRENCE_MIN,
 )
 
 logger = logging.getLogger(__name__)
@@ -57,7 +57,7 @@ def _segment_overlap(a_start: float, a_end: float,
 
 def _cross_match_audio_face(
     segments: list[dict],
-    min_cooccurrence: int = FUSION_COOCCURRENCE_MIN,
+    min_cooccurrence: int = AUDIO_FACE_COOCCURRENCE_MIN,
 ) -> dict[str, int]:
     """Cross-match audio_speaker (pyannote) ↔ face_cluster (vision).
 
@@ -130,7 +130,7 @@ def fuse_speakers(
 
     # ── Step 1: cross-match audio ↔ face ──
     audio_to_face = _cross_match_audio_face(
-        segments, min_cooccurrence=FUSION_COOCCURRENCE_MIN,
+        segments, min_cooccurrence=AUDIO_FACE_COOCCURRENCE_MIN,
     )
 
     # ── Step 2: build canonical CHAR_XX namespace ──
