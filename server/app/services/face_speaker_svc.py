@@ -160,6 +160,52 @@ def _get_insightface_app():
         return None
 
 
+def _extract_face_embedding(frame_bgr, bbox: tuple) -> Optional[np.ndarray]:
+    """Extract 512-dim face recognition embedding từ insightface buffalo_l.
+
+    bbox: (x1, y1, x2, y2) normalized 0-1.
+    Trả normalized embedding (L2 norm = 1) hoặc None nếu fail.
+
+    Dùng để re-identify cùng nhân vật qua shot changes — cosine similarity
+    > 0.45 giữa 2 embedding = cùng người.
+    """
+    app = _get_insightface_app()
+    if app is None:
+        return None
+    try:
+        h, w = frame_bgr.shape[:2]
+        x1, y1, x2, y2 = bbox
+        # Mở rộng bbox 20% cho recognition model (cần forehead + cằm)
+        bw = x2 - x1
+        bh = y2 - y1
+        x1 = max(0.0, x1 - bw * 0.20)
+        y1 = max(0.0, y1 - bh * 0.20)
+        x2 = min(1.0, x2 + bw * 0.20)
+        y2 = min(1.0, y2 + bh * 0.20)
+        px1, py1 = int(x1 * w), int(y1 * h)
+        px2, py2 = int(x2 * w), int(y2 * h)
+        if px2 <= px1 + 30 or py2 <= py1 + 30:
+            return None
+        crop = frame_bgr[py1:py2, px1:px2]
+        if crop.size == 0:
+            return None
+        faces = app.get(crop)
+        if not faces:
+            return None
+        # Pick face lớn nhất
+        face = max(faces, key=lambda f: (f.bbox[2] - f.bbox[0]) * (f.bbox[3] - f.bbox[1]))
+        if hasattr(face, "normed_embedding") and face.normed_embedding is not None:
+            emb = np.asarray(face.normed_embedding, dtype=np.float32)
+            # Đảm bảo L2 normalized
+            norm = np.linalg.norm(emb)
+            if norm > 0:
+                return emb / norm
+        return None
+    except Exception as e:
+        logger.debug("face embedding extract fail: %s", e)
+        return None
+
+
 def _gender_via_insightface(frame_bgr, bbox: tuple) -> Optional[str]:
     """Predict gender bằng CNN insightface trên crop face từ frame.
 
@@ -271,6 +317,126 @@ def _sample_timestamps(start: float, end: float, fps: float) -> list[float]:
     n = max(1, int(duration * fps))
     step = duration / n
     return [start + i * step + step / 2 for i in range(n)]
+
+
+def _reidentify_tracks(
+    tracks: list,
+    video_cap,
+    video_fps: float,
+    similarity_threshold: float = 0.45,
+    max_samples_per_track: int = 3,
+) -> dict[int, int]:
+    """Cluster face tracks bằng insightface embedding → merge cùng nhân vật.
+
+    Camera cắt giữa shot → IoU tracking mất → 1 nhân vật bị split thành
+    N face_id. Hàm này dùng face embedding (CNN feature 512-d) để re-id:
+    embeddings cùng người → cosine similarity > 0.45 → gộp cluster.
+
+    Args:
+      tracks: list FaceTrack (đã filter active).
+      video_cap: cv2.VideoCapture đang mở.
+      video_fps: fps video.
+      similarity_threshold: cosine sim threshold để merge (0.45 = standard cho
+        face_recognition; cao hơn = strict hơn, ít merge sai nhưng có thể miss).
+      max_samples_per_track: lấy N frame to extract embedding mỗi track
+        (chọn frame có face area lớn nhất → embedding chất lượng).
+
+    Returns: {old_track_id: cluster_id} mapping. cluster_id 0,1,2,...
+    """
+    if not tracks or _get_insightface_app() is None:
+        # Không có insightface → return identity mapping (no merge)
+        return {tr.track_id: tr.track_id for tr in tracks}
+
+    import cv2
+
+    # Step 1: Extract representative embedding per track
+    track_embeddings: dict[int, np.ndarray] = {}
+    for tr in tracks:
+        if len(tr.detections) < 2:
+            continue
+        # Pick top-N detections theo face area (face lớn = embedding chất lượng)
+        sorted_dets = sorted(
+            tr.detections,
+            key=lambda d: (d[1].bbox[2] - d[1].bbox[0]) * (d[1].bbox[3] - d[1].bbox[1]),
+            reverse=True,
+        )
+        sample_dets = sorted_dets[:max_samples_per_track]
+
+        embeddings = []
+        for ts, det in sample_dets:
+            frame_idx = int(ts * video_fps)
+            video_cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
+            ok, frame = video_cap.read()
+            if not ok or frame is None:
+                continue
+            emb = _extract_face_embedding(frame, det.bbox)
+            if emb is not None:
+                embeddings.append(emb)
+
+        if embeddings:
+            # Average embeddings + re-normalize
+            avg = np.mean(embeddings, axis=0)
+            norm = np.linalg.norm(avg)
+            if norm > 0:
+                track_embeddings[tr.track_id] = avg / norm
+
+    if not track_embeddings:
+        logger.info("face re-id: không extract được embedding → no clustering")
+        return {tr.track_id: tr.track_id for tr in tracks}
+
+    # Step 2: Greedy clustering — cho mỗi track, tìm cluster có similarity cao nhất
+    clusters: list[dict] = []  # [{cluster_id, centroid, members: [(tid, emb)]}]
+    track_to_cluster: dict[int, int] = {}
+
+    # Sort tracks theo số detections để track lớn vào cluster trước (anchor)
+    sorted_tids = sorted(
+        track_embeddings.keys(),
+        key=lambda tid: -sum(1 for t in tracks if t.track_id == tid for _ in t.detections),
+    )
+
+    for tid in sorted_tids:
+        emb = track_embeddings[tid]
+        best_cluster_id = -1
+        best_sim = 0.0
+        for c in clusters:
+            sim = float(np.dot(emb, c["centroid"]))
+            if sim > best_sim:
+                best_sim = sim
+                best_cluster_id = c["cluster_id"]
+
+        if best_sim >= similarity_threshold and best_cluster_id >= 0:
+            # Merge vào cluster có sẵn
+            c = next(cc for cc in clusters if cc["cluster_id"] == best_cluster_id)
+            c["members"].append((tid, emb))
+            # Update centroid (average)
+            embs = np.stack([e for _, e in c["members"]])
+            centroid = embs.mean(axis=0)
+            norm = np.linalg.norm(centroid)
+            c["centroid"] = centroid / norm if norm > 0 else centroid
+            track_to_cluster[tid] = best_cluster_id
+            logger.info("face re-id: track %d merged → cluster %d (sim=%.3f)",
+                         tid, best_cluster_id, best_sim)
+        else:
+            # Tạo cluster mới
+            new_cluster_id = len(clusters)
+            clusters.append({
+                "cluster_id": new_cluster_id,
+                "centroid": emb,
+                "members": [(tid, emb)],
+            })
+            track_to_cluster[tid] = new_cluster_id
+            logger.info("face re-id: track %d → new cluster %d", tid, new_cluster_id)
+
+    # Tracks không có embedding (quá ngắn) → giữ original id offset (an toàn)
+    next_cluster_id = len(clusters)
+    for tr in tracks:
+        if tr.track_id not in track_to_cluster:
+            track_to_cluster[tr.track_id] = next_cluster_id
+            next_cluster_id += 1
+
+    logger.info("face re-id: %d tracks → %d clusters (threshold cos_sim=%.2f)",
+                 len(tracks), len(clusters), similarity_threshold)
+    return track_to_cluster
 
 
 def detect_speakers_by_face(
@@ -451,49 +617,78 @@ def detect_speakers_by_face(
             conf = min(0.95, 0.4 + 0.15 * min(4, ratio))
         segments_confidence[seg_idx] = float(conf)
 
+    # ── Face re-identification ──
+    # Trước khi release cap, dùng cap để đọc frames cho embedding extraction.
+    # Merge các face tracks thuộc cùng 1 nhân vật (camera shot change phá IoU
+    # tracking → 1 người bị split N face_id → re-id gộp lại).
+    active_tracks_pre = [tr for tr in tracks if len(tr.detections) >= 2]
+    track_to_cluster = _reidentify_tracks(
+        active_tracks_pre, cap, video_fps,
+        similarity_threshold=0.45,
+    )
     cap.release()
     face_mesh.close()
 
-    # Compute gender per face track — cross-validate CNN insightface + geometry.
-    # CNN có trọng số CAO HƠN (3x) vì accuracy 95% vs heuristic 70-80%.
-    face_genders: dict[int, str] = {}
-    face_gender_confs: dict[int, float] = {}
+    # Apply cluster mapping: re-aggregate gender votes + segments theo cluster
+    # Step A: aggregate gender CHO MỖI cluster (gộp votes của tất cả tracks trong cluster)
+    cluster_cnn_votes: dict[int, list[str]] = {}
+    cluster_geo_votes: dict[int, list[str]] = {}
+    cluster_detections_count: dict[int, int] = {}
     for tr in tracks:
-        if not tr.detections:
-            continue
-        cnn_votes: list[str] = []  # weight 3
-        geo_votes: list[str] = []  # weight 1
+        cluster_id = track_to_cluster.get(tr.track_id, tr.track_id)
         for _, det in tr.detections[:30]:
             if det.cnn_gender in ("male", "female"):
-                cnn_votes.append(det.cnn_gender)
+                cluster_cnn_votes.setdefault(cluster_id, []).append(det.cnn_gender)
             if det.geo_gender in ("male", "female"):
-                geo_votes.append(det.geo_gender)
+                cluster_geo_votes.setdefault(cluster_id, []).append(det.geo_gender)
+        cluster_detections_count[cluster_id] = (
+            cluster_detections_count.get(cluster_id, 0) + len(tr.detections)
+        )
 
-        male_score = cnn_votes.count("male") * 3 + geo_votes.count("male")
-        female_score = cnn_votes.count("female") * 3 + geo_votes.count("female")
+    # Compute gender per cluster (CNN weight 3x)
+    face_genders: dict[int, str] = {}
+    face_gender_confs: dict[int, float] = {}
+    all_cluster_ids = set(cluster_detections_count.keys())
+    for cluster_id in all_cluster_ids:
+        cnn = cluster_cnn_votes.get(cluster_id, [])
+        geo = cluster_geo_votes.get(cluster_id, [])
+        male_score = cnn.count("male") * 3 + geo.count("male")
+        female_score = cnn.count("female") * 3 + geo.count("female")
         total = male_score + female_score
-
         if total == 0:
-            face_genders[tr.track_id] = "unknown"
-            face_gender_confs[tr.track_id] = 0.0
+            face_genders[cluster_id] = "unknown"
+            face_gender_confs[cluster_id] = 0.0
             continue
-
         if male_score > female_score * 1.3:
-            face_genders[tr.track_id] = "male"
+            face_genders[cluster_id] = "male"
         elif female_score > male_score * 1.3:
-            face_genders[tr.track_id] = "female"
+            face_genders[cluster_id] = "female"
         else:
-            face_genders[tr.track_id] = "unknown"
-        # Confidence = dominant / total (0.5-1.0)
+            face_genders[cluster_id] = "unknown"
         dom = max(male_score, female_score)
-        face_gender_confs[tr.track_id] = round(dom / total, 2)
+        face_gender_confs[cluster_id] = round(dom / total, 2)
 
-    # Filter: chỉ giữ track có >=2 detections (loại noise/false positive)
-    active_tracks = [tr for tr in tracks if len(tr.detections) >= 2]
-    active_ids = {tr.track_id for tr in active_tracks}
-    # Clean segments_face: nếu face_id không trong active → None
+    # Step B: remap segments_face track_id → cluster_id
     for seg_idx in list(segments_face.keys()):
-        if segments_face[seg_idx] is not None and segments_face[seg_idx] not in active_ids:
+        old_tid = segments_face[seg_idx]
+        if old_tid is None:
+            continue
+        new_cid = track_to_cluster.get(old_tid)
+        if new_cid is not None:
+            segments_face[seg_idx] = new_cid
+
+    # Filter: chỉ giữ cluster có >=2 detections total (loại noise/false positive)
+    active_cluster_ids = {
+        cid for cid, count in cluster_detections_count.items() if count >= 2
+    }
+    # Build active "tracks" pseudo-list cho stats (1 cluster = 1 "active face")
+    active_tracks = [
+        type("ClusterStub", (), {"track_id": cid})()  # dummy obj với .track_id
+        for cid in sorted(active_cluster_ids)
+    ]
+    # Clean segments_face: nếu cluster không active → None
+    for seg_idx in list(segments_face.keys()):
+        if segments_face[seg_idx] is not None and segments_face[seg_idx] not in active_cluster_ids:
             segments_face[seg_idx] = None
             segments_confidence[seg_idx] = 0.0
 
@@ -506,23 +701,25 @@ def detect_speakers_by_face(
         "total_segments": n_segments,
         "segments_with_face": n_assigned,
         "coverage_pct": round(100 * n_assigned / max(1, n_segments), 1),
-        "n_face_tracks_total": len(tracks),
-        "n_face_tracks_active": len(active_tracks),
+        "n_face_tracks_total": len(tracks),         # tracks RAW từ IoU
+        "n_face_clusters_active": len(active_tracks),  # clusters sau face re-id
         "video_fps": video_fps,
         "fps_sample": fps_sample,
     }
 
     # Log gender summary
     gender_summary = ", ".join(
-        f"FACE_{tid:02d}={face_genders.get(tid, '?')}({face_gender_confs.get(tid, 0):.2f})"
-        for tid in sorted(t.track_id for t in active_tracks)
+        f"FACE_{cid:02d}={face_genders.get(cid, '?')}({face_gender_confs.get(cid, 0):.2f})"
+        for cid in sorted(active_cluster_ids)
     )
     insightface_used = _get_insightface_app() is not None
     logger.info(
-        "face_speaker: %d/%d segments có face (%.1f%%) · %d face active · "
+        "face_speaker: %d/%d segments có face (%.1f%%) · "
+        "%d raw tracks → %d clusters (after re-id) · "
         "%.1fs · gender_engine=%s · [%s]",
         n_assigned, n_segments,
-        stats["coverage_pct"], len(active_tracks), elapsed,
+        stats["coverage_pct"], len(tracks), len(active_tracks),
+        elapsed,
         "CNN+heuristic" if insightface_used else "heuristic_only",
         gender_summary,
     )

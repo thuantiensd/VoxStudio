@@ -2320,25 +2320,10 @@ def transcribe_project(project_id: str) -> dict:
                     if g != "unknown":
                         face_spk = f"FACE_{face_id_int:02d}"
                         speaker_genders[face_spk] = g
-                # Persist face info vào project meta để UI hiển thị
+                # Persist face info vào IN-MEMORY project dict (KHÔNG load/save
+                # disk riêng — race với end-of-function _save_meta sẽ ghi đè).
+                # End-of-function _save_meta(project) sẽ persist toàn bộ 1 lần.
                 try:
-                    project_meta_face = _load_meta(project_id) or {}
-                    project_meta_face["face_speaker_stats"] = face_result.stats
-                    project_meta_face["face_speaker_genders"] = {
-                        f"FACE_{k:02d}": v
-                        for k, v in face_result.face_genders.items()
-                    }
-                    project_meta_face["face_speaker_gender_confs"] = {
-                        f"FACE_{k:02d}": v
-                        for k, v in face_result.face_gender_confs.items()
-                    }
-                    # Rebuild voice_map với face IDs (override pyannote voice_map)
-                    from app.services.speaker_pipeline import build_speaker_voice_map
-                    face_speakers = sorted({
-                        f"FACE_{k:02d}" for k in face_result.face_genders.keys()
-                    })
-                    voice_slots_face = project_meta_face.get("voice_slots") or []
-                    user_over_face = project_meta_face.get("speaker_voice_map") or {}
                     face_genders_str = {
                         f"FACE_{k:02d}": v
                         for k, v in face_result.face_genders.items()
@@ -2347,6 +2332,17 @@ def transcribe_project(project_id: str) -> dict:
                         f"FACE_{k:02d}": v
                         for k, v in face_result.face_gender_confs.items()
                     }
+                    project["face_speaker_stats"] = face_result.stats
+                    project["face_speaker_genders"] = face_genders_str
+                    project["face_speaker_gender_confs"] = face_gender_confs_str
+
+                    # Rebuild voice_map với face IDs (override pyannote voice_map)
+                    from app.services.speaker_pipeline import build_speaker_voice_map
+                    face_speakers = sorted({
+                        f"FACE_{k:02d}" for k in face_result.face_genders.keys()
+                    })
+                    voice_slots_face = project.get("voice_slots") or []
+                    user_over_face = project.get("speaker_voice_map") or {}
                     face_voice_map = build_speaker_voice_map(
                         speakers=face_speakers,
                         voice_slots=voice_slots_face,
@@ -2354,8 +2350,7 @@ def transcribe_project(project_id: str) -> dict:
                         speaker_genders=face_genders_str,
                         gender_confidences=face_gender_confs_str,
                     )
-                    project_meta_face["speaker_voice_map"] = face_voice_map
-                    _save_meta(project_meta_face)
+                    project["speaker_voice_map"] = face_voice_map
                     logger.info("Face voice_map rebuilt: %s (genders=%s, confs=%s)",
                                  face_voice_map, face_genders_str, face_gender_confs_str)
                 except Exception as e2:
@@ -2388,6 +2383,9 @@ def transcribe_project(project_id: str) -> dict:
             "voice_id": None,
             "speaker": seg.get("speaker"),
             "speaker_gender": speaker_genders.get(seg.get("speaker")) if seg.get("speaker") else None,
+            # Face detection fields — set bởi face_speaker_svc hook ở trên
+            "face_id": seg.get("face_id"),
+            "face_confidence": seg.get("face_confidence"),
             "volume": 1.0,
             "fade_in": 0.0,
             "fade_out": 0.0,
