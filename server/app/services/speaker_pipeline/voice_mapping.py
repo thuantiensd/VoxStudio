@@ -1,26 +1,424 @@
-"""Phase 12 — Voice mapping (speaker_id → voice_id).
+"""Voice mapping service (Phase 8 refactor — character-aware).
 
-TUYỆT ĐỐI không dùng gender. Thay vào đó:
+Phase 8 NEW: `build_character_voice_map` — single source of truth là
+`CharacterProfile` từ character_registry. Supports 3 explicit modes:
 
-  1. User-explicit mapping (per-project): persist trong project meta
-     {speaker_id: voice_id} — UI cho phép user gán/đổi.
+  • "1_voice":     all characters → voice_slots[0].voice_id (gender ignored)
+  • "2_voice":     gender-matched (male char → male slot, female → female).
+                    Unknown gender → fallback_voice_id || majority gender voice.
+  • "multi_voice": top N chars (by line_count desc, total_duration desc,
+                    character_id asc tie-break) → 1 slot riêng. Còn lại
+                    fallback theo gender như 2_voice rule.
 
-  2. Auto-default: nếu user chưa map, dùng voice_slots theo thứ tự xuất hiện
-     của speakers (SPEAKER_00 → slot 0, SPEAKER_01 → slot 1, ...).
+Phase 8 LEGACY: `build_speaker_voice_map` — wrapper deprecated, giữ cho
+face-only path (no registry). Sẽ xóa ở Phase 12.
 
-  3. Fallback nếu hết slot: default voice của target language.
-
-KHÔNG suy luận male/female để pick voice — speaker là 1 ID, voice là 1
-ID, mapping là user choice (hoặc thứ tự xuất hiện).
+Phase 8 MIN-1 fix: KHÔNG còn hardcode "slot 0 = male, slot 1 = female".
+Caller pass `VoiceSlot(voice_id, gender, priority)` explicit. Default
+config trong DEFAULT_VOICE_SLOTS_* constants.
 """
 from __future__ import annotations
 
 import logging
-from typing import Optional
+from collections import Counter
+from dataclasses import dataclass, field
+from typing import Literal, Optional
 
 from app.config import GENDER_VOICE_MATCH_MIN
+from app.models.character_schemas import CharacterProfile, VoiceMapWarning
 
 logger = logging.getLogger(__name__)
+
+
+# ── VoiceSlot dataclass (Phase 8 MIN-1 fix) ───────────────────────
+
+@dataclass
+class VoiceSlot:
+    """1 voice slot — explicit gender + priority, không hardcode position."""
+    voice_id: str
+    gender: Literal["male", "female", "any"] = "any"
+    priority: int = 0  # higher = preferred for top characters in multi_voice
+
+
+# Default configs — caller override được khi cần.
+DEFAULT_VOICE_SLOTS_2VOICE: list[VoiceSlot] = [
+    VoiceSlot(voice_id="vi_male_default", gender="male", priority=10),
+    VoiceSlot(voice_id="vi_female_default", gender="female", priority=10),
+]
+
+
+VoiceModeType = Literal["1_voice", "2_voice", "multi_voice"]
+
+
+# ── Phase 8 main entry: build_character_voice_map ─────────────────
+
+def build_character_voice_map(
+    characters: dict[str, CharacterProfile],
+    voice_slots: list[VoiceSlot],
+    mode: VoiceModeType,
+    fallback_voice_id: Optional[str] = None,
+    *,
+    apply_to_profiles: bool = True,
+) -> tuple[dict[str, str], list[VoiceMapWarning]]:
+    """Build character_id → voice_id map (Phase 8 character-aware).
+
+    Args:
+      characters: dict[CHAR_XXX, CharacterProfile] từ Phase 5 registry.
+      voice_slots: list VoiceSlot (gender explicit, không hardcode position).
+      mode: "1_voice" / "2_voice" / "multi_voice".
+      fallback_voice_id: voice cho unknown gender chars (mode 2/multi).
+        None → fallback theo majority gender + log warning.
+      apply_to_profiles: True → mutate CharacterProfile.voice_profile_id.
+        False → dry-run.
+
+    Returns: (voice_map: char_id → voice_id, warnings list)
+
+    Mode 1 (1_voice):
+      Tất cả char → voice_slots[0].voice_id. KHÔNG cần gender.
+
+    Mode 2 (2_voice):
+      Mỗi gender → slot tương ứng (theo VoiceSlot.gender):
+        male char   → first slot có gender=male
+        female char → first slot có gender=female
+        unknown     → fallback_voice_id || majority_voice + warning
+
+    Mode multi (multi_voice):
+      Sort chars by (line_count desc, total_duration desc, char_id asc).
+      Top N chars (N = len(voice_slots)) → 1 voice riêng theo gender match.
+      Rank > N → fallback theo gender (như Mode 2 unknown rule).
+    """
+    if not characters:
+        return {}, []
+    if not voice_slots:
+        logger.warning("build_character_voice_map: no voice_slots provided")
+        return {}, []
+
+    voice_map: dict[str, str] = {}
+    warnings: list[VoiceMapWarning] = []
+
+    if mode == "1_voice":
+        # All chars → first slot voice. Gender ignored.
+        primary_voice = voice_slots[0].voice_id
+        for char_id in characters:
+            voice_map[char_id] = primary_voice
+        logger.info(
+            "build_character_voice_map mode=1_voice: %d chars → %s (gender ignored)",
+            len(characters), primary_voice,
+        )
+
+    elif mode == "2_voice":
+        majority_g = _compute_majority_gender(characters)
+        for char_id, profile in characters.items():
+            voice_id, warning = _resolve_voice_for_character(
+                char_id=char_id,
+                profile=profile,
+                voice_slots=voice_slots,
+                fallback_voice_id=fallback_voice_id,
+                majority_gender=majority_g,
+                is_top_priority=False,
+                used_slots=None,  # mode 2 không reserve slot
+            )
+            voice_map[char_id] = voice_id
+            if warning:
+                warnings.append(warning)
+        logger.info(
+            "build_character_voice_map mode=2_voice: %d chars, %d warnings, "
+            "majority_gender=%s",
+            len(characters), len(warnings), majority_g,
+        )
+
+    elif mode == "multi_voice":
+        # Sort chars by importance: line_count desc, duration desc, id asc.
+        # Tie-breaker đảm bảo deterministic (Phase 8 risk #1).
+        sorted_chars = sorted(
+            characters.items(),
+            key=lambda kv: (-kv[1].line_count, -kv[1].total_duration, kv[0]),
+        )
+        n_slots = len(voice_slots)
+        majority_g = _compute_majority_gender(characters)
+        used_slot_indices: set[int] = set()
+
+        # Top N: assign từng slot riêng (prefer gender match)
+        for rank, (char_id, profile) in enumerate(sorted_chars[:n_slots]):
+            voice_id, warning = _resolve_voice_for_character(
+                char_id=char_id,
+                profile=profile,
+                voice_slots=voice_slots,
+                fallback_voice_id=fallback_voice_id,
+                majority_gender=majority_g,
+                is_top_priority=True,
+                used_slots=used_slot_indices,
+            )
+            voice_map[char_id] = voice_id
+            if warning:
+                warnings.append(warning)
+
+        # Rank > N: fallback (no slot reservation needed)
+        for char_id, profile in sorted_chars[n_slots:]:
+            voice_id, warning = _resolve_voice_for_character(
+                char_id=char_id,
+                profile=profile,
+                voice_slots=voice_slots,
+                fallback_voice_id=fallback_voice_id,
+                majority_gender=majority_g,
+                is_top_priority=False,
+                used_slots=None,
+            )
+            voice_map[char_id] = voice_id
+            if warning:
+                warnings.append(warning)
+
+        logger.info(
+            "build_character_voice_map mode=multi_voice: %d chars (top %d "
+            "gender-matched slots), %d warnings, majority_gender=%s",
+            len(characters), n_slots, len(warnings), majority_g,
+        )
+    else:
+        raise ValueError(f"Unknown voice mode: {mode!r}")
+
+    # Mutate CharacterProfile.voice_profile_id
+    if apply_to_profiles:
+        for char_id, voice_id in voice_map.items():
+            if char_id in characters:
+                characters[char_id].voice_profile_id = voice_id
+
+    return voice_map, warnings
+
+
+def _compute_majority_gender(
+    characters: dict[str, CharacterProfile],
+) -> Optional[str]:
+    """Compute majority gender by CHARACTER COUNT (not line_count).
+
+    Tie → first alphabetical (female < male). Returns None nếu không có
+    male/female char nào.
+
+    Phase 8 risk #2 mitigation: count chars, KHÔNG count theo line_count
+    (line_count weighting có thể skew majority về 1 char nói nhiều).
+    """
+    gender_counter = Counter(
+        p.gender for p in characters.values()
+        if p.gender in ("male", "female")
+    )
+    if not gender_counter:
+        return None
+    max_count = max(gender_counter.values())
+    candidates = sorted([g for g, c in gender_counter.items() if c == max_count])
+    return candidates[0]
+
+
+def _candidate_slots_for(
+    voice_slots: list[VoiceSlot],
+    prefer_gender: str,
+    used_slots: Optional[set[int]],
+) -> list[int]:
+    """Returns slot indices that can serve `prefer_gender`, sorted by preference.
+
+    Tier ordering:
+      Tier 0: exact gender match (slot.gender == prefer_gender)
+      Tier 1: "any" gender slot
+      Tier 2: (excluded — slot có gender khác → KHÔNG match)
+
+    Within tier: priority desc → original index asc.
+
+    Nếu used_slots not None → exclude already-used.
+    """
+    if not voice_slots:
+        return []
+    candidates: list[tuple[int, int, int]] = []  # (tier, -priority, original_idx)
+    for idx, slot in enumerate(voice_slots):
+        if used_slots is not None and idx in used_slots:
+            continue
+        if slot.gender == prefer_gender:
+            tier = 0
+        elif slot.gender == "any":
+            tier = 1
+        else:
+            continue
+        candidates.append((tier, -slot.priority, idx))
+    candidates.sort()
+    return [c[2] for c in candidates]
+
+
+def _resolve_voice_for_character(
+    char_id: str,
+    profile: CharacterProfile,
+    voice_slots: list[VoiceSlot],
+    fallback_voice_id: Optional[str],
+    majority_gender: Optional[str],
+    *,
+    is_top_priority: bool,
+    used_slots: Optional[set[int]],
+) -> tuple[str, Optional[VoiceMapWarning]]:
+    """Resolve voice_id cho 1 character — gender match → fallback → majority.
+
+    Returns: (voice_id, warning_or_None).
+    Mutates used_slots set nếu is_top_priority + slot assignable.
+
+    Priority order (known gender):
+      1a. Unused slot matching gender exactly OR "any" — preferred for is_top.
+      1b. Reuse: same-gender slot (allow used) — warning reused_slot_same_gender.
+      1c. Reuse: any slot — warning no_matching_gender_slot.
+      1d. Fallback path (rare — no slots at all).
+
+    Priority order (unknown gender):
+      2a. fallback_voice_id explicit (Phase 8 risk #3 — highest).
+      2b. is_top + unused "any" slot — natural fit for top-priority unknown.
+      2c. Majority gender voice.
+      2d. Any "any" slot.
+      2e. voice_slots[0] last resort.
+    """
+    g = profile.gender
+
+    # Case 1: known gender (male/female)
+    if g in ("male", "female"):
+        # 1a. Unused slot matching gender or "any"
+        unused = _candidate_slots_for(voice_slots, g, used_slots)
+        if unused:
+            idx = unused[0]
+            if is_top_priority and used_slots is not None:
+                used_slots.add(idx)
+            return (voice_slots[idx].voice_id, None)
+
+        # 1b. Reuse: same-gender slot (top priority exhausted, non-top fallback)
+        reuse_same = _candidate_slots_for(voice_slots, g, used_slots=None)
+        if reuse_same:
+            idx = reuse_same[0]
+            slot = voice_slots[idx]
+            issue = (
+                "reused_slot_same_gender" if slot.gender == g
+                else "no_matching_gender_slot"
+            )
+            return (
+                slot.voice_id,
+                VoiceMapWarning(
+                    character_id=char_id,
+                    issue=issue,
+                    decided_voice=slot.voice_id,
+                    reason=f"char gender={g}, slot reused (top priority exhausted)",
+                ),
+            )
+
+        # 1d. No slot at all (rare) → fallback / first
+        return _fallback_resolve(
+            char_id=char_id,
+            char_gender=g,
+            voice_slots=voice_slots,
+            fallback_voice_id=fallback_voice_id,
+            majority_gender=majority_gender,
+            is_top_priority=is_top_priority,
+            used_slots=used_slots,
+            reason_prefix=f"no_matching_gender_slot (char gender={g})",
+        )
+
+    # Case 2: unknown gender — Phase 8 risk #3 explicit priority
+    return _fallback_resolve(
+        char_id=char_id,
+        char_gender="unknown",
+        voice_slots=voice_slots,
+        fallback_voice_id=fallback_voice_id,
+        majority_gender=majority_gender,
+        is_top_priority=is_top_priority,
+        used_slots=used_slots,
+        reason_prefix="unknown_gender",
+    )
+
+
+def _fallback_resolve(
+    char_id: str,
+    char_gender: str,
+    voice_slots: list[VoiceSlot],
+    fallback_voice_id: Optional[str],
+    majority_gender: Optional[str],
+    is_top_priority: bool,
+    used_slots: Optional[set[int]],
+    reason_prefix: str,
+) -> tuple[str, VoiceMapWarning]:
+    """Phase 8 risk #3 mitigation: explicit priority order.
+
+    Order:
+      1. fallback_voice_id (caller-provided explicit) ← highest
+      2. (unknown + is_top only) unused "any" slot — natural top-priority fit
+      3. majority_gender voice (allow reuse)
+      4. first "any" gender slot (allow reuse)
+      5. voice_slots[0].voice_id (last resort)
+    """
+    # 1. Explicit fallback (caller's call wins absolute)
+    if fallback_voice_id:
+        return (
+            fallback_voice_id,
+            VoiceMapWarning(
+                character_id=char_id,
+                issue="unknown_gender_fallback_applied"
+                      if char_gender == "unknown"
+                      else "no_matching_gender_slot",
+                decided_voice=fallback_voice_id,
+                reason=f"{reason_prefix} → fallback_voice_id provided",
+            ),
+        )
+
+    # 2. Unknown + is_top: prefer unused "any" slot (gives top char individual voice)
+    if char_gender == "unknown" and is_top_priority and used_slots is not None:
+        for idx, slot in enumerate(voice_slots):
+            if slot.gender == "any" and idx not in used_slots:
+                used_slots.add(idx)
+                return (
+                    slot.voice_id,
+                    VoiceMapWarning(
+                        character_id=char_id,
+                        issue="unknown_gender_no_fallback",
+                        decided_voice=slot.voice_id,
+                        reason=f"{reason_prefix}, no fallback → unused 'any' "
+                               f"slot (top-priority)",
+                    ),
+                )
+
+    # 3. Majority gender voice (allow reuse since usually exhausted)
+    if majority_gender:
+        cands = _candidate_slots_for(voice_slots, majority_gender, used_slots=None)
+        if cands:
+            idx = cands[0]
+            return (
+                voice_slots[idx].voice_id,
+                VoiceMapWarning(
+                    character_id=char_id,
+                    issue="majority_rule_applied",
+                    decided_voice=voice_slots[idx].voice_id,
+                    reason=f"{reason_prefix}, no fallback → majority gender "
+                           f"{majority_gender} voice",
+                ),
+            )
+
+    # 4. First "any" slot (allow reuse)
+    for i, s in enumerate(voice_slots):
+        if s.gender == "any":
+            return (
+                s.voice_id,
+                VoiceMapWarning(
+                    character_id=char_id,
+                    issue="tie_breaker_alphabetical"
+                          if majority_gender is None
+                          else "no_matching_gender_slot",
+                    decided_voice=s.voice_id,
+                    reason=f"{reason_prefix}, no fallback, no majority → "
+                           f"first any-gender slot",
+                ),
+            )
+
+    # 5. Last resort
+    return (
+        voice_slots[0].voice_id,
+        VoiceMapWarning(
+            character_id=char_id,
+            issue="voice_slot_count_insufficient",
+            decided_voice=voice_slots[0].voice_id,
+            reason=f"{reason_prefix}, no fallback, no majority, no any-slot → "
+                   f"voice_slots[0] last resort",
+        ),
+    )
+
+
+# ── LEGACY: build_speaker_voice_map (deprecated wrapper) ──────────
 
 
 def build_speaker_voice_map(
@@ -32,25 +430,22 @@ def build_speaker_voice_map(
     gender_confidences: Optional[dict[str, float]] = None,
     confidence_threshold: float = GENDER_VOICE_MATCH_MIN,
 ) -> dict[str, str]:
-    """Map mỗi stable speaker_id → voice_id.
+    """DEPRECATED Phase 8 — wrapper cho legacy raw-speaker path (face-only).
 
-    UI convention (slotGenderHint trong page.tsx):
-      - Slot 0 → giọng NAM
-      - Slot 1 → giọng NỮ
-      - Slot 2,3,4 → bất kỳ
+    Phase 8 NEW: dùng `build_character_voice_map` cho character-aware path
+    (CHAR_XXX namespace, single source of truth = CharacterProfile). Function
+    này giữ làm backward-compat cho:
+      - Face-only path (no pyannote registry) — voice_map keyed bằng FACE_XX
+      - Audio-only legacy path (no character_registry build) — SPEAKER_XX
 
-    Logic ưu tiên (per spec — bán-auto: user pick voice slots upfront, pipeline
-    auto-route speakers theo gender):
+    Phase 12 sẽ xóa hoàn toàn + force tất cả callers dùng character_voice_map
+    (kể cả face-only — build pseudo-registry từ face IDs).
 
-      1. user_overrides[speaker_id] (priority cao nhất — UI tương lai)
-      2. Nếu có speaker_genders + voice_slots:
-         - Speaker male → slot 0 (nếu non-empty), nếu không → slot "any" còn trống
-         - Speaker female → slot 1 (nếu non-empty), nếu không → slot "any"
-         - Mỗi slot chỉ assign cho 1 speaker (tránh dồn cùng giọng).
-      3. Fallback (no gender info or speaker exhausted slots):
-         - Cycle qua slots theo thứ tự xuất hiện.
-      4. default_voice nếu có.
-      5. "" → backend tự pick.
+    Logic giữ nguyên Phase 1-7b (xem git history pre-Phase 8 cho doc cũ).
+
+    Convention hardcoded slot 0=male, slot 1=female được giữ — không sửa
+    legacy path vì caller (dubbing_svc fallback block) vẫn pass raw list[str]
+    voice_slots, không phải VoiceSlot.
     """
     overrides = user_overrides or {}
     genders = speaker_genders or {}

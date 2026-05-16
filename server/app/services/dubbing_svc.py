@@ -17,8 +17,8 @@ import soundfile as sf
 
 from app.config import (
     DUBBING_DIR, VOICES_DIR, TTS_DEFAULT_GUIDANCE, TTS_DEFAULT_STEPS, IS_CUDA,
-    LLM_OVERRIDE_PIPELINE_LOW, LLM_OVERRIDE_PIPELINE_MID, LLM_OVERRIDE_PIPELINE_HIGH,
-    LLM_OVERRIDE_EVIDENCE_MIN_CHARS, LLM_OVERRIDE_EVIDENCE_STRONG_CHARS,
+    LLM_GENDER_HINT_PIPELINE_LOW, LLM_GENDER_HINT_PIPELINE_MID, LLM_GENDER_HINT_PIPELINE_HIGH,
+    LLM_GENDER_HINT_EVIDENCE_MIN_CHARS, LLM_GENDER_HINT_EVIDENCE_STRONG_CHARS,
 )
 from app.core.gpu_manager import gpu
 from app.core.storage import load_voice
@@ -774,25 +774,36 @@ def _pick_omni_voice_id_for_segment(seg: dict, project: dict) -> str | None:
     if seg_voice:
         return seg_voice
 
-    speaker_id = seg.get("speaker")
+    # Phase 7b: voice lookup key — prefer character_id (CHAR_XXX từ registry,
+    # single source of truth) qua raw speaker (SPEAKER_XX / FACE_XX legacy).
+    # speaker_voice_map có thể keyed theo cả 2 namespace tuỳ pipeline path:
+    #   - keyspace = "character_id" (audio+face với registry)
+    #   - keyspace = "raw_face_speaker" hoặc "raw_speaker" (fallback)
+    # Dùng character_id trước; fallback raw speaker nếu chưa map.
+    character_id = seg.get("character_id")
+    raw_speaker_id = seg.get("speaker")
+    speaker_id = character_id or raw_speaker_id  # lookup key prefer character_id
     voice_slots = project.get("voice_slots") or []
     voice_count = int(project.get("voice_count") or 1)
 
-    # 2. Speaker voice map (analyze-speakers result)
+    # 2. Speaker voice map (character_registry / fallback raw result)
     speaker_voice_map = project.get("speaker_voice_map") or {}
-    if speaker_id and speaker_id in speaker_voice_map:
-        v = speaker_voice_map[speaker_id]
-        if v:
-            return v
+    # Try character_id first, then raw speaker — defensive cho old project meta.
+    for _key in (character_id, raw_speaker_id):
+        if _key and _key in speaker_voice_map:
+            v = speaker_voice_map[_key]
+            if v:
+                return v
 
-    # 3. Multi-voice mode: cycle qua voice_slots theo thứ tự xuất hiện
+    # 3. Multi-voice mode: cycle qua voice_slots theo thứ tự xuất hiện.
+    # Phase 7b — speakers_seen ưu tiên character_id, fallback raw speaker.
     if voice_count > 1 and voice_slots and speaker_id:
         cache_key = "_omni_slot_cache_v2"
         if cache_key not in project:
             speakers_seen: list[str] = []
             seen_set: set[str] = set()
             for s in project.get("segments", []) or []:
-                spk = s.get("speaker")
+                spk = s.get("character_id") or s.get("speaker")
                 if spk and spk not in seen_set:
                     speakers_seen.append(spk)
                     seen_set.add(spk)
@@ -897,7 +908,11 @@ def _pick_edge_voice_for_segment(seg: dict, project: dict) -> str | None:
       6. Default voice cho target_language (chỉ khi single-voice mode).
       7. None.
     """
-    speaker_id = seg.get("speaker")
+    # Phase 7b: voice lookup key — prefer character_id (CHAR_XXX từ registry,
+    # single source of truth) qua raw speaker (SPEAKER_XX / FACE_XX legacy).
+    character_id = seg.get("character_id")
+    raw_speaker_id = seg.get("speaker")
+    speaker_id = character_id or raw_speaker_id
     voice_count = int(project.get("voice_count") or 1)
     voice_slots = project.get("voice_slots") or []
     target_lang = project.get("target_language")
@@ -906,20 +921,23 @@ def _pick_edge_voice_for_segment(seg: dict, project: dict) -> str | None:
     # Khi voice_count == 1: bỏ qua map cũ → đảm bảo 1 giọng duy nhất đọc
     # mọi segment, bất kể diarization detect được bao nhiêu speaker.
     speaker_voice_map = project.get("speaker_voice_map") or {}
-    if voice_count > 1 and speaker_id and speaker_id in speaker_voice_map:
-        v = speaker_voice_map[speaker_id]
-        if v:
-            return v
+    if voice_count > 1:
+        for _key in (character_id, raw_speaker_id):
+            if _key and _key in speaker_voice_map:
+                v = speaker_voice_map[_key]
+                if v:
+                    return v
 
     # ── Priority 2: Multi-speaker mode without explicit map ──
     # Build stable speaker_id → slot_idx mapping, cycle qua slots.
+    # Phase 7b — speakers_seen ưu tiên character_id (stable across segments).
     if voice_count > 1 and speaker_id:
         cache_key = "_edge_slot_cache_v2"
         if cache_key not in project:
             speakers_seen: list[str] = []
             seen_set: set[str] = set()
             for s in project.get("segments", []) or []:
-                spk = s.get("speaker")
+                spk = s.get("character_id") or s.get("speaker")
                 if spk and spk not in seen_set:
                     speakers_seen.append(spk)
                     seen_set.add(spk)
@@ -1915,6 +1933,13 @@ def transcribe_project(project_id: str) -> dict:
         )
         return project
 
+    # Phase 7b → Phase 8 quick win: clear stale per-project slot caches từ
+    # pre-Phase 7b runs (keyed bằng CHAR_XX 2-digit, sau Option B sẽ keyed
+    # bằng CHAR_XXX 3-digit hoặc raw IDs). Nếu giữ cache cũ → voice cycling
+    # sẽ pick wrong voice cho project transcribe lại. 1 dòng, risk thấp.
+    project.pop("_omni_slot_cache_v2", None)
+    project.pop("_edge_slot_cache_v2", None)
+
     project["status"] = "transcribing"
     _save_meta(project)
 
@@ -2180,6 +2205,11 @@ def transcribe_project(project_id: str) -> dict:
     # và SAU khi character_id stable (fix CRIT-2: voice map trước character_registry).
     sp_result = None  # set bởi pyannote analyze nếu thành công
     fusion_ran = False  # True nếu face fusion produced char_voice_map
+    # Phase 7a — init fusion ở outer scope (set bên trong face hook nếu chạy).
+    # Cần để character_registry build (sau face block) wire face_track_to_speaker
+    # từ fusion.audio_to_face → E1 evidence.
+    fusion = None  # type: ignore[assignment]
+    face_result = None  # cũng cần ngoài scope cho gender_detection wire
 
     # Skip speaker pipeline khi:
     # 1. User explicit skip qua env (VOX_SKIP_SPEAKER_PIPELINE=true)
@@ -2334,12 +2364,36 @@ def transcribe_project(project_id: str) -> dict:
                     # → face KHÔNG được override. Face chỉ thắng khi audio yếu
                     # và face active_speaker (MAR variance) đủ mạnh.
                     from app.services.multimodal_speaker_svc import fuse_speakers
-                    # audio_speaker_confidences: gender_confidences từ pipeline
-                    # gender F0 (per SPEAKER_XX). Dùng làm proxy cho audio speaker
-                    # labelling confidence (Phase 6 sẽ replace bằng ownership_confidence
-                    # proper từ speaker embedding similarity).
-                    # Empty dict {} nếu pyannote failed → fuse_speakers default 0.5/speaker.
-                    audio_confs_for_fusion: dict[str, float] = dict(gender_confidences)
+                    # ── Phase 6 FIX REGRESSION (audit fix REG-1): ──
+                    # Trước Phase 6: audio_confs = dict(gender_confidences) —
+                    # SAI semantic (gender confidence ≠ speaker labelling confidence).
+                    # Sau Phase 6: derive từ embedding quality MEAN per speaker
+                    # (đo trực tiếp độ "clean" của audio mà pyannote dùng label).
+                    # Fallback 0.5 khi không có embeddings cho speaker.
+                    audio_confs_for_fusion: dict[str, float] = {}
+                    sp_embeddings = list(getattr(sp_result, "embeddings", []) or [])
+                    if sp_embeddings:
+                        from collections import defaultdict
+                        _qual_acc: dict[str, list[float]] = defaultdict(list)
+                        for _emb in sp_embeddings:
+                            _spk = getattr(_emb, "speaker_id", None)
+                            _q = float(getattr(_emb, "quality", 0.0))
+                            if _spk:
+                                _qual_acc[_spk].append(_q)
+                        audio_confs_for_fusion = {
+                            spk: float(sum(qs) / len(qs)) if qs else 0.5
+                            for spk, qs in _qual_acc.items()
+                        }
+                        logger.info(
+                            "audio_speaker_confidences (Phase 6 proper, "
+                            "embedding-quality-derived): %s",
+                            {k: round(v, 3) for k, v in audio_confs_for_fusion.items()},
+                        )
+                    else:
+                        logger.info(
+                            "audio_speaker_confidences: no embeddings exposed "
+                            "from sp_result → fuse_speakers default 0.5/speaker",
+                        )
                     fusion = fuse_speakers(
                         segments=merged,
                         face_genders=face_result.face_genders,
@@ -2349,26 +2403,25 @@ def transcribe_project(project_id: str) -> dict:
                         # Thresholds dùng default từ config (ACTIVE_SPEAKER_STRONG=0.80,
                         # AUDIO_STRONG=0.85, OWNERSHIP_KEEP=0.70).
                     )
-                    # fuse_speakers mutates merged: set seg["speaker"] = CHAR_XX,
-                    # seg["fusion_reason"], seg["ownership_confidence"], seg["speaker_gender"]
+                    # Phase 7b Option B: fuse_speakers mutates merged → seg["speaker"]
+                    # = RAW winner (SPEAKER_XX hoặc FACE_XX), seg["fusion_reason"],
+                    # seg["ownership_confidence"]. KHÔNG còn synthetic CHAR_XX.
+                    # KHÔNG set seg["speaker_gender"] tại đây — gender_detection_service
+                    # sẽ ghi CharacterProfile.gender post-registry.
 
-                    # Update speaker_genders dict với canonical chars cho downstream
+                    # speaker_genders đã chứa raw SPEAKER_XX genders từ pyannote;
+                    # fusion.char_genders giờ là raw_id → gender, merge thêm
+                    # FACE_XX entries (chưa có trong speaker_genders).
                     speaker_genders.update(fusion.char_genders)
 
-                    # Persist CHAR_XX gender confidence vào speaker_gender_confs
-                    # → cross-validate logic (sau translate) đọc được, biết
-                    # confidence của face CNN để decide LLM override hay không.
-                    char_gender_confs_for_cv: dict[str, float] = {}
-                    for char_id in fusion.char_genders:
-                        try:
-                            face_int = int(char_id.replace("CHAR_", ""))
-                            char_gender_confs_for_cv[char_id] = (
-                                face_result.face_gender_confs.get(face_int, 0.5)
-                            )
-                        except (ValueError, AttributeError):
-                            char_gender_confs_for_cv[char_id] = 0.5
+                    # speaker_gender_confs cho cross-validate: gộp FACE_XX confs
+                    # từ face_result. (Audio raw đã có ở sp_gender_confs dict bên dưới.)
+                    face_raw_gender_confs: dict[str, float] = {
+                        f"FACE_{k:02d}": v
+                        for k, v in face_result.face_gender_confs.items()
+                    }
                     existing_confs = project.get("speaker_gender_confs") or {}
-                    existing_confs.update(char_gender_confs_for_cv)
+                    existing_confs.update(face_raw_gender_confs)
                     project["speaker_gender_confs"] = existing_confs
 
                     # Persist stats vào IN-MEMORY project (end-of-function save once)
@@ -2376,45 +2429,24 @@ def transcribe_project(project_id: str) -> dict:
                         f"FACE_{k:02d}": v
                         for k, v in face_result.face_genders.items()
                     }
-                    face_gender_confs_str = {
-                        f"FACE_{k:02d}": v
-                        for k, v in face_result.face_gender_confs.items()
-                    }
+                    face_gender_confs_str = dict(face_raw_gender_confs)
                     project["face_speaker_stats"] = face_result.stats
                     project["face_speaker_genders"] = face_genders_str
                     project["face_speaker_gender_confs"] = face_gender_confs_str
                     project["multimodal_fusion_stats"] = fusion.stats
-                    project["multimodal_char_genders"] = fusion.char_genders
+                    project["multimodal_char_genders"] = fusion.char_genders  # raw IDs
 
-                    # Voice_map theo canonical CHAR_XX (gộp face + audio)
-                    from app.services.speaker_pipeline import build_speaker_voice_map
-                    char_speakers = sorted(fusion.char_genders.keys())
-                    voice_slots = project.get("voice_slots") or []
-                    user_overrides = project.get("speaker_voice_map") or {}
-                    # Dùng confidence 0.85 cho chars có face evidence (cao)
-                    # 0.6 cho chars chỉ có audio (thấp hơn)
-                    char_gender_confs = {}
-                    for char_id in fusion.char_genders:
-                        # Char có face = audio_to_face.values() ∪ unmatched_faces
-                        # Confidence dựa trên face conf nếu có, không thì audio default
-                        try:
-                            face_int = int(char_id.replace("CHAR_", ""))
-                            char_gender_confs[char_id] = face_result.face_gender_confs.get(face_int, 0.6)
-                        except (ValueError, AttributeError):
-                            char_gender_confs[char_id] = 0.5
-                    char_voice_map = build_speaker_voice_map(
-                        speakers=char_speakers,
-                        voice_slots=voice_slots,
-                        user_overrides=user_overrides,
-                        speaker_genders=fusion.char_genders,
-                        gender_confidences=char_gender_confs,
-                    )
-                    project["speaker_voice_map"] = char_voice_map
-                    # Phase 4: mark fusion ran successfully để fallback block sau
-                    # face hook biết KHÔNG cần build lại voice_map với SPEAKER_XX.
+                    # Phase 7b MAJ-6 fix: voice_map KHÔNG còn build ở đây.
+                    # Build duy nhất sau character_registry + gender_detection →
+                    # nguồn gender là CharacterProfile.gender (per CHAR_XXX).
+                    # Xem block "PHASE 7b UNIFIED voice_map" cuối Phase 6/7.
                     fusion_ran = True
-                    logger.info("Multimodal voice_map (CHAR_XX): %s (genders=%s)",
-                                 char_voice_map, fusion.char_genders)
+                    logger.info(
+                        "Multimodal fusion (Phase 7b Option B raw IDs): "
+                        "%d raw winners · voice_map build deferred → "
+                        "post-registry unified.",
+                        len(fusion.char_genders),
+                    )
                 except Exception as e2:
                     logger.warning("Multimodal fusion failed: %s", e2)
                     logger.exception("fusion traceback:")
@@ -2444,37 +2476,383 @@ def transcribe_project(project_id: str) -> dict:
     #
     # Trước Phase 4: voice_map build 2 lần (1 sau pyannote, 1 sau fusion)
     # → race condition + overwrite. Phase 4 đảm bảo single build path.
-    if not fusion_ran:
-        if sp_result is not None and getattr(sp_result, "speakers", None):
+    # Phase 7b MAJ-6 fix: voice_map block CŨ (build từ raw SPEAKER_XX +
+    # gender_confidences gender F0) ĐÃ XOÁ. Voice_map BUILD DUY NHẤT
+    # ở "PHASE 7b UNIFIED voice_map build" sau character_registry +
+    # gender_detection_service — source gender là CharacterProfile.gender
+    # (per CHAR_XXX, đã fuse audio + face + self-ref text).
+    # Face-only path (no pyannote, no registry): vẫn fallback raw IDs ở block
+    # unified — single build path đảm bảo không có race condition / overwrite.
+
+    # ═══════════════════════════════════════════════════════════════════
+    # PHASE 6: CHARACTER REGISTRY + SEGMENT OWNERSHIP
+    # ═══════════════════════════════════════════════════════════════════
+    # Build canonical character_registry (cluster raw SPEAKER_XX → CHAR_XXX
+    # theo cosine sim + supporting evidences) → write character_registry.json.
+    # Then validate per-segment ownership (opt-in cost guard).
+    #
+    # Skip nếu sp_result không có hoặc không có embeddings (face-only path):
+    # character_registry yêu cầu speaker embeddings để cluster. Face-only
+    # path đã có CHAR_XX từ fusion → caller dùng trực tiếp.
+    if sp_result is not None and getattr(sp_result, "embeddings", None):
+        try:
+            from app.services.character_registry_service import (
+                assign_character_ids_to_segments,
+                build_character_registry,
+                save_character_registry,
+            )
+            from app.services.segment_ownership_service import (
+                build_character_embeddings,
+                extract_speaker_embeddings_from_pipeline,
+            )
+
+            raw_speakers_for_reg = list(sp_result.speakers or [])
+            speaker_embeddings_dict = extract_speaker_embeddings_from_pipeline(
+                list(sp_result.embeddings),
+            )
+            # Build per-speaker segments dict from merged (use audio_speaker
+            # field — preserved before fusion overwrote seg["speaker"]).
+            speaker_segments_dict: dict[str, list[dict]] = {}
+            for seg in merged:
+                spk = seg.get("audio_speaker") or seg.get("speaker")
+                if spk and not str(spk).startswith("CHAR_"):
+                    speaker_segments_dict.setdefault(spk, []).append({
+                        "start": float(seg.get("start", 0.0)),
+                        "end": float(seg.get("end", 0.0)),
+                    })
+
+            # speaker_genders / confs: derive from speaker_genders + audio_confs_for_fusion
+            # (audio_confs_for_fusion may not exist in this scope — recompute).
+            sp_gender_confs_dict: dict[str, float] = {}
+            for spk in raw_speakers_for_reg:
+                # Pull from stats.gender_confidences (pipeline F0 + spectral)
+                stats_confs = (sp_result.stats or {}).get("gender_confidences") or {}
+                sp_gender_confs_dict[spk] = float(stats_confs.get(spk, 0.0))
+
+            registry = build_character_registry(
+                project_id=project_id,
+                raw_speakers=raw_speakers_for_reg,
+                speaker_embeddings=speaker_embeddings_dict,
+                speaker_segments=speaker_segments_dict,
+                speaker_genders={
+                    spk: speaker_genders.get(spk, "unknown")
+                    for spk in raw_speakers_for_reg
+                },
+                speaker_gender_confs=sp_gender_confs_dict,
+                # Phase 7a — wire face_track_to_speaker từ fusion cross-match.
+                # Audio_to_face = {SPEAKER_XX: face_int_id} reverse → E1 evidence.
+                # Nếu fusion không ran (face skipped) → empty dict → E1 sẽ 0.
+                face_track_to_speaker={
+                    face_int: audio_spk
+                    for audio_spk, face_int
+                    in (fusion.audio_to_face.items() if fusion_ran else {})
+                } if fusion_ran else {},
+            )
+
+            # Persist character_registry.json vào project dir
+            from pathlib import Path as _P
+            reg_path = _project_dir(project_id) / "character_registry.json"
+            save_character_registry(registry, reg_path)
+
+            # Map raw SPEAKER_XX → CHAR_XXX trên merged. Note: nếu fusion đã
+            # overwrite seg["speaker"] = CHAR_XX face-fused, ta dùng
+            # seg["audio_speaker"] (pyannote raw) làm key cho registry assign.
+            n_assigned = assign_character_ids_to_segments(
+                merged, registry, raw_speaker_field="audio_speaker",
+            )
+            logger.info(
+                "Phase 6 character_registry: %d chars · %d possible_merges · "
+                "%d/%d segments tagged audio character_id",
+                len(registry.characters), len(registry.possible_merges),
+                n_assigned, len(merged),
+            )
+
+            # ── PHASE 7a: GENDER DETECTION PER-CHARACTER ──
+            # Fuse audio gender (F0+formant) + face gender (insightface CNN, chỉ
+            # khi face_track stable map với char) + self-ref text patterns.
+            # Mutate CharacterProfile.gender + gender_confidence + review_required
+            # in-place. Phase 8 (voice mapping) sẽ dùng các field này.
             try:
-                from app.services.speaker_pipeline import build_speaker_voice_map
-                voice_slots_fallback = project.get("voice_slots") or []
-                # KHÔNG dùng project["speaker_voice_map"] làm user_overrides ở
-                # đây — đó là output của pipeline trước, không phải user choice.
-                # User override sẽ wire ở Phase 8 (UI panel).
-                voice_map_fallback = build_speaker_voice_map(
-                    speakers=list(sp_result.speakers),
-                    voice_slots=voice_slots_fallback,
-                    user_overrides={},
-                    speaker_genders=speaker_genders,
-                    gender_confidences=gender_confidences,
+                from app.services.gender_detection_service import (
+                    detect_all_character_genders,
                 )
-                project["speaker_voice_map"] = voice_map_fallback
+                # face_track_to_speaker đã wire ở build_character_registry call
+                # → tận dụng lại cho gender fusion (E1 reference).
+                _face_track_to_speaker_for_gender = (
+                    {
+                        face_int: audio_spk
+                        for audio_spk, face_int in fusion.audio_to_face.items()
+                    }
+                    if fusion_ran and fusion is not None
+                    else {}
+                )
+                _face_genders_for_gender = (
+                    face_result.face_genders if face_result is not None else {}
+                )
+                _face_gender_confs_for_gender = (
+                    face_result.face_gender_confs if face_result is not None else {}
+                )
+                # Build character_texts: gom original_text per CHAR_XXX cho
+                # self-ref pattern match. Dùng merged (đã có character_id).
+                _char_texts: dict[str, list[str]] = {}
+                for seg in merged:
+                    cid = seg.get("character_id")
+                    txt = seg.get("text") or seg.get("original_text")
+                    if cid and txt:
+                        _char_texts.setdefault(cid, []).append(txt)
+
+                gender_decisions, gender_conflicts = detect_all_character_genders(
+                    registry=registry,
+                    audio_speaker_genders={
+                        spk: speaker_genders.get(spk, "unknown")
+                        for spk in raw_speakers_for_reg
+                    },
+                    audio_speaker_gender_confs=sp_gender_confs_dict,
+                    face_track_to_speaker=_face_track_to_speaker_for_gender,
+                    face_genders=_face_genders_for_gender,
+                    face_gender_confs=_face_gender_confs_for_gender,
+                    character_texts=_char_texts,
+                    apply_to_profiles=True,  # mutate profiles in-place
+                )
+                project["gender_conflicts"] = [
+                    gc.model_dump(mode="json") for gc in gender_conflicts
+                ]
                 logger.info(
-                    "Phase 4 fallback voice_map (pyannote SPEAKER_XX, "
-                    "face skipped/failed): %s",
-                    voice_map_fallback,
+                    "Phase 7a gender_detection: %d chars decided · %d conflicts "
+                    "(audio vs face disagree)",
+                    len(gender_decisions), len(gender_conflicts),
                 )
             except Exception as e:
-                logger.warning("Phase 4 fallback voice_map fail: %s", e)
+                logger.warning("Phase 7a gender_detection fail: %s", e)
+                logger.exception("gender_detection traceback:")
+
+            # ── Persist registry summary vào project meta (Phase 11 qa_report) ──
+            # Đặt SAU gender_detection để summary có gender mới (per-character).
+            project["character_registry_summary"] = {
+                "characters": [
+                    {
+                        "character_id": c.character_id,
+                        "source_speakers": c.source_speakers,
+                        "gender": c.gender,
+                        "gender_confidence": c.gender_confidence,
+                        "line_count": c.line_count,
+                        "merge_confidence": c.merge_confidence,
+                        "review_required": c.review_required,
+                    }
+                    for c in registry.characters.values()
+                ],
+                "possible_merges": [pm.model_dump() for pm in registry.possible_merges],
+            }
+
+            # ── PHASE 6 SEGMENT OWNERSHIP (opt-in cost guard) ──
+            # Per-segment cosine sim validation: requires extracting 1 embedding
+            # per segment (pyannote/embedding forward pass ~ 50-150ms each).
+            # 200 segments × 100ms = 20s GPU cost. Default OFF — opt-in qua env
+            # VOX_PHASE6_SEGMENT_OWNERSHIP=true. Service code đã sẵn sàng;
+            # bật khi user muốn QA report đầy đủ rule 1-5.
+            # Phase 11 auto-enable: default ON cho qa_report đầy đủ.
+            # User có thể disable explicit qua VOX_PHASE6_SEGMENT_OWNERSHIP=false
+            # nếu cost (≈20s/200 segs) là vấn đề. Trade-off ngược với Phase 6 plan.
+            _env_seg_own = os.environ.get("VOX_PHASE6_SEGMENT_OWNERSHIP", "").lower()
+            if _env_seg_own == "false":
+                run_seg_ownership = False
+            else:
+                run_seg_ownership = True  # default ON Phase 11
+            if run_seg_ownership and speaker_embeddings_dict:
+                try:
+                    from app.services.segment_ownership_service import (
+                        compute_segment_embeddings,
+                        validate_segments_batch,
+                    )
+                    char_embs_for_validate = build_character_embeddings(
+                        registry, speaker_embeddings_dict,
+                    )
+                    seg_embs_dict = compute_segment_embeddings(
+                        audio_path=str(vocals_path) if vocals_path.exists() else audio_path,
+                        segments=merged,
+                    )
+                    ownership_infos, ownership_warnings = validate_segments_batch(
+                        segments=merged,
+                        character_embeddings=char_embs_for_validate,
+                        segment_embeddings=seg_embs_dict,
+                        registry=registry,
+                        character_id_field="character_id",
+                    )
+                    project["ownership_warnings"] = [
+                        w.model_dump() for w in ownership_warnings
+                    ]
+                    logger.info(
+                        "Phase 6 segment_ownership: %d infos · %d warnings",
+                        len(ownership_infos), len(ownership_warnings),
+                    )
+                except Exception as e_so:
+                    logger.warning("Phase 6 segment_ownership fail: %s", e_so)
+                    logger.exception("segment_ownership traceback:")
+            else:
+                logger.info(
+                    "Phase 6 segment_ownership: skip (env "
+                    "VOX_PHASE6_SEGMENT_OWNERSHIP=%s, embeddings=%s) "
+                    "— set true để bật full validation",
+                    os.environ.get("VOX_PHASE6_SEGMENT_OWNERSHIP", "false"),
+                    bool(speaker_embeddings_dict),
+                )
+        except Exception as e:
+            logger.warning("Phase 6 character_registry build fail: %s", e)
+            logger.exception("character_registry traceback:")
+            registry = None  # mark cho voice_map block dùng fallback path
+    else:
+        logger.info(
+            "Phase 6 character_registry: skip (sp_result=%s, embeddings=%s). "
+            "Face-only path → voice_map sẽ build keyed by raw FACE_XX/SPEAKER_XX.",
+            sp_result is not None,
+            bool(getattr(sp_result, "embeddings", None)) if sp_result else False,
+        )
+        registry = None
+
+    # ═══════════════════════════════════════════════════════════════════
+    # PHASE 8 UNIFIED voice_map BUILD (Phase 7b MAJ-6 + Phase 8 character-aware)
+    # ═══════════════════════════════════════════════════════════════════
+    # Voice_map keyed bằng character_id (CHAR_XXX) khi registry available,
+    # else raw IDs (SPEAKER_XX / FACE_XX) làm fallback.
+    # Phase 8: registry path dùng build_character_voice_map (3 modes explicit:
+    # 1_voice / 2_voice / multi_voice), tie-breaker deterministic. Source gender
+    # LUÔN từ CharacterProfile.gender (đã fuse audio+face+text).
+    # Phase 8 mutates CharacterProfile.voice_profile_id in-place.
+    # Phase 7b legacy build_speaker_voice_map giữ cho face-only / audio-only path.
+    try:
+        from app.services.speaker_pipeline import build_speaker_voice_map
+        from app.services.speaker_pipeline.voice_mapping import (
+            VoiceSlot, build_character_voice_map,
+        )
+        voice_slots_final = project.get("voice_slots") or []
+        voice_count_final = int(project.get("voice_count") or 1)
+
+        if registry is not None and registry.characters:
+            # ── Phase 8 CHARACTER-AWARE path ──
+            # Build VoiceSlot list từ project["voice_slots"] (list[str] legacy)
+            # với gender hint convention: slot 0=male, slot 1=female, slot 2+=any.
+            # User config (UI) sẽ gửi gender explicit ở Phase 9+ (UI panel).
+            voice_slot_objs: list[VoiceSlot] = []
+            for i, vid in enumerate(voice_slots_final):
+                if not vid:
+                    continue
+                if i == 0:
+                    g = "male"
+                elif i == 1:
+                    g = "female"
+                else:
+                    g = "any"
+                voice_slot_objs.append(VoiceSlot(voice_id=vid, gender=g))
+
+            # Phase 9 quick win (Phase 8 Risk 2 fix): auto-downgrade mode
+            # if effective slot count < user-requested voice_count.
+            # E.g. user chọn voice_count=3 nhưng chỉ chỉnh được 2 slot non-empty
+            # → mode multi sẽ fail (chỉ 2 slot). Downgrade về 2_voice.
+            effective_voice_count = sum(
+                1 for s in voice_slot_objs if s.voice_id
+            )
+            mode_voice_count = min(voice_count_final, effective_voice_count)
+            if effective_voice_count < voice_count_final:
+                logger.warning(
+                    "Phase 8 Risk 2 auto-downgrade: voice_count=%d nhưng chỉ "
+                    "%d slot non-empty → mode = %d_voice",
+                    voice_count_final, effective_voice_count, mode_voice_count,
+                )
+
+            if mode_voice_count <= 1:
+                vm_mode = "1_voice"
+            elif mode_voice_count == 2:
+                vm_mode = "2_voice"
+            else:
+                vm_mode = "multi_voice"
+
+            fallback_vid = project.get("voice_id") or None  # default voice user chose
+
+            if voice_slot_objs:
+                voice_map_final, vm_warnings = build_character_voice_map(
+                    characters=registry.characters,
+                    voice_slots=voice_slot_objs,
+                    mode=vm_mode,  # type: ignore[arg-type]
+                    fallback_voice_id=fallback_vid,
+                    apply_to_profiles=True,  # mutate CharacterProfile.voice_profile_id
+                )
+                project["speaker_voice_map"] = voice_map_final
+                project["voice_map_keyspace"] = "character_id"
+                project["voice_map_warnings"] = [
+                    w.model_dump() for w in vm_warnings
+                ]
+                logger.info(
+                    "Phase 8 character-aware voice_map (mode=%s, CHAR_XXX, "
+                    "%d slots, %d warnings): %s",
+                    vm_mode, len(voice_slot_objs), len(vm_warnings),
+                    voice_map_final,
+                )
+            else:
+                logger.warning(
+                    "Phase 8 voice_map: registry exists but voice_slots rỗng → "
+                    "no map built. TTS sẽ dùng default voice.",
+                )
+        elif fusion_ran and fusion is not None:
+            # Face-only path (no pyannote registry). Raw IDs từ fusion.char_genders.
+            raw_speakers_for_map = sorted(fusion.char_genders.keys())
+            voice_map_final = build_speaker_voice_map(
+                speakers=raw_speakers_for_map,
+                voice_slots=voice_slots_final,
+                user_overrides={},
+                speaker_genders=fusion.char_genders,  # raw_id → gender
+                gender_confidences={
+                    rid: 0.6 for rid in raw_speakers_for_map  # face CNN default
+                },
+            )
+            project["speaker_voice_map"] = voice_map_final
+            project["voice_map_keyspace"] = "raw_face_speaker"
+            logger.info(
+                "Phase 7b unified voice_map (face-only path, raw FACE/SPEAKER): %s",
+                voice_map_final,
+            )
+        elif sp_result is not None and getattr(sp_result, "speakers", None):
+            # Audio-only path (no fusion, no registry). Raw SPEAKER_XX.
+            voice_map_final = build_speaker_voice_map(
+                speakers=list(sp_result.speakers),
+                voice_slots=voice_slots_final,
+                user_overrides={},
+                speaker_genders=speaker_genders,
+                gender_confidences=(sp_result.stats or {}).get(
+                    "gender_confidences", {},
+                ),
+            )
+            project["speaker_voice_map"] = voice_map_final
+            project["voice_map_keyspace"] = "raw_speaker"
+            logger.info(
+                "Phase 7b unified voice_map (audio-only path, raw SPEAKER_XX): %s",
+                voice_map_final,
+            )
         else:
             logger.info(
-                "Phase 4: no voice_map built — cả pyannote + face đều skip/fail. "
-                "TTS sẽ dùng default voice cho mọi segment.",
+                "Phase 7b unified voice_map: SKIP (no registry, no fusion, "
+                "no pyannote). TTS sẽ dùng default voice.",
             )
+    except Exception as e:
+        logger.warning("Phase 7b unified voice_map build fail: %s", e)
+        logger.exception("voice_map traceback:")
 
     segments = []
     for i, seg in enumerate(merged):
+        # Phase 7b: seg["speaker_gender"] source priority:
+        #   1. CharacterProfile.gender via character_id (registry path)
+        #   2. speaker_genders[raw_id] (fusion/audio-only fallback)
+        _cid = seg.get("character_id")
+        _seg_gender = None
+        if _cid and registry is not None and _cid in registry.characters:
+            _seg_gender = registry.characters[_cid].gender
+            if _seg_gender == "unknown":
+                _seg_gender = None
+        if _seg_gender is None:
+            _raw = seg.get("speaker")
+            _seg_gender = speaker_genders.get(_raw) if _raw else None
+            if _seg_gender == "unknown":
+                _seg_gender = None
+
         segments.append({
             "id": uuid.uuid4().hex[:8],
             "index": i,
@@ -2486,10 +2864,17 @@ def transcribe_project(project_id: str) -> dict:
             "emotion": "neutral",
             "voice_id": None,
             "speaker": seg.get("speaker"),
-            "speaker_gender": speaker_genders.get(seg.get("speaker")) if seg.get("speaker") else None,
+            "speaker_gender": _seg_gender,
             # Face detection fields — set bởi face_speaker_svc hook ở trên
             "face_id": seg.get("face_id"),
             "face_confidence": seg.get("face_confidence"),
+            # Phase 6 — character_id (canonical CHAR_XXX từ character_registry) +
+            # ownership tracking. Có thể None khi character_registry không build
+            # được (face-only path) hoặc segment không match speaker nào.
+            "character_id": seg.get("character_id"),
+            "ownership_confidence": seg.get("ownership_confidence"),
+            "ownership_decision_reason": seg.get("ownership_decision_reason"),
+            "ownership_tier": seg.get("ownership_tier"),
             "volume": 1.0,
             "fade_in": 0.0,
             "fade_out": 0.0,
@@ -2506,6 +2891,51 @@ def transcribe_project(project_id: str) -> dict:
 
 
 # ── Translate ──────────────────────────────────────
+
+def _build_registry_block_for_translate(project: dict) -> str | None:
+    """Phase 11 helper: reconstruct CharacterRegistry từ project meta +
+    format thành prompt block cho LLM translate engines.
+
+    Returns: block string nếu registry available, None nếu face-only / no registry.
+    """
+    try:
+        from app.models.character_schemas import CharacterProfile, CharacterRegistry
+        from app.services.translation_character_helper import (
+            build_character_registry_prompt_block,
+        )
+        reg_summary = (project.get("character_registry_summary") or {}).get("characters") or []
+        if not reg_summary:
+            return None
+        reconstructed = {}
+        for c in reg_summary:
+            cid = c.get("character_id")
+            if not cid:
+                continue
+            try:
+                reconstructed[cid] = CharacterProfile(
+                    character_id=cid,
+                    source_speakers=c.get("source_speakers") or [],
+                    gender=c.get("gender", "unknown"),
+                    gender_confidence=float(c.get("gender_confidence") or 0.0),
+                    line_count=int(c.get("line_count") or 0),
+                    merge_confidence=float(c.get("merge_confidence") or 1.0),
+                    locked=bool(c.get("locked") or False),
+                )
+            except Exception:
+                continue
+        if not reconstructed:
+            return None
+        registry = CharacterRegistry(
+            project_id=project.get("id", ""),
+            characters=reconstructed,
+        )
+        chars_meta = project.get("speaker_characters") or {}
+        block = build_character_registry_prompt_block(registry, chars_meta=chars_meta)
+        return block or None
+    except Exception as e:
+        logger.warning("_build_registry_block_for_translate fail: %s", e)
+        return None
+
 
 def translate_project(
     project_id: str,
@@ -2623,12 +3053,17 @@ def translate_project(
     if eng == "gemini" and not api_key and gemini_translate_svc.is_available():
         logger.info("Translating %d segments with Gemini (env key, context-aware)…",
                     len(project["segments"]))
+        # Phase 11 wire (Phase 10 Risk 1 fix): compute character_registry_block
+        # từ project meta (persisted ở transcribe step) → pass vào Gemini engine.
+        # LLM sẽ thấy CHAR_XXX + gender rules trước batch.
+        _reg_block = _build_registry_block_for_translate(project)
         results = gemini_translate_svc.translate_segments(
             project["segments"], target_lang, source_lang,
             topic_hint=topic_hint, glossary=glossary,
             speaker_genders=project.get("speaker_genders") or {},
             film_genre=project.get("film_genre"),
             visual_context=project.get("visual_context") or None,
+            character_registry_block=_reg_block,
         )
         for seg, result in zip(project["segments"], results):
             if result.get("translated_text"):
@@ -2784,7 +3219,19 @@ def translate_project(
 
     # Tag character_name + age + gender vào mỗi segment để output JSON sạch
     # (theo format kịch bản: id/character/gender/age/text).
+    #
+    # Phase 9 migration (Phase 7b Risk 1 fix):
+    # GENDER source = CharacterProfile via character_id (registry path),
+    #   fallback chars_meta[raw_speaker] cho face-only (no registry).
+    # NAME + AGE source = chars_meta (LLM Pass-0 analyze, keyed by raw speaker).
+    # 2 namespace tồn tại song song có lý do — registry là phân loại
+    # đáng tin (cosine clustering), chars_meta là content metadata (LLM
+    # named entity extraction). Phase 11 sẽ unify khi UI panel cho user
+    # edit character_name per CHAR_XXX trực tiếp.
     chars_meta = project.get("speaker_characters") or {}
+    reg_summary = (project.get("character_registry_summary") or {}).get("characters") or []
+    char_id_to_profile_meta = {c.get("character_id"): c for c in reg_summary}
+
     missing_indices: list[int] = []
     for idx, (seg, trans) in enumerate(zip(project["segments"], translated)):
         if trans and trans.strip():
@@ -2799,13 +3246,22 @@ def translate_project(
                 seg["translated_text"] = orig
                 seg["speech_text"] = orig
                 missing_indices.append(idx)
-        # Tag character_name + age + gender per-segment
+
+        # Phase 9 — registry-first GENDER lookup
+        cid = seg.get("character_id")
+        char_profile = char_id_to_profile_meta.get(cid) if cid else None
+        if char_profile and char_profile.get("gender") in ("male", "female"):
+            seg["speaker_gender"] = char_profile["gender"]
+
+        # NAME + AGE via chars_meta (raw speaker keyed — LLM analyze pass)
         spk = seg.get("speaker")
         if spk and spk in chars_meta:
             ci = chars_meta[spk]
             seg["character_name"] = ci.get("character_name", "")
             seg["age"] = ci.get("age", "adult")
-            if ci.get("gender"):
+            # Gender từ chars_meta CHỈ apply nếu registry không có
+            # (face-only path / pre-Phase 9 project meta backward compat).
+            if not char_profile and ci.get("gender"):
                 seg["speaker_gender"] = ci["gender"]
             seg["emotion"] = "neutral"
     if missing_indices:
@@ -2818,6 +3274,84 @@ def translate_project(
     # (gồm cả fallback nguyên gốc). Chạy 1 lần cuối → sub + dub đều dùng
     # text đã clean.
     _apply_translation_post_fixes(project)
+
+    # ── PHASE 10: TRANSLATION QA SERVICE ──
+    # 4 checks post-translation + conservative auto-fix:
+    #   1. Locked + high conf char pronoun mismatch
+    #   2. Cross-batch pronoun drift
+    #   3. Low ownership over-gendered
+    #   4. Unknown gender forced
+    # Auto-fix CHỈ khi confidence >= 0.90; medium → neutral_safe rewrite;
+    # low → keep + warning only.
+    try:
+        from app.services.translation_qa_service import (
+            apply_qa_rewrites, run_translation_qa,
+        )
+        from app.models.character_schemas import CharacterProfile, CharacterRegistry
+        # Reconstruct registry from project summary (transcribe persisted it)
+        reg_summary = (project.get("character_registry_summary") or {}).get("characters") or []
+        qa_registry = None
+        if reg_summary:
+            reconstructed_chars = {}
+            for c in reg_summary:
+                cid = c.get("character_id")
+                if not cid:
+                    continue
+                try:
+                    reconstructed_chars[cid] = CharacterProfile(
+                        character_id=cid,
+                        source_speakers=c.get("source_speakers") or [],
+                        gender=c.get("gender", "unknown"),
+                        gender_confidence=float(c.get("gender_confidence") or 0.0),
+                        line_count=int(c.get("line_count") or 0),
+                        merge_confidence=float(c.get("merge_confidence") or 1.0),
+                        locked=bool(c.get("locked") or False),
+                        review_required=bool(c.get("review_required") or False),
+                    )
+                except Exception:
+                    continue
+            if reconstructed_chars:
+                qa_registry = CharacterRegistry(
+                    project_id=project_id,
+                    characters=reconstructed_chars,
+                )
+
+        qa_result = run_translation_qa(
+            project["segments"], qa_registry, batch_size=20,
+        )
+        applied_count = apply_qa_rewrites(
+            project["segments"], qa_result["rewrites"],
+        )
+        project["translation_warnings"] = [
+            w.model_dump() for w in qa_result["warnings"]
+        ]
+        project["translation_qa_stats"] = qa_result["stats"]
+        logger.info(
+            "Phase 10 translation_qa: %d warnings, %d auto-fixed (%d applied)",
+            len(qa_result["warnings"]), qa_result["stats"]["auto_fixed"],
+            applied_count,
+        )
+    except Exception as e:
+        logger.warning("Phase 10 translation_qa fail: %s", e)
+        logger.exception("translation_qa traceback:")
+
+    # ── PHASE 11: BUILD qa_report.json ──
+    # Aggregate warnings từ tất cả phases (5, 6, 7a, 8, 9, 10) + summary stats.
+    # Output: <project_dir>/qa_report.json — user/UI reads for review.
+    try:
+        from app.services.qa_report_service import build_qa_report, save_qa_report
+        qa_report = build_qa_report(project, registry=qa_registry)
+        qa_report_path = _project_dir(project_id) / "qa_report.json"
+        save_qa_report(qa_report, qa_report_path)
+        project["qa_report_path"] = str(qa_report_path.name)
+        project["qa_report_summary"] = qa_report.summary.model_dump()
+        logger.info(
+            "Phase 11 qa_report: written → %s (summary: %s)",
+            qa_report_path.name, qa_report.summary.model_dump(),
+        )
+    except Exception as e:
+        logger.warning("Phase 11 qa_report build fail: %s", e)
+        logger.exception("qa_report traceback:")
 
     # ── LLM Self-verify gender (Option A) ──
     # LLM trả speaker_genders cuối output → so sánh với pipeline detect →
@@ -2873,11 +3407,25 @@ def translate_project(
                 should_override = False
                 reason = ""
                 ev_len = len(evidence) if evidence else 0
+                # Phase 7b: deprecate ev_len > LLM_GENDER_HINT_EVIDENCE_STRONG_CHARS
+                # → preferred path: detect_self_reference_gender (gender_detection_service)
+                # đã pattern match Vietnamese self-ref rồi. ev_len char count
+                # quá rough. Giữ ev_strong cho compat code paths cũ; Phase 12
+                # sẽ xóa.
+                _self_ref_g = None
+                try:
+                    from app.services.gender_detection_service import (
+                        detect_self_reference_gender as _det_selfref,
+                    )
+                    _self_ref_g = _det_selfref(evidence or "")
+                except Exception:
+                    _self_ref_g = None
                 ev_strong = bool(evidence and (
-                    "self-ref" in evidence.lower()
+                    _self_ref_g in ("male", "female")  # pattern-matched self-ref
+                    or "self-ref" in evidence.lower()
                     or "diarization" in evidence.lower()
                     or "merge" in evidence.lower()
-                    or ev_len > LLM_OVERRIDE_EVIDENCE_STRONG_CHARS
+                    or ev_len > LLM_GENDER_HINT_EVIDENCE_STRONG_CHARS  # DEPRECATED Phase 7b
                 ))
                 # ABSOLUTE PRIORITY: pipeline unknown → LLM thắng vô điều kiện
                 # (CNN gender bias với face Á trẻ → hay vote "unknown" → cần
@@ -2885,13 +3433,13 @@ def translate_project(
                 if pipeline_g in ("unknown", "unsure", None, ""):
                     should_override = True
                     reason = f"pipeline_g={pipeline_g} → LLM thắng tuyệt đối"
-                elif pipeline_conf < LLM_OVERRIDE_PIPELINE_LOW:
+                elif pipeline_conf < LLM_GENDER_HINT_PIPELINE_LOW:
                     should_override = True
                     reason = f"pipeline_conf={pipeline_conf:.2f} thấp → LLM thắng"
-                elif pipeline_conf < LLM_OVERRIDE_PIPELINE_MID and ev_len > LLM_OVERRIDE_EVIDENCE_MIN_CHARS:
+                elif pipeline_conf < LLM_GENDER_HINT_PIPELINE_MID and ev_len > LLM_GENDER_HINT_EVIDENCE_MIN_CHARS:
                     should_override = True
                     reason = f"pipeline_conf={pipeline_conf:.2f} ambiguous + LLM có evidence"
-                elif pipeline_conf < LLM_OVERRIDE_PIPELINE_HIGH and ev_strong:
+                elif pipeline_conf < LLM_GENDER_HINT_PIPELINE_HIGH and ev_strong:
                     should_override = True
                     reason = f"pipeline_conf={pipeline_conf:.2f} cao nhưng LLM evidence MẠNH ({ev_len} chars)"
                 else:
@@ -2915,20 +3463,58 @@ def translate_project(
                 project["speaker_genders"] = new_genders
                 project["speaker_genders_llm"] = llm_genders  # save full for UI
                 logger.info("Gender overrides applied: %s", overridden)
-                # Rebuild voice_map với gender mới
+                # Phase 7b MAJ-6 fix: rebuild voice_map dùng source character_id
+                # (CHAR_XXX từ character_registry_summary nếu có) → gender source
+                # ưu tiên CharacterProfile-derived genders đã store trong meta.
+                # Fallback raw SPEAKER_XX cho legacy projects chưa có registry.
                 try:
                     from app.services.speaker_pipeline import build_speaker_voice_map
-                    speakers = list(new_genders.keys())
                     voice_slots = project.get("voice_slots") or []
-                    user_overrides = project.get("speaker_voice_map") or {}
-                    new_voice_map = build_speaker_voice_map(
-                        speakers=speakers,
-                        voice_slots=voice_slots,
-                        user_overrides=user_overrides,
-                        speaker_genders=new_genders,
-                    )
-                    project["speaker_voice_map"] = new_voice_map
-                    logger.info("Voice map rebuilt: %s", new_voice_map)
+                    char_summary = project.get("character_registry_summary") or {}
+                    char_entries = char_summary.get("characters") or []
+                    keyspace = project.get("voice_map_keyspace", "raw_speaker")
+
+                    if char_entries and keyspace == "character_id":
+                        # Registry-aware path: map LLM overrides về char_id qua
+                        # source_speakers. Nếu LLM nói SPEAKER_00=female → tìm
+                        # char chứa SPEAKER_00, override CharacterProfile.gender.
+                        spk_to_char: dict[str, str] = {}
+                        char_genders_rebuild: dict[str, str] = {}
+                        for c in char_entries:
+                            cid = c.get("character_id")
+                            char_genders_rebuild[cid] = c.get("gender", "unknown")
+                            for spk in c.get("source_speakers", []) or []:
+                                spk_to_char[spk] = cid
+                        for raw_spk, new_g in overridden.items():
+                            cid = spk_to_char.get(raw_spk)
+                            if cid:
+                                char_genders_rebuild[cid] = new_g
+                        new_voice_map = build_speaker_voice_map(
+                            speakers=sorted(char_genders_rebuild.keys()),
+                            voice_slots=voice_slots,
+                            user_overrides={},
+                            speaker_genders=char_genders_rebuild,
+                        )
+                        project["speaker_voice_map"] = new_voice_map
+                        logger.info(
+                            "Voice map rebuilt (Phase 7b MAJ-6, CHAR_XXX namespace, "
+                            "LLM overrides re-applied via source_speakers): %s",
+                            new_voice_map,
+                        )
+                    else:
+                        # Legacy fallback: raw speaker namespace (no registry).
+                        speakers = list(new_genders.keys())
+                        new_voice_map = build_speaker_voice_map(
+                            speakers=speakers,
+                            voice_slots=voice_slots,
+                            user_overrides={},  # KHÔNG dùng prev map làm override
+                            speaker_genders=new_genders,
+                        )
+                        project["speaker_voice_map"] = new_voice_map
+                        logger.info(
+                            "Voice map rebuilt (Phase 7b fallback raw namespace): %s",
+                            new_voice_map,
+                        )
                 except Exception as e:
                     logger.warning("Voice map rebuild fail: %s", e)
         # Clear cache cho project sau

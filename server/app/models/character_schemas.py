@@ -171,11 +171,51 @@ class TranslationWarning(BaseModel):
         ...,
         description='enum: "pronoun_inconsistent_with_profile", '
                     '"batch_pronoun_drift", "ambiguous_pronoun", '
-                    '"ownership_low_neutral_forced", "gender_unknown_forced_safe"',
+                    '"ownership_low_neutral_forced", "gender_unknown_forced_safe", '
+                    '"locked_character_gender_violated", '
+                    '"invalid_llm_note_fallback_ok"',
     )
     original_translation: Optional[str] = None
     corrected_translation: Optional[str] = None
     auto_fixed: bool = False
+
+
+# Phase 9 — LLM translation note enum (strict whitelist for parsing).
+# LLM may hallucinate any string; parser must validate vs this enum.
+TranslationNote = Literal[
+    "ok",
+    "neutral_safe_due_to_low_gender_confidence",
+    "neutral_safe_due_to_low_ownership_confidence",
+    "follows_character_profile",
+    "ambiguous_pronoun",
+]
+
+
+VALID_TRANSLATION_NOTES: tuple[str, ...] = (
+    "ok",
+    "neutral_safe_due_to_low_gender_confidence",
+    "neutral_safe_due_to_low_ownership_confidence",
+    "follows_character_profile",
+    "ambiguous_pronoun",
+)
+
+
+class VoiceMapWarning(BaseModel):
+    """Phase 8 — voice_map build cảnh báo: unknown gender + no fallback,
+    majority rule applied, tie-breaker alphabetical, ..."""
+    model_config = ConfigDict(extra="forbid")
+
+    character_id: str
+    issue: str = Field(
+        ...,
+        description='enum: "unknown_gender_no_fallback", '
+                    '"unknown_gender_fallback_applied", '
+                    '"majority_rule_applied", "tie_breaker_alphabetical", '
+                    '"no_matching_gender_slot", "reused_slot_same_gender", '
+                    '"voice_slot_count_insufficient"',
+    )
+    decided_voice: str = Field("", description="voice_id final được gán")
+    reason: str = ""
 
 
 class TimingWarning(BaseModel):
@@ -242,5 +282,6 @@ class QAReport(BaseModel):
     gender_conflicts: list[GenderConflict] = Field(default_factory=list)
     ownership_warnings: list[OwnershipWarning] = Field(default_factory=list)
     translation_warnings: list[TranslationWarning] = Field(default_factory=list)
+    voice_map_warnings: list[VoiceMapWarning] = Field(default_factory=list)
     timing_warnings: list[TimingWarning] = Field(default_factory=list)
     system_errors: list[SystemError] = Field(default_factory=list)

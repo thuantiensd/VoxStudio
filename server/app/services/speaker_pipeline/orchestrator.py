@@ -257,6 +257,16 @@ def analyze_speakers(
     stats["reid_seconds"] = round(time.time() - t, 2)
     stats["embeddings_used"] = len(embeddings)
 
+    # Phase 6 — rename embeddings' speaker_id từ TEMP → stable (sau reID).
+    # speaker_mapping = {SPEAKER_TEMP_xx: SPEAKER_00}. Cần để character_registry +
+    # segment_ownership_service downstream dùng stable IDs match với
+    # speaker_segments/speaker_genders (đều stable sau reID).
+    if speaker_mapping:
+        for emb in embeddings:
+            new_id = speaker_mapping.get(emb.speaker_id)
+            if new_id:
+                emb.speaker_id = new_id
+
     # Stable speaker IDs trong order xuất hiện
     seen: list[str] = []
     for turn in turns:
@@ -337,4 +347,10 @@ def analyze_speakers(
         language=detected_lang,
         stats=stats,
         speaker_genders={spk: speaker_genders.get(spk, "unknown") for spk in final_speakers},
+        # Phase 6 — expose embeddings cho character_registry + segment_ownership.
+        # Note: speaker_id ở đây là TEMP (vd SPEAKER_TEMP_00), KHÔNG phải stable
+        # final ID. reidentify_speakers đã map → caller dùng `speaker_mapping`
+        # nếu cần stable IDs. Hiện tại trả raw để caller (dubbing_svc) tự re-map
+        # qua turns[].speaker (đã stable sau reID).
+        embeddings=embeddings,
     )

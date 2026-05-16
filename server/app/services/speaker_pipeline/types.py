@@ -113,6 +113,12 @@ class SpeakerPipelineResult:
     # Phase 4b — F0-based gender per speaker_id ("male"|"female"|"unknown").
     # Heuristic, voice mapping fallback "any" slot khi "unknown".
     speaker_genders: dict[str, str] = field(default_factory=dict)
+    # Phase 6 audit refactor — expose per-turn embeddings cho character_registry
+    # + segment_ownership_service (downstream cosine similarity). Trước Phase 6:
+    # embeddings tính rồi vứt sau reID. Sau Phase 6: caller dùng được cho cluster
+    # build_character_registry + per-segment ownership validation.
+    # KHÔNG serialize vào to_json (numpy vector lớn — internal only).
+    embeddings: list[SpeakerEmbedding] = field(default_factory=list)
 
     def to_json(self) -> dict:
         return {

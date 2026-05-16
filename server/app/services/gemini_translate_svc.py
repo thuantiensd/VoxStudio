@@ -34,6 +34,7 @@ def translate_segments(
     speaker_genders: dict | None = None,
     film_genre: str | None = None,
     visual_context: dict | None = None,
+    character_registry_block: str | None = None,
 ) -> list[dict]:
     """Translate film dialogue segments — 3-pass cinematic.
 
@@ -51,6 +52,7 @@ def translate_segments(
             return _translate_uncached(
                 uncached, target_language, source_language,
                 topic_hint, glossary, film_genre, visual_context,
+                character_registry_block,
             )
 
         return cached_translate_segments(
@@ -66,6 +68,7 @@ def translate_segments(
         return _translate_uncached(
             segments, target_language, source_language,
             topic_hint, glossary, film_genre, visual_context,
+            character_registry_block,
         )
 
 
@@ -77,6 +80,7 @@ def _translate_uncached(
     glossary: list[tuple[str, str]] | None,
     film_genre: str | None,
     visual_context: dict | None = None,
+    character_registry_block: str | None = None,
 ) -> list[dict]:
     """Internal — gọi 3-pass thực sự (sau cache miss)."""
     from app.services.llm import run_analyze, run_translate, run_edit
@@ -85,6 +89,19 @@ def _translate_uncached(
 
     glossary_block = glossary_svc.format_for_prompt(glossary) if glossary else None
     topic_block = glossary_svc.format_topic_hint_for_prompt(topic_hint) if topic_hint else None
+
+    # Phase 10 wire (Phase 9 Risk 2 fix): Prepend character_registry_block
+    # to topic_block. LLM thấy registry trước → bias prompts toward char-aware
+    # xưng hô. Block đã chứa rules → KHÔNG duplicate rules đâu khác.
+    if character_registry_block:
+        if topic_block:
+            topic_block = character_registry_block + "\n\n" + topic_block
+        else:
+            topic_block = character_registry_block
+        logger.info(
+            "Gemini: character_registry_block prepended (len=%d chars)",
+            len(character_registry_block),
+        )
 
     # ── Pass-0: analyze speaker relationships (1 call cho cả phim) ──
     relationships: dict = {}

@@ -134,17 +134,33 @@ AUDIO_FACE_COOCCURRENCE_MIN = 2
 # ⚠️ MISMATCH spec: spec yêu cầu GENDER_HIGH=0.80, code đang 0.70.
 GENDER_VOICE_MATCH_MIN = 0.70
 
-# === LLM gender cross-validate (sau translate) ===
-# Pipeline confidence thresholds cho rule tree LLM override (dubbing_svc):
+# === LLM gender hint cross-validate (sau translate) ===
+# Phase 7b rename: LLM_OVERRIDE_* → LLM_GENDER_HINT_*.
+# Naming cũ misleading — LLM không "override" mà chỉ là 1 hint signal trong
+# multi-source fusion (audio + face + LLM text + self-ref pattern). Final
+# gender quyết định ở gender_detection_service per character profile.
+#
+# Pipeline confidence thresholds cho rule tree LLM hint apply (dubbing_svc):
 #   conf < LOW  → LLM thắng vô điều kiện
 #   conf < MID  → LLM thắng nếu evidence ≥ EVIDENCE_MIN_CHARS
 #   conf < HIGH → LLM thắng nếu evidence_strong (≥ STRONG_CHARS hoặc keyword "self-ref"...)
 #   conf ≥ HIGH → giữ pipeline (audio cực mạnh)
-LLM_OVERRIDE_PIPELINE_LOW = 0.70
-LLM_OVERRIDE_PIPELINE_MID = 0.90
-LLM_OVERRIDE_PIPELINE_HIGH = 0.98
-LLM_OVERRIDE_EVIDENCE_MIN_CHARS = 5
-LLM_OVERRIDE_EVIDENCE_STRONG_CHARS = 30
+LLM_GENDER_HINT_PIPELINE_LOW = 0.70
+LLM_GENDER_HINT_PIPELINE_MID = 0.90
+LLM_GENDER_HINT_PIPELINE_HIGH = 0.98
+
+# DEPRECATED — Phase 7b replaced by pattern match in gender_detection_service
+# (detect_self_reference_gender). Kept as alias để compat code chưa migrate;
+# Phase 12 sẽ xóa hoàn toàn + remove all callers. KHÔNG dùng cho code mới.
+LLM_GENDER_HINT_EVIDENCE_MIN_CHARS = 5      # DEPRECATED Phase 7b
+LLM_GENDER_HINT_EVIDENCE_STRONG_CHARS = 30  # DEPRECATED Phase 7b
+
+# Back-compat aliases — Phase 7b. Sẽ xóa ở Phase 12.
+LLM_OVERRIDE_PIPELINE_LOW = LLM_GENDER_HINT_PIPELINE_LOW
+LLM_OVERRIDE_PIPELINE_MID = LLM_GENDER_HINT_PIPELINE_MID
+LLM_OVERRIDE_PIPELINE_HIGH = LLM_GENDER_HINT_PIPELINE_HIGH
+LLM_OVERRIDE_EVIDENCE_MIN_CHARS = LLM_GENDER_HINT_EVIDENCE_MIN_CHARS
+LLM_OVERRIDE_EVIDENCE_STRONG_CHARS = LLM_GENDER_HINT_EVIDENCE_STRONG_CHARS
 
 # ═══════════════════════════════════════════════════════════════════════
 # SPEC DEFAULTS — đặt sẵn cho Phase 3-7 sẽ dùng (character_registry,
@@ -176,3 +192,22 @@ AUDIO_STRONG = 0.85            # audio ownership ≥ này → face KHÔNG đư�
 # === Embedding extraction (Phase 4) ===
 MIN_EMBEDDING_DURATION = 2.0   # đoạn audio tối thiểu (giây) để extract embedding tin cậy
 MAX_EMBEDDING_DURATION = 10.0  # đoạn tối đa (tránh embedding "averaged" qua nhiều câu)
+# Phase 6 — quality threshold cho embedding-based segment ownership.
+# segment_embedding_quality < này → rule 1b apply (low_confidence keep).
+EMBEDDING_QUALITY_MIN = 0.3
+
+# === Gender fusion (Phase 7) ===
+# Per-character gender quyết định ở fusion service, KHÔNG per-segment.
+# Threshold tier cho final gender_confidence:
+#   ≥ GENDER_HIGH (0.80) → high tier, dùng full character profile cho TTS
+#   GENDER_MEDIUM (0.60) ≤ conf < HIGH → medium tier, neutral-safe translation
+#   < GENDER_MEDIUM → unknown → fallback voice + neutral pronouns
+# Đã định nghĩa GENDER_HIGH / GENDER_MEDIUM ở trên (line 161-162).
+#
+# Fusion rules (audio = primary, face = supporting):
+GENDER_AUDIO_STRONG = 0.70     # audio_conf ≥ này → audio thắng trong conflict
+GENDER_AGREEMENT_BOOST = 0.05  # audio + face cùng kết quả → boost conf +0.05
+GENDER_AGREEMENT_CAP = 0.95    # cap sau boost agreement
+GENDER_CONFLICT_PENALTY = 0.10 # audio + face conflict → conf trừ 0.10
+GENDER_SELFREF_BOOST = 0.10    # text self-ref khớp → boost +0.10
+GENDER_SELFREF_CAP = 0.95      # cap sau self-ref boost

@@ -199,74 +199,52 @@ def _decide_segment(
         face_int is not None and active_speaker_conf >= active_speaker_threshold
     )
 
-    # Helper: CHAR id từ face_int
-    def _char_from_face(fid: int) -> str:
-        return f"CHAR_{fid:02d}"
+    # Phase 7b — Option B namespace refactor.
+    # Trước: helper _char_from_face(fid) tạo "CHAR_{fid:02d}" inline → collide
+    # với CHAR_XXX từ character_registry. Sau: trả raw FACE_XX (match format
+    # face_speaker_svc đã set ở seg["face_id"]). Caller (character_registry)
+    # consume raw IDs làm source → tạo CHAR_XXX duy nhất.
+    # audio_unmatched_to_char arg KHÔNG dùng nữa — Tier B/D/G2 trả audio_spk raw.
+    def _face_raw_id(fid: int) -> str:
+        return f"FACE_{fid:02d}"
 
     # ── Tier A: AUDIO STRONG + cross-match ──
+    # Audio chắc + face confirm → audio_speaker (registry sẽ merge với face
+    # cùng cluster qua face_track_to_speaker mapping E1).
     if audio_spk and audio_conf >= audio_strong_threshold and cross_matched:
-        return (
-            _char_from_face(audio_to_face[audio_spk]),
-            REASON_AUDIO_STRONG_FACE_CONFIRM,
-            audio_conf,
-        )
+        return (audio_spk, REASON_AUDIO_STRONG_FACE_CONFIRM, audio_conf)
 
-    # ── Tier B: AUDIO STRONG, không cross-match (voice-over) ──
+    # ── Tier B: AUDIO STRONG, không cross-match (voice-over off-screen) ──
     if audio_spk and audio_conf >= audio_strong_threshold:
-        # CHAR audio_only — caller sẽ resolve qua audio_unmatched_to_char
-        char_id = audio_unmatched_to_char.get(audio_spk)
-        if char_id:
-            return (char_id, REASON_AUDIO_STRONG_NO_FACE, audio_conf)
-        # Fallback nếu audio_unmatched_to_char chưa map → tier C/D dưới
+        return (audio_spk, REASON_AUDIO_STRONG_NO_FACE, audio_conf)
 
     # ── Tier C: AUDIO MID + cross-match ──
     if audio_spk and audio_conf >= ownership_keep_threshold and cross_matched:
         ownership = (audio_conf + active_speaker_conf) / 2.0
-        return (
-            _char_from_face(audio_to_face[audio_spk]),
-            REASON_AUDIO_MID_FACE_CONFIRM,
-            ownership,
-        )
+        return (audio_spk, REASON_AUDIO_MID_FACE_CONFIRM, ownership)
 
     # ── Tier D: AUDIO MID, không cross-match ──
     if audio_spk and audio_conf >= ownership_keep_threshold:
-        char_id = audio_unmatched_to_char.get(audio_spk)
-        if char_id:
-            return (char_id, REASON_AUDIO_MID_NO_FACE, audio_conf)
+        return (audio_spk, REASON_AUDIO_MID_NO_FACE, audio_conf)
 
     # ── Tier E: AUDIO WEAK + face active strong ──
     if audio_spk and has_face_active_strong:
-        # Audio yếu, face active strong → trust face vì face xác định ai đang nói
-        return (
-            _char_from_face(face_int),
-            REASON_FACE_WINS_WEAK_AUDIO,
-            active_speaker_conf,
-        )
+        # Audio yếu, face active strong → trust face xác định ai đang nói.
+        # Trả face raw ID — registry sẽ map cùng character nếu audio cùng cluster.
+        return (_face_raw_id(face_int), REASON_FACE_WINS_WEAK_AUDIO, active_speaker_conf)
 
-    # ── Tier F: No audio + face active strong (on-screen actor, pyannote miss) ──
+    # ── Tier F: No audio + face active strong (pyannote miss) ──
     if not audio_spk and has_face_active_strong:
-        return (
-            _char_from_face(face_int),
-            REASON_FACE_ONLY_NO_AUDIO,
-            active_speaker_conf,
-        )
+        return (_face_raw_id(face_int), REASON_FACE_ONLY_NO_AUDIO, active_speaker_conf)
 
     # ── Tier G1: WEAK both → fallback face (face_id có) ──
     if face_int is not None:
-        # Cap ownership ở OWNERSHIP_LOW vì weak signal
         weak_conf = min(active_speaker_conf, OWNERSHIP_LOW)
-        return (
-            _char_from_face(face_int),
-            REASON_FACE_WEAK_FALLBACK,
-            weak_conf,
-        )
-    # ── Tier G2: audio weak + no face → fallback audio_only ──
-    # Reason riêng REASON_AUDIO_WEAK_FALLBACK (không phải MID — audio thực sự weak)
+        return (_face_raw_id(face_int), REASON_FACE_WEAK_FALLBACK, weak_conf)
+
+    # ── Tier G2: audio weak + no face → fallback audio_only raw ──
     if audio_spk:
-        char_id = audio_unmatched_to_char.get(audio_spk)
-        if char_id:
-            # Cap ownership ở OWNERSHIP_LOW vì weak signal
-            return (char_id, REASON_AUDIO_WEAK_FALLBACK, min(audio_conf, OWNERSHIP_LOW))
+        return (audio_spk, REASON_AUDIO_WEAK_FALLBACK, min(audio_conf, OWNERSHIP_LOW))
 
     # ── Tier H: no signal ──
     return (None, REASON_NO_SIGNAL, 0.0)
@@ -317,39 +295,34 @@ def fuse_speakers(
         segments, min_cooccurrence=AUDIO_FACE_COOCCURRENCE_MIN,
     )
 
-    # ── Step 2: build canonical CHAR_XX namespace ──
-    char_genders: dict[str, str] = {}
-    char_gender_confs: dict[str, float] = {}
-
-    used_face_ids = set(face_genders.keys())
+    # ── Step 2: Phase 7b Option B — build RAW gender map (no CHAR_XX synthesis) ──
+    # raw_genders keyed bằng raw IDs trực tiếp:
+    #   SPEAKER_XX (audio) → gender từ audio_speaker_genders
+    #   FACE_XX    (face)  → gender từ face_genders[face_int]
+    # Caller (character_registry) tổng hợp raw → CHAR_XXX duy nhất.
+    raw_genders: dict[str, str] = {}
+    raw_gender_confs: dict[str, float] = {}
     for face_int, g in face_genders.items():
-        char_id = f"CHAR_{face_int:02d}"
-        char_genders[char_id] = g
-        char_gender_confs[char_id] = face_gender_confs.get(face_int, 0.0)
-
-    # Audio speakers không match face → CHAR riêng (off-screen / voice-over)
-    unmatched_audios = [
-        spk for spk in audio_speaker_genders.keys()
-        if spk not in audio_to_face and spk
-    ]
-    next_unmatched_char = max(used_face_ids, default=-1) + 1
-    audio_unmatched_to_char: dict[str, str] = {}
-    for spk in unmatched_audios:
-        char_id = f"CHAR_{next_unmatched_char:02d}"
-        next_unmatched_char += 1
-        char_genders[char_id] = audio_speaker_genders.get(spk, "unknown")
-        char_gender_confs[char_id] = 0.5  # audio gender mid confidence
-        audio_unmatched_to_char[spk] = char_id
+        face_key = f"FACE_{face_int:02d}"
+        raw_genders[face_key] = g
+        raw_gender_confs[face_key] = face_gender_confs.get(face_int, 0.0)
+    for spk, g in audio_speaker_genders.items():
+        if not spk:
+            continue
+        raw_genders[spk] = g
+        raw_gender_confs[spk] = audio_speaker_confidences.get(spk, 0.5)
 
     # ── Step 3: per-segment decision (AUDIO-FIRST tree) ──
     fusion_stats: dict[str, int] = defaultdict(int)
     gender_conflicts: list[dict] = []
 
     for seg in segments:
-        canonical, reason, ownership = _decide_segment(
+        # Phase 7b: audio_unmatched_to_char arg DEPRECATED — pass empty dict
+        # (kept signature cho compat, _decide_segment không dùng nữa).
+        raw_winner, reason, ownership = _decide_segment(
             seg,
             audio_to_face=audio_to_face,
-            audio_unmatched_to_char=audio_unmatched_to_char,
+            audio_unmatched_to_char={},
             audio_speaker_confidences=audio_speaker_confidences,
             audio_strong_threshold=audio_strong_threshold,
             ownership_keep_threshold=ownership_keep_threshold,
@@ -357,22 +330,23 @@ def fuse_speakers(
         )
         fusion_stats[reason] += 1
 
-        # Update segment fields
-        seg["speaker"] = canonical
+        # Update segment fields.
+        # Phase 7b Option B: seg["speaker"] = raw winner (SPEAKER_XX hoặc
+        # FACE_XX), KHÔNG còn synthetic CHAR_XX. character_registry sẽ tạo
+        # seg["character_id"] = CHAR_XXX là single source of truth downstream.
+        seg["speaker"] = raw_winner
         seg["fusion_reason"] = reason
         seg["ownership_confidence"] = round(ownership, 3)
 
-        # Gender per segment LẤY TỪ CHAR (per-character canonical, không per-segment)
-        if canonical and canonical in char_genders:
-            g = char_genders[canonical]
-            if g and g != "unknown":
-                seg["speaker_gender"] = g
+        # Phase 7b: KHÔNG set seg["speaker_gender"] tại fusion nữa.
+        # gender_detection_service sẽ ghi CharacterProfile.gender per CHAR_XXX,
+        # downstream TTS đọc qua character_id. Tránh stale value.
 
-        # Detect gender conflict: audio gender vs face gender đồng segment khác nhau
+        # Detect gender conflict: audio gender vs face gender đồng segment khác nhau.
         audio_spk = seg.get("audio_speaker")
-        if audio_spk and canonical:
+        if audio_spk and raw_winner:
             audio_g = audio_speaker_genders.get(audio_spk)
-            face_g = char_genders.get(canonical)
+            face_g = raw_genders.get(raw_winner) if raw_winner.startswith("FACE_") else None
             if (audio_g and face_g
                     and audio_g != "unknown"
                     and face_g != "unknown"
@@ -381,35 +355,39 @@ def fuse_speakers(
                     "segment_id": seg.get("index"),
                     "audio_speaker": audio_spk,
                     "audio_gender": audio_g,
-                    "face_char": canonical,
+                    "face_winner": raw_winner,
                     "face_gender": face_g,
                     "fusion_reason": reason,
                 })
 
-    # Final char list (chỉ chars được dùng)
-    used_chars = {s.get("speaker") for s in segments if s.get("speaker")}
-    final_char_genders = {c: g for c, g in char_genders.items() if c in used_chars}
+    # Final raw list (chỉ raw IDs được dùng).
+    used_raw = {s.get("speaker") for s in segments if s.get("speaker")}
+    final_raw_genders = {c: g for c, g in raw_genders.items() if c in used_raw}
 
     logger.info(
-        "multimodal fusion AUDIO-FIRST: %d chars, "
-        "audio↔face matches=%d, decisions=%s",
-        len(used_chars), len(audio_to_face), dict(fusion_stats),
+        "multimodal fusion AUDIO-FIRST (Phase 7b Option B, raw IDs): "
+        "%d raw winners, audio↔face matches=%d, decisions=%s",
+        len(used_raw), len(audio_to_face), dict(fusion_stats),
     )
     if gender_conflicts:
         logger.warning(
             "Gender conflicts detected on %d segments (audio vs face disagree)",
             len(gender_conflicts),
         )
-    logger.info("multimodal genders: %s", final_char_genders)
+    logger.info("multimodal raw_genders: %s", final_raw_genders)
 
     return FusionResult(
         audio_to_face=dict(audio_to_face),
-        char_genders=final_char_genders,
-        char_count=len(used_chars),
+        # Phase 7b: field tên giữ char_genders (backward compat field name),
+        # nhưng VALUES giờ là raw_id → gender (SPEAKER_XX hoặc FACE_XX), KHÔNG
+        # phải CHAR_XX synthetic. Downstream cần update accordingly.
+        char_genders=final_raw_genders,
+        char_count=len(used_raw),
         stats={
             **dict(fusion_stats),
             "audio_to_face_match": dict(audio_to_face),
             "gender_conflicts_count": len(gender_conflicts),
+            "namespace": "raw_ids_phase_7b",  # marker cho caller verify
             "thresholds_used": {
                 "active_speaker": active_speaker_threshold,
                 "audio_strong": audio_strong_threshold,
