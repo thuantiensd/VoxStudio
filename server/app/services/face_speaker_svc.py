@@ -88,13 +88,26 @@ class FaceSpeakerResult:
 
 
 def _check_available() -> bool:
+    """Check mediapipe + cv2 importable AND mp.solutions API tồn tại.
+
+    Mediapipe ≥ 0.10.22 / builds một số đã loại bỏ legacy `solutions`
+    namespace (migrate sang `tasks` API). Code hiện tại dùng solutions →
+    cần fail SỚM với hint cài đúng version, thay vì crash giữa pipeline.
+    """
     try:
-        import mediapipe  # noqa: F401
+        import mediapipe as mp
         import cv2  # noqa: F401
-        return True
     except ImportError as e:
-        logger.warning("face_speaker_svc unavailable: %s", e)
+        logger.warning("face_speaker_svc unavailable (import): %s", e)
         return False
+    if not hasattr(mp, "solutions") or not hasattr(mp.solutions, "face_mesh"):
+        logger.warning(
+            "face_speaker_svc: mediapipe %s thiếu solutions.face_mesh — "
+            "pin version cũ. Chạy: pip install --force-reinstall 'mediapipe==0.10.21'",
+            getattr(mp, "__version__", "?"),
+        )
+        return False
+    return True
 
 
 # ── InsightFace CNN gender (optional, fallback geometry) ──
