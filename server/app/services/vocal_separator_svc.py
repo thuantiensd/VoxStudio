@@ -58,8 +58,11 @@ def separate(audio_path: str, output_dir: str) -> dict:
         # Run demucs CLI — auto device, 2 stems mode (vocals + no_vocals)
         device = _pick_device()
         logger.info("Demucs using device: %s", device)
+        # Use sys.executable để inherit current venv (KHÔNG hardcode "python"
+        # — pod RunPod hay có /usr/bin/python khác venv → fail import demucs).
+        import sys
         cmd = [
-            "python", "-m", "demucs",
+            sys.executable, "-m", "demucs",
             "--two-stems", "vocals",  # Only split into vocals + no_vocals
             "-n", MODEL,
             "--device", device,
