@@ -15,7 +15,11 @@ import ffmpeg
 import numpy as np
 import soundfile as sf
 
-from app.config import DUBBING_DIR, VOICES_DIR, TTS_DEFAULT_GUIDANCE, TTS_DEFAULT_STEPS, IS_CUDA
+from app.config import (
+    DUBBING_DIR, VOICES_DIR, TTS_DEFAULT_GUIDANCE, TTS_DEFAULT_STEPS, IS_CUDA,
+    LLM_OVERRIDE_PIPELINE_LOW, LLM_OVERRIDE_PIPELINE_MID, LLM_OVERRIDE_PIPELINE_HIGH,
+    LLM_OVERRIDE_EVIDENCE_MIN_CHARS, LLM_OVERRIDE_EVIDENCE_STRONG_CHARS,
+)
 from app.core.gpu_manager import gpu
 from app.core.storage import load_voice
 from app.services import whisper_svc, translate_svc, llm_translate_svc, edge_tts_svc, vocal_separator_svc, gemini_translate_svc, diarize_svc, resemblyzer_diarize_svc, default_voices_svc, whisperx_svc
@@ -2335,6 +2339,22 @@ def transcribe_project(project_id: str) -> dict:
                     # Update speaker_genders dict với canonical chars cho downstream
                     speaker_genders.update(fusion.char_genders)
 
+                    # Persist CHAR_XX gender confidence vào speaker_gender_confs
+                    # → cross-validate logic (sau translate) đọc được, biết
+                    # confidence của face CNN để decide LLM override hay không.
+                    char_gender_confs_for_cv: dict[str, float] = {}
+                    for char_id in fusion.char_genders:
+                        try:
+                            face_int = int(char_id.replace("CHAR_", ""))
+                            char_gender_confs_for_cv[char_id] = (
+                                face_result.face_gender_confs.get(face_int, 0.5)
+                            )
+                        except (ValueError, AttributeError):
+                            char_gender_confs_for_cv[char_id] = 0.5
+                    existing_confs = project.get("speaker_gender_confs") or {}
+                    existing_confs.update(char_gender_confs_for_cv)
+                    project["speaker_gender_confs"] = existing_confs
+
                     # Persist stats vào IN-MEMORY project (end-of-function save once)
                     face_genders_str = {
                         f"FACE_{k:02d}": v
@@ -2780,6 +2800,8 @@ def translate_project(
                     continue
 
                 # Disagree — quyết định theo pipeline confidence + chất lượng evidence:
+                # • pipeline_g = "unknown"/"unsure" → LLM THẮNG TUYỆT ĐỐI
+                #   (face CNN bias với face Á trẻ hay mark "unknown" sai)
                 # • conf < 0.70 → audio yếu → LLM thắng (kể cả không evidence)
                 # • 0.70 ≤ conf < 0.90 → ambiguous → cần LLM evidence ≥ 5 chars
                 # • 0.90 ≤ conf < 0.98 → audio mạnh nhưng có thể bị nhiễu (cluster
@@ -2795,15 +2817,21 @@ def translate_project(
                     "self-ref" in evidence.lower()
                     or "diarization" in evidence.lower()
                     or "merge" in evidence.lower()
-                    or ev_len > 30
+                    or ev_len > LLM_OVERRIDE_EVIDENCE_STRONG_CHARS
                 ))
-                if pipeline_conf < 0.70:
+                # ABSOLUTE PRIORITY: pipeline unknown → LLM thắng vô điều kiện
+                # (CNN gender bias với face Á trẻ → hay vote "unknown" → cần
+                # text context override mạnh).
+                if pipeline_g in ("unknown", "unsure", None, ""):
+                    should_override = True
+                    reason = f"pipeline_g={pipeline_g} → LLM thắng tuyệt đối"
+                elif pipeline_conf < LLM_OVERRIDE_PIPELINE_LOW:
                     should_override = True
                     reason = f"pipeline_conf={pipeline_conf:.2f} thấp → LLM thắng"
-                elif pipeline_conf < 0.90 and ev_len > 5:
+                elif pipeline_conf < LLM_OVERRIDE_PIPELINE_MID and ev_len > LLM_OVERRIDE_EVIDENCE_MIN_CHARS:
                     should_override = True
                     reason = f"pipeline_conf={pipeline_conf:.2f} ambiguous + LLM có evidence"
-                elif pipeline_conf < 0.98 and ev_strong:
+                elif pipeline_conf < LLM_OVERRIDE_PIPELINE_HIGH and ev_strong:
                     should_override = True
                     reason = f"pipeline_conf={pipeline_conf:.2f} cao nhưng LLM evidence MẠNH ({ev_len} chars)"
                 else:

@@ -32,6 +32,11 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass
 from typing import Optional
 
+from app.config import (
+    FACE_USE_MIN_CONFIDENCE,
+    FUSION_COOCCURRENCE_MIN,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -52,7 +57,7 @@ def _segment_overlap(a_start: float, a_end: float,
 
 def _cross_match_audio_face(
     segments: list[dict],
-    min_cooccurrence: int = 2,
+    min_cooccurrence: int = FUSION_COOCCURRENCE_MIN,
 ) -> dict[str, int]:
     """Cross-match audio_speaker (pyannote) ↔ face_cluster (vision).
 
@@ -103,7 +108,7 @@ def fuse_speakers(
     face_genders: dict[int, str],
     face_gender_confs: dict[int, float],
     audio_speaker_genders: Optional[dict[str, str]] = None,
-    face_conf_threshold: float = 0.6,
+    face_conf_threshold: float = FACE_USE_MIN_CONFIDENCE,
 ) -> FusionResult:
     """Multi-modal fusion: quyết định canonical CHAR_XX per segment.
 
@@ -124,7 +129,9 @@ def fuse_speakers(
     audio_speaker_genders = audio_speaker_genders or {}
 
     # ── Step 1: cross-match audio ↔ face ──
-    audio_to_face = _cross_match_audio_face(segments, min_cooccurrence=2)
+    audio_to_face = _cross_match_audio_face(
+        segments, min_cooccurrence=FUSION_COOCCURRENCE_MIN,
+    )
 
     # ── Step 2: build canonical CHAR_XX namespace ──
     # Mỗi face_cluster_int = 1 CHAR. Audio_speakers không match → CHAR riêng.

@@ -40,6 +40,13 @@ from typing import Optional
 
 import numpy as np
 
+from app.config import (
+    FACE_IOU_TRACK_MIN,
+    FACE_REID_COSINE_MIN,
+    FACE_USE_MIN_CONFIDENCE,
+    FACE_GENDER_OVERRIDE_MIN,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -331,7 +338,7 @@ def _reidentify_tracks(
     tracks: list,
     video_cap,
     video_fps: float,
-    similarity_threshold: float = 0.45,
+    similarity_threshold: float = FACE_REID_COSINE_MIN,
     max_samples_per_track: int = 3,
 ) -> dict[int, int]:
     """Cluster face tracks bằng insightface embedding → merge cùng nhân vật.
@@ -492,9 +499,10 @@ def detect_speakers_by_face(
     )
 
     # Track faces toàn pipeline — IoU matching, simple.
+    # IOU_MATCH_THRESHOLD imported từ config (FACE_IOU_TRACK_MIN) — Phase 1 refactor.
     tracks: list[FaceTrack] = []
     next_track_id = 0
-    IOU_MATCH_THRESHOLD = 0.30
+    IOU_MATCH_THRESHOLD = FACE_IOU_TRACK_MIN
 
     def _match_or_create_track(det: FaceDetection, frame_t: float) -> int:
         nonlocal next_track_id
@@ -632,7 +640,7 @@ def detect_speakers_by_face(
     active_tracks_pre = [tr for tr in tracks if len(tr.detections) >= 2]
     track_to_cluster = _reidentify_tracks(
         active_tracks_pre, cap, video_fps,
-        similarity_threshold=0.45,
+        similarity_threshold=FACE_REID_COSINE_MIN,
     )
     cap.release()
     face_mesh.close()
@@ -746,8 +754,8 @@ def detect_speakers_by_face(
 def apply_face_speakers_to_segments(
     segments: list[dict],
     result: FaceSpeakerResult,
-    min_confidence: float = 0.6,
-    min_gender_confidence: float = 0.65,
+    min_confidence: float = FACE_USE_MIN_CONFIDENCE,
+    min_gender_confidence: float = FACE_GENDER_OVERRIDE_MIN,
     override_audio: bool = True,
 ) -> int:
     """Apply face_id từ FaceSpeakerResult vào segments[i]['speaker'] in-place.

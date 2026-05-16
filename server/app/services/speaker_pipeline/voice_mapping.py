@@ -18,6 +18,8 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
+from app.config import GENDER_VOICE_MATCH_MIN
+
 logger = logging.getLogger(__name__)
 
 
@@ -28,7 +30,7 @@ def build_speaker_voice_map(
     default_voice: Optional[str] = None,
     speaker_genders: Optional[dict[str, str]] = None,
     gender_confidences: Optional[dict[str, float]] = None,
-    confidence_threshold: float = 0.7,
+    confidence_threshold: float = GENDER_VOICE_MATCH_MIN,
 ) -> dict[str, str]:
     """Map mỗi stable speaker_id → voice_id.
 
