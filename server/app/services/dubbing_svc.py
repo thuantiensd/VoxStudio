@@ -2271,6 +2271,93 @@ def transcribe_project(project_id: str) -> dict:
             logger.warning("speaker_pipeline failed (%s) — segments without speaker info", e)
             logger.exception("speaker_pipeline full traceback:")
 
+    # ── PHASE 1: FACE DETECTION SPEAKER MAPPING (HeyGen-style) ──
+    # Override pyannote/whisperx speaker_id bằng face_id từ video — ground
+    # truth chính xác hơn nhiều cho video có người nói rõ trên screen.
+    # Skip nếu: voice_count=1 (không cần phân biệt), video file không có
+    # (audio-only), hoặc env disable.
+    video_path = _project_dir(project_id) / "original.mp4"
+    skip_face = (
+        os.environ.get("VOX_SKIP_FACE_SPEAKER", "").lower() == "true"
+        or voice_count_meta == 1
+        or not video_path.exists()
+    )
+    if not skip_face:
+        try:
+            from app.services.face_speaker_svc import (
+                detect_speakers_by_face, apply_face_speakers_to_segments,
+            )
+            logger.info("Running face_speaker_svc — video=%s, segments=%d",
+                         video_path.name, len(merged))
+            # Build temp seg list with index để face svc tham chiếu
+            for i, m in enumerate(merged):
+                m["index"] = i
+            face_result = detect_speakers_by_face(
+                str(video_path),
+                merged,
+                fps_sample=4.0,
+                max_faces=max(6, voice_count_meta),
+            )
+            if face_result and face_result.face_count > 0:
+                n_updated = apply_face_speakers_to_segments(
+                    merged, face_result,
+                    min_confidence=0.6,
+                    override_audio=True,
+                )
+                logger.info(
+                    "face_speaker: %d/%d segments override speaker_id, "
+                    "%d face detected · stats=%s",
+                    n_updated, len(merged), face_result.face_count,
+                    face_result.stats,
+                )
+                # Update speaker_genders dict từ face genders để voice_map dùng
+                for face_id_int, g in face_result.face_genders.items():
+                    if g != "unknown":
+                        face_spk = f"FACE_{face_id_int:02d}"
+                        speaker_genders[face_spk] = g
+                # Persist face info vào project meta để UI hiển thị
+                try:
+                    project_meta_face = _load_meta(project_id) or {}
+                    project_meta_face["face_speaker_stats"] = face_result.stats
+                    project_meta_face["face_speaker_genders"] = {
+                        f"FACE_{k:02d}": v
+                        for k, v in face_result.face_genders.items()
+                    }
+                    # Rebuild voice_map với face IDs (override pyannote voice_map)
+                    from app.services.speaker_pipeline import build_speaker_voice_map
+                    face_speakers = sorted({
+                        f"FACE_{k:02d}" for k in face_result.face_genders.keys()
+                    })
+                    voice_slots_face = project_meta_face.get("voice_slots") or []
+                    user_over_face = project_meta_face.get("speaker_voice_map") or {}
+                    face_voice_map = build_speaker_voice_map(
+                        speakers=face_speakers,
+                        voice_slots=voice_slots_face,
+                        user_overrides=user_over_face,
+                        speaker_genders={
+                            f"FACE_{k:02d}": v
+                            for k, v in face_result.face_genders.items()
+                        },
+                    )
+                    project_meta_face["speaker_voice_map"] = face_voice_map
+                    _save_meta(project_meta_face)
+                    logger.info("Face voice_map rebuilt: %s", face_voice_map)
+                except Exception as e2:
+                    logger.warning("Persist face stats failed: %s", e2)
+            else:
+                logger.info(
+                    "face_speaker: 0 face detected → giữ pyannote/whisperx speaker",
+                )
+        except ImportError as e:
+            logger.info(
+                "face_speaker disabled — mediapipe/opencv chưa cài: %s. "
+                "pip install mediapipe opencv-python-headless để bật.",
+                e,
+            )
+        except Exception as e:
+            logger.warning("face_speaker failed (%s) — fallback pyannote speaker", e)
+            logger.exception("face_speaker full traceback:")
+
     segments = []
     for i, seg in enumerate(merged):
         segments.append({

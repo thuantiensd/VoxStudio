@@ -17,6 +17,11 @@ pyloudnorm
 resemblyzer
 silero-vad
 scikit-learn
+# Face detection cho speaker mapping chính xác (Phase 1 HeyGen-style).
+# mediapipe FaceMesh: 468 landmarks/face, lip-activity scoring để detect
+# người nào đang nói trong frame → ground truth speaker ID.
+mediapipe
+opencv-python-headless    # video frame I/O cho face_speaker_svc
 yt-dlp[default,curl-cffi]
 douyin-tiktok-scraper
 httpx<0.28  # Pin để tương thích với Douyin_TikTok_Download_API khi tích hợp sidecar
