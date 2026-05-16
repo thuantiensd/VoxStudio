@@ -23,6 +23,16 @@ VENV="$WS/.venv"
 LOG="$WS/voxstudio.log"
 REQ_HASH_FILE="$WS/.requirements_hash"
 
+# ── Cache directories trên persistent /workspace ──
+# Mọi HF model + torch hub + faster-whisper sẽ load từ /workspace/hf_cache
+# thay vì re-download từ HuggingFace mỗi lần pod khởi động.
+# Bắt buộc export TRƯỚC khi uvicorn fork — child process kế thừa env.
+export HF_HOME="$WS/hf_cache"
+export HUGGINGFACE_HUB_CACHE="$WS/hf_cache/hub"
+export TRANSFORMERS_CACHE="$WS/hf_cache"
+export TORCH_HOME="$WS/torch_cache"
+mkdir -p "$HF_HOME" "$HUGGINGFACE_HUB_CACHE" "$TORCH_HOME"
+
 NO_PULL=0
 for arg in "$@"; do
     case "$arg" in
