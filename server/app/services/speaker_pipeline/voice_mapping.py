@@ -58,6 +58,17 @@ def build_speaker_voice_map(
     result: dict[str, str] = {}
     used_slots: set[int] = set()
 
+    # Slot gender convention: slot 0 = nam, slot 1 = nữ, slot 2+ = any.
+    # Khai báo ngoài Pass 2 để Pass 3 access được (cho gender match reuse).
+    slot_genders: list[str] = []
+    for i in range(n_slots):
+        if i == 0:
+            slot_genders.append("male")
+        elif i == 1:
+            slot_genders.append("female")
+        else:
+            slot_genders.append("any")
+
     # Pass 1: explicit user overrides
     for spk in speakers:
         if spk in overrides and overrides[spk]:
@@ -67,15 +78,6 @@ def build_speaker_voice_map(
     # ≥ threshold. Confidence thấp → skip pass này, để Pass 3 cycle slot
     # (an toàn hơn guess sai).
     if genders:
-        slot_genders = []
-        for i in range(n_slots):
-            if i == 0:
-                slot_genders.append("male")
-            elif i == 1:
-                slot_genders.append("female")
-            else:
-                slot_genders.append("any")
-
         for spk in speakers:
             if spk in result:
                 continue
@@ -109,13 +111,54 @@ def build_speaker_voice_map(
                     spk, g, spk_conf,
                 )
 
-    # Pass 3: speaker còn sót → ưu tiên slot CHƯA DÙNG, sau đó cycle.
+    # Pass 3: speaker còn sót — ƯU TIÊN GENDER MATCH ngay cả khi slot đã
+    # dùng. Nguyên tắc: thà 2 char cùng gender share voice slot, còn hơn
+    # đẩy char vào slot SAI gender.
+    #
+    # Thứ tự ưu tiên:
+    #   3a. Unused slot matching gender (rare — Pass 2 đã ăn hết)
+    #   3b. **Used slot matching gender (REUSE)** ← MỚI: tránh wrong gender
+    #   3c. Unused slot any gender
+    #   3d. Cycle qua tất cả slot (last resort)
     for i, spk in enumerate(speakers):
         if spk in result:
             continue
-        # 3a. Tìm slot chưa dùng (BẤT KỲ index, không chỉ "any") + non-empty
-        # → tránh dồn 2 speaker vào cùng 1 voice khi vẫn còn slot trống.
+        g = genders.get(spk, "unknown")
+
+        # 3a. Unused slot match gender
         assigned = False
+        if g in ("male", "female"):
+            for j, sg in enumerate(slot_genders):
+                if j in used_slots or sg != g:
+                    continue
+                if j < n_slots and voice_slots[j]:
+                    result[spk] = voice_slots[j]
+                    used_slots.add(j)
+                    assigned = True
+                    break
+        if assigned:
+            continue
+
+        # 3b. USED slot match gender (REUSE) — quan trọng để tránh wrong gender.
+        # Vd: 3 chars [female, male, female] + 2 slots [nam, nữ] → char_02
+        # female sẽ reuse slot 1 (nữ) thay vì rơi sang slot 0 (nam).
+        if g in ("male", "female"):
+            for j, sg in enumerate(slot_genders):
+                if sg != g:
+                    continue
+                if j < n_slots and voice_slots[j]:
+                    result[spk] = voice_slots[j]
+                    assigned = True
+                    logger.info(
+                        "Speaker %s (gender=%s) reuse slot %d (cùng gender) "
+                        "thay vì cycle wrong gender",
+                        spk, g, j,
+                    )
+                    break
+        if assigned:
+            continue
+
+        # 3c. Unused slot bất kỳ (gender không match, nhưng còn slot trống)
         for j in range(n_slots):
             if j in used_slots:
                 continue
@@ -123,10 +166,16 @@ def build_speaker_voice_map(
                 result[spk] = voice_slots[j]
                 used_slots.add(j)
                 assigned = True
+                logger.warning(
+                    "Speaker %s gender=%s không có slot match → dùng slot %d "
+                    "(wrong gender — voice slots có thể thiếu)",
+                    spk, g, j,
+                )
                 break
         if assigned:
             continue
-        # 3b. Hết slot trống → cycle qua tất cả slot non-empty (chấp nhận trùng)
+
+        # 3d. Last resort — cycle qua tất cả slot non-empty
         non_empty = [v for v in voice_slots if v]
         if non_empty:
             result[spk] = non_empty[i % len(non_empty)]
