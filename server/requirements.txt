@@ -17,6 +17,14 @@ pyloudnorm
 resemblyzer
 silero-vad
 scikit-learn
+# Transitive dep pins — chặn pip-25+ resolver search hàng trăm version
+# combinations gây "resolution-too-deep". Các package này là dep của
+# pyannote.audio + librosa (qua resemblyzer) — pin TRỰC TIẾP để pip không
+# phải tự resolve.
+numba==0.65.1
+llvmlite==0.47.0
+opentelemetry-api==1.34.0
+opentelemetry-sdk==1.34.0
 # Face detection cho speaker mapping chính xác (Phase 1 HeyGen-style).
 # mediapipe FaceMesh: 468 landmarks/face, lip-activity scoring → ground
 # truth speaker ID. Pin 0.10.21 vì build mới đôi khi thiếu legacy
