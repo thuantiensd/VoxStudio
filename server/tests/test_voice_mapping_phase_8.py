@@ -377,6 +377,25 @@ def test_risk_2_majority_by_char_count_not_line_count():
           f"female wins (3 chars > 1)")
 
 
+def test_phase_12_multi_voice_2_unknown_chars_distinct_voices():
+    """Phase 12 fix: voice_count=2 + 2 chars unknown gender + 2 slots gendered.
+    Expected: 2 chars → 2 distinct voices (NOT collapse vào cùng slot[0])."""
+    chars = _make_chars([
+        ("CHAR_000", "unknown", 50, 100.0),
+        ("CHAR_001", "unknown", 40, 80.0),
+    ])
+    slots = _slots(("nam_long_vu", "male"), ("nu_co_ba", "female"))
+    vm, warnings = build_character_voice_map(
+        chars, slots, mode="multi_voice",  # voice_count=2 → multi_voice
+    )
+    # Both chars should get DIFFERENT voices (slot reservation)
+    voices_assigned = set(vm.values())
+    assert len(voices_assigned) == 2, \
+        f"Phase 12 fix: 2 chars phải có 2 voices, got {vm}"
+    assert vm["CHAR_000"] != vm["CHAR_001"]
+    print(f"✓ test_phase_12_multi_voice_2_unknown_chars_distinct_voices — {vm}")
+
+
 def test_risk_3_fallback_priority_explicit_over_majority():
     """Phase 8 risk #3: fallback_voice_id PHẢI ƯU TIÊN CAO HƠN majority.
     Case: provide fallback + majority cũng có → fallback thắng."""
@@ -435,6 +454,7 @@ def main():
         test_risk_1_tie_breaker_deterministic,
         test_risk_2_majority_by_char_count_not_line_count,
         test_risk_3_fallback_priority_explicit_over_majority,
+        test_phase_12_multi_voice_2_unknown_chars_distinct_voices,
         test_legacy_build_speaker_voice_map_still_works,
     ]
     passed = 0

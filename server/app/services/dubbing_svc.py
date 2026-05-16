@@ -2759,10 +2759,13 @@ def transcribe_project(project_id: str) -> dict:
                     voice_count_final, effective_voice_count, mode_voice_count,
                 )
 
+            # Phase 12 fix (Phase 8 UX bug): voice_count >= 2 → multi_voice mode.
+            # 2_voice gender-first không phù hợp UX khi user pick N slot khác nhau —
+            # nếu chars unknown gender, mode 2_voice fallback đẩy cả 2 vào cùng 1
+            # slot. Multi_voice reserve slot riêng cho top N chars → đảm bảo
+            # N voices distinct.
             if mode_voice_count <= 1:
                 vm_mode = "1_voice"
-            elif mode_voice_count == 2:
-                vm_mode = "2_voice"
             else:
                 vm_mode = "multi_voice"
 
@@ -2781,6 +2784,27 @@ def transcribe_project(project_id: str) -> dict:
                 project["voice_map_warnings"] = [
                     w.model_dump() for w in vm_warnings
                 ]
+                # Phase 12 fix: re-build character_registry_summary với voice_profile_id
+                # đã mutate xong (Phase 7a save summary TRƯỚC Phase 8 → summary cũ
+                # thiếu voice_profile_id). qa_report cần data này.
+                project["character_registry_summary"] = {
+                    "characters": [
+                        {
+                            "character_id": c.character_id,
+                            "source_speakers": c.source_speakers,
+                            "gender": c.gender,
+                            "gender_confidence": c.gender_confidence,
+                            "voice_profile_id": c.voice_profile_id,
+                            "line_count": c.line_count,
+                            "merge_confidence": c.merge_confidence,
+                            "review_required": c.review_required,
+                        }
+                        for c in registry.characters.values()
+                    ],
+                    "possible_merges": [
+                        pm.model_dump() for pm in registry.possible_merges
+                    ],
+                }
                 logger.info(
                     "Phase 8 character-aware voice_map (mode=%s, CHAR_XXX, "
                     "%d slots, %d warnings): %s",

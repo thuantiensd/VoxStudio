@@ -357,8 +357,14 @@ def _fallback_resolve(
             ),
         )
 
-    # 2. Unknown + is_top: prefer unused "any" slot (gives top char individual voice)
+    # 2. Unknown + is_top: prefer ANY unused slot for distinct voice (Phase 12 fix).
+    # Multi_voice intent = top N chars get N distinct voices. Khi user pick N
+    # gendered slots không có "any", thà dùng slot wrong-gender còn hơn collapse
+    # 2 chars vào cùng 1 slot. Order:
+    #   2a. unused "any" slot (best fit)
+    #   2b. unused ANY-gender slot (distinct voice > correct gender for unknown)
     if char_gender == "unknown" and is_top_priority and used_slots is not None:
+        # 2a. Try unused "any" slot first
         for idx, slot in enumerate(voice_slots):
             if slot.gender == "any" and idx not in used_slots:
                 used_slots.add(idx)
@@ -370,6 +376,21 @@ def _fallback_resolve(
                         decided_voice=slot.voice_id,
                         reason=f"{reason_prefix}, no fallback → unused 'any' "
                                f"slot (top-priority)",
+                    ),
+                )
+        # 2b. No unused "any" → try ANY unused slot (any gender) for distinct voice.
+        for idx, slot in enumerate(voice_slots):
+            if idx not in used_slots:
+                used_slots.add(idx)
+                return (
+                    slot.voice_id,
+                    VoiceMapWarning(
+                        character_id=char_id,
+                        issue="unknown_gender_no_fallback",
+                        decided_voice=slot.voice_id,
+                        reason=f"{reason_prefix}, no fallback, no 'any' slot → "
+                               f"unused gendered slot for distinct voice "
+                               f"(top-priority, slot.gender={slot.gender})",
                     ),
                 )
 
