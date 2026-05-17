@@ -2769,7 +2769,17 @@ def transcribe_project(project_id: str) -> dict:
             else:
                 vm_mode = "multi_voice"
 
-            fallback_vid = project.get("voice_id") or None  # default voice user chose
+            # Phase 12 fix (UX bug): chỉ pass fallback_vid khi 1_voice mode.
+            # Trong multi_voice/2_voice, UI vẫn auto-set project["voice_id"] =
+            # 1 trong các slots → _fallback_resolve rule #1 (fallback wins
+            # tuyệt đối) → COLLAPSE tất cả chars unknown gender vào fallback
+            # voice. Bug user complain "1 giọng cho tất cả nhân vật".
+            # Multi-voice intent: dùng N voice slots distinct → KHÔNG cần
+            # fallback override Phase 12 slot reservation logic.
+            if vm_mode == "1_voice":
+                fallback_vid = project.get("voice_id") or None
+            else:
+                fallback_vid = None  # multi/2-voice: let Phase 12 slot logic decide
 
             if voice_slot_objs:
                 voice_map_final, vm_warnings = build_character_voice_map(
