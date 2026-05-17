@@ -2979,6 +2979,21 @@ def translate_project(
         from app.services import glossary_svc
         glossary = glossary_svc.parse_glossary(project.get("glossary") or "")
 
+    # Phase 12 — Prepend character_registry_block vào topic_hint cho Path B
+    # (BYOK cloud_translate_svc). Cùng pattern wire như Path A đã có.
+    # Đảm bảo Gemini/OpenAI/Claude/Qwen LLM thấy CHAR_XXX + vocative addressee
+    # rules + locked character preservation.
+    _reg_block_for_byok = _build_registry_block_for_translate(project)
+    if _reg_block_for_byok:
+        if topic_hint:
+            topic_hint = _reg_block_for_byok + "\n\n" + topic_hint
+        else:
+            topic_hint = _reg_block_for_byok
+        logger.info(
+            "Phase 12 BYOK: character_registry_block prepended (len=%d chars)",
+            len(_reg_block_for_byok),
+        )
+
     # Auto-detect genre nếu chưa có (user-explicit luôn ưu tiên).
     # Detect 1 lần từ tổng original_text rồi persist vào meta để LLM prompt
     # các batch sau dùng nhất quán + UI hiển thị genre cho user verify.
@@ -3047,35 +3062,14 @@ def translate_project(
         else:
             logger.info("Visual context: dùng cached từ trước")
 
-    # ── Path A: Gemini — server-side context-aware (env key) ──
-    # Giữ path cũ để backward-compat khi user KHÔNG truyền api_key (admin
-    # set env GEMINI_API_KEY). Nếu user truyền key → đi path BYOK chung.
-    if eng == "gemini" and not api_key and gemini_translate_svc.is_available():
-        logger.info("Translating %d segments with Gemini (env key, context-aware)…",
-                    len(project["segments"]))
-        # Phase 11 wire (Phase 10 Risk 1 fix): compute character_registry_block
-        # từ project meta (persisted ở transcribe step) → pass vào Gemini engine.
-        # LLM sẽ thấy CHAR_XXX + gender rules trước batch.
-        _reg_block = _build_registry_block_for_translate(project)
-        results = gemini_translate_svc.translate_segments(
-            project["segments"], target_lang, source_lang,
-            topic_hint=topic_hint, glossary=glossary,
-            speaker_genders=project.get("speaker_genders") or {},
-            film_genre=project.get("film_genre"),
-            visual_context=project.get("visual_context") or None,
-            character_registry_block=_reg_block,
+    # Phase 12 — Gemini env path REMOVED. BYOK only (user paste API key UI).
+    # User spec: "BYOK chỉ dùng cái này bỏ hắn cái kia, nếu không có key thì
+    # không cho chạy, báo phải nhập key."
+    if eng == "gemini" and not api_key:
+        raise ValueError(
+            "❌ Gemini cần API key. Vào UI Settings → AI & API keys → "
+            "paste Gemini API key (lấy free tại https://aistudio.google.com/apikey)."
         )
-        for seg, result in zip(project["segments"], results):
-            if result.get("translated_text"):
-                seg["translated_text"] = result["translated_text"]
-                seg["speech_text"] = result["speech_text"] or result["translated_text"]
-                seg["emotion"] = result.get("emotion", "neutral")
-        _apply_translation_post_fixes(project)
-        method = "Gemini (env)"
-        _save_meta(project)
-        logger.info("Translated %d segs → %s (%s)",
-                    len(project["segments"]), target_lang, method)
-        return project
 
     # ── Path B: Qwen local ──
     if eng == "qwen":
