@@ -759,74 +759,130 @@ def _speech_rate_for(target_lang: str | None) -> float:
     return SPEECH_CHARS_PER_SEC.get(target_lang.lower().strip(), 14.0)
 
 
-def _pick_omni_voice_id_for_segment(seg: dict, project: dict) -> str | None:
-    """Chọn voice_id cho OmniVoice TTS theo speaker (multi-voice support).
+def _resolve_voice_by_character_id(
+    character_id: str | None,
+    project: dict,
+) -> tuple[str | None, str | None]:
+    """Phase 12 STRICT — character_id-only voice resolution.
 
-    Priority (NO gender — production spec compliant):
-      1. seg.voice_id (override per-segment do user edit)
-      2. project.speaker_voice_map[speaker_id] — từ analyze-speakers pipeline
-      3. voice_slots cycle theo thứ tự xuất hiện speaker
-      4. project.voice_id (legacy single-voice setting)
-      5. None → caller fallback (worker xử lý mặc định)
+    Rule 1: TTS chỉ dùng character_id → registry → voice_profile_id.
+    Rule 2: missing character_id hoặc voice_profile_id null → fallback voice
+            + log (TUYỆT ĐỐI KHÔNG quay lại raw_speaker / speaker_gender).
+
+    Fallback tiers (no raw_speaker anywhere):
+      Tier 1: voice_map[character_id] direct hit (no fallback).
+      Tier 2: character_id None → first non-empty voice_slot, log "missing_char".
+      Tier 3: character has profile + gender → gender-matched slot (slot 0=male,
+              slot 1=female convention), log "voice_profile_null_gender_fallback".
+      Tier 4: no gender or no profile → first non-empty slot, log "default_slot".
+      Tier 5: nothing available → (None, "no_voice_available").
+
+    Returns: (voice_id, fallback_reason). fallback_reason=None nếu direct hit.
     """
-    # 1. Per-segment override
+    voice_map = project.get("speaker_voice_map") or {}
+    voice_slots = project.get("voice_slots") or []
+    project_voice_id = project.get("voice_id")
+
+    # Tier 1: STRICT character_id lookup
+    if character_id and character_id in voice_map:
+        v = voice_map[character_id]
+        if v:
+            return (v, None)
+
+    # Tier 2: missing character_id
+    if not character_id:
+        for slot_v in voice_slots:
+            if slot_v:
+                return (slot_v, "missing_character_id")
+        if project_voice_id:
+            return (project_voice_id, "missing_character_id_use_project_default")
+        return (None, "missing_character_id_no_fallback")
+
+    # Tier 3: character_id present but voice_map missing/null → gender fallback
+    char_summary = (project.get("character_registry_summary") or {}).get("characters") or []
+    profile = next(
+        (c for c in char_summary if c.get("character_id") == character_id),
+        None,
+    )
+    if profile:
+        gender = profile.get("gender")
+        # Slot convention: slot 0=male, slot 1=female (hardcoded UI assumption)
+        if gender == "male" and len(voice_slots) >= 1 and voice_slots[0]:
+            return (voice_slots[0], "voice_profile_null_gender_male_fallback")
+        if gender == "female" and len(voice_slots) >= 2 and voice_slots[1]:
+            return (voice_slots[1], "voice_profile_null_gender_female_fallback")
+
+    # Tier 4: no gender match → first non-empty slot
+    for slot_v in voice_slots:
+        if slot_v:
+            return (slot_v, "voice_profile_null_default_slot_fallback")
+    if project_voice_id:
+        return (project_voice_id, "voice_profile_null_use_project_default")
+
+    # Tier 5: nothing
+    return (None, "no_voice_available")
+
+
+def _log_voice_fallback(
+    project: dict,
+    seg: dict,
+    character_id: str | None,
+    voice_id: str | None,
+    reason: str,
+) -> None:
+    """Log voice fallback / warning vào project meta cho qa_report.
+
+    Phase 12 spec — qa_report.voice_warnings format:
+      {
+        "segment_id": ...,
+        "character_id": ...,
+        "issue": <reason>,
+        "fallback_used": <voice_id>,
+      }
+    """
+    warnings = project.setdefault("voice_warnings", [])
+    warnings.append({
+        "segment_id": seg.get("index", seg.get("id", "?")),
+        "character_id": character_id,
+        "issue": reason,
+        "fallback_used": voice_id or "(none)",
+    })
+    # Track segments missing character_id cho uncertain_segments
+    if not character_id:
+        uncert = project.setdefault("uncertain_segments_no_char", [])
+        seg_key = seg.get("index", seg.get("id", "?"))
+        if seg_key not in uncert:
+            uncert.append(seg_key)
+    logger.warning(
+        "voice_fallback: seg=%s char=%s reason=%s → voice=%s",
+        seg.get("index", "?"), character_id, reason, voice_id,
+    )
+
+
+def _pick_omni_voice_id_for_segment(seg: dict, project: dict) -> str | None:
+    """Phase 12 STRICT — voice_id chỉ từ character_id.
+
+    Priority:
+      1. seg.voice_id (per-segment user explicit override — OK per spec rule 1)
+      2. _resolve_voice_by_character_id (STRICT character_id → registry)
+
+    TUYỆT ĐỐI KHÔNG dùng:
+      - seg["speaker"] (raw SPEAKER_XX / FACE_XX) làm voice_map key
+      - seg["speaker_gender"] để pick voice
+      - cycle qua voice_slots theo raw_speaker order
+      - project["voice_id"] làm fallback khi voice_count > 1 (multi-voice)
+    """
+    # 1. Per-segment override (user explicit choice qua UI per-segment voice picker)
     seg_voice = seg.get("voice_id")
     if seg_voice:
         return seg_voice
 
-    # Phase 7b: voice lookup key — prefer character_id (CHAR_XXX từ registry,
-    # single source of truth) qua raw speaker (SPEAKER_XX / FACE_XX legacy).
-    # speaker_voice_map có thể keyed theo cả 2 namespace tuỳ pipeline path:
-    #   - keyspace = "character_id" (audio+face với registry)
-    #   - keyspace = "raw_face_speaker" hoặc "raw_speaker" (fallback)
-    # Dùng character_id trước; fallback raw speaker nếu chưa map.
+    # 2. STRICT character_id resolution
     character_id = seg.get("character_id")
-    raw_speaker_id = seg.get("speaker")
-    speaker_id = character_id or raw_speaker_id  # lookup key prefer character_id
-    voice_slots = project.get("voice_slots") or []
-    voice_count = int(project.get("voice_count") or 1)
-
-    # 2. Speaker voice map (character_registry / fallback raw result)
-    speaker_voice_map = project.get("speaker_voice_map") or {}
-    # Try character_id first, then raw speaker — defensive cho old project meta.
-    for _key in (character_id, raw_speaker_id):
-        if _key and _key in speaker_voice_map:
-            v = speaker_voice_map[_key]
-            if v:
-                return v
-
-    # 3. Multi-voice mode: cycle qua voice_slots theo thứ tự xuất hiện.
-    # Phase 7b — speakers_seen ưu tiên character_id, fallback raw speaker.
-    if voice_count > 1 and voice_slots and speaker_id:
-        cache_key = "_omni_slot_cache_v2"
-        if cache_key not in project:
-            speakers_seen: list[str] = []
-            seen_set: set[str] = set()
-            for s in project.get("segments", []) or []:
-                spk = s.get("character_id") or s.get("speaker")
-                if spk and spk not in seen_set:
-                    speakers_seen.append(spk)
-                    seen_set.add(spk)
-            slot_assignment: dict[str, int] = {}
-            for i, spk in enumerate(speakers_seen):
-                slot_assignment[spk] = i % voice_count
-            project[cache_key] = slot_assignment
-        slot_map = project[cache_key]
-        if speaker_id in slot_map:
-            slot_idx = slot_map[speaker_id]
-            if slot_idx < len(voice_slots) and voice_slots[slot_idx]:
-                return voice_slots[slot_idx]
-
-    # 4. STRICT FALLBACK: voice_count > 1 + có voice_slots → CHỈ dùng giọng
-    # user đã chọn. Khi speaker_id = None hoặc không match map → slot 0.
-    # KHÔNG fallback về project.voice_id (giọng ngoài N slot user chọn).
-    if voice_count > 1 and voice_slots:
-        for slot_v in voice_slots[:voice_count]:
-            if slot_v:
-                return slot_v
-
-    # 5. Legacy single-voice (voice_count == 1 hoặc không có slot nào)
-    return project.get("voice_id") or None
+    voice_id, fallback_reason = _resolve_voice_by_character_id(character_id, project)
+    if fallback_reason:
+        _log_voice_fallback(project, seg, character_id, voice_id, fallback_reason)
+    return voice_id
 
 
 def _build_speaker_voice_assignments(project: dict, voice_slots: list, voice_count: int) -> dict:
@@ -889,96 +945,47 @@ def _build_speaker_voice_assignments(project: dict, voice_slots: list, voice_cou
 
 
 def _pick_edge_voice_for_segment(seg: dict, project: dict) -> str | None:
-    """Choose an Edge TTS voice for this segment.
+    """Phase 12 STRICT — Edge voice chỉ từ character_id.
 
     Priority:
-      1. speaker_voice_map[speaker_id] — explicit mapping từ analyze-speakers.
-         CHỈ apply khi voice_count > 1 (multi-voice mode). Khi user chọn 1
-         giọng, speaker_voice_map cũ từ analyze trước đó KHÔNG được dùng —
-         tránh bug "chọn 1 giọng vẫn ra 2 người đọc".
-      2. voice_count > 1 + voice_slots: cycle qua slots theo thứ tự xuất hiện
-         speaker (đảm bảo mỗi speaker có voice riêng).
-      3. **Multi-voice STRICT FALLBACK**: nếu voice_count > 1 và voice_slots
-         có giá trị (user đã chọn), khi seg.speaker = None hoặc không match
-         map → dùng slot 0 (KHÔNG ra ngoài giọng user đã chọn). Đây là rule
-         "chọn 2 giọng thì chỉ đọc 2 giọng đấy thôi".
-      4. Single-voice override `edge_voice`.
-      5. Single-voice fallback: voice_slots[0] khi user đã chọn 1 slot
-         nhưng chưa set `edge_voice` (UI mode mới).
-      6. Default voice cho target_language (chỉ khi single-voice mode).
-      7. None.
+      1. seg.voice_id (per-segment user override)
+      2. project["edge_voice"] (single-voice mode legacy field)
+      3. _resolve_voice_by_character_id (STRICT character_id → registry)
+      4. Lang-based default (only when voice_count <= 1)
+
+    TUYỆT ĐỐI KHÔNG dùng:
+      - seg["speaker"] làm voice_map key
+      - seg["speaker_gender"] để pick voice
+      - cycle qua voice_slots theo raw_speaker order
     """
-    # Phase 7b: voice lookup key — prefer character_id (CHAR_XXX từ registry,
-    # single source of truth) qua raw speaker (SPEAKER_XX / FACE_XX legacy).
-    character_id = seg.get("character_id")
-    raw_speaker_id = seg.get("speaker")
-    speaker_id = character_id or raw_speaker_id
     voice_count = int(project.get("voice_count") or 1)
     voice_slots = project.get("voice_slots") or []
     target_lang = project.get("target_language")
 
-    # ── Priority 1: speaker_voice_map (CHỈ multi-voice) ──
-    # Khi voice_count == 1: bỏ qua map cũ → đảm bảo 1 giọng duy nhất đọc
-    # mọi segment, bất kể diarization detect được bao nhiêu speaker.
-    speaker_voice_map = project.get("speaker_voice_map") or {}
-    if voice_count > 1:
-        for _key in (character_id, raw_speaker_id):
-            if _key and _key in speaker_voice_map:
-                v = speaker_voice_map[_key]
-                if v:
-                    return v
+    # 1. Per-segment override
+    seg_voice = seg.get("voice_id")
+    if seg_voice:
+        return seg_voice
 
-    # ── Priority 2: Multi-speaker mode without explicit map ──
-    # Build stable speaker_id → slot_idx mapping, cycle qua slots.
-    # Phase 7b — speakers_seen ưu tiên character_id (stable across segments).
-    if voice_count > 1 and speaker_id:
-        cache_key = "_edge_slot_cache_v2"
-        if cache_key not in project:
-            speakers_seen: list[str] = []
-            seen_set: set[str] = set()
-            for s in project.get("segments", []) or []:
-                spk = s.get("character_id") or s.get("speaker")
-                if spk and spk not in seen_set:
-                    speakers_seen.append(spk)
-                    seen_set.add(spk)
-            slot_assignment: dict[str, int] = {}
-            for i, spk in enumerate(speakers_seen):
-                slot_assignment[spk] = i % voice_count
-            project[cache_key] = slot_assignment
-        slot_map = project[cache_key]
-        if speaker_id in slot_map:
-            slot_idx = slot_map[speaker_id]
-            if slot_idx < len(voice_slots) and voice_slots[slot_idx]:
-                return voice_slots[slot_idx]
-
-    # ── Priority 3: Multi-voice STRICT FALLBACK ──
-    # User đã chọn N giọng → kết quả CHỈ được dùng các giọng đó. Khi
-    # seg.speaker = None (Whisper segment không match diarization), thay
-    # vì rơi xuống Lang default (giọng ngoài), pick slot 0 (giọng nam thường
-    # — slot 0 theo UI convention).
-    if voice_count > 1 and voice_slots:
-        for slot_v in voice_slots[:voice_count]:
-            if slot_v:
-                return slot_v
-
-    # ── Priority 4: Single-voice override (legacy edge_voice field) ──
-    if project.get("edge_voice"):
+    # 2. Single-voice legacy override (edge_voice field)
+    if voice_count <= 1 and project.get("edge_voice"):
         return project["edge_voice"]
 
-    # ── Priority 5: Single-voice slot mode ──
-    # UI mode mới: user chọn voice_count=1 + voice_slots[0]=<voice key> thay
-    # vì set edge_voice. Trả slot 0 cho mọi segment.
-    if voice_count <= 1 and voice_slots and voice_slots[0]:
-        return voice_slots[0]
+    # 3. STRICT character_id resolution (works for both single & multi voice)
+    character_id = seg.get("character_id")
+    voice_id, fallback_reason = _resolve_voice_by_character_id(character_id, project)
+    if voice_id:
+        if fallback_reason:
+            _log_voice_fallback(project, seg, character_id, voice_id, fallback_reason)
+        return voice_id
 
-    # ── Priority 6: Lang-based default (CHỈ khi single-voice mode) ──
+    # 4. Lang-based default (only when single-voice mode + no character path worked)
     if voice_count <= 1 and target_lang:
         lang = target_lang.lower().strip()
         pair = DEFAULT_EDGE_VOICES_BY_LANG.get(lang)
         if pair:
             return pair.get("male") or pair.get("female")
 
-    # ── Priority 7: None — Edge default ──
     return None
 
 
@@ -3995,9 +4002,17 @@ def _group_segments_into_batches(segments: list[dict]) -> list[list[dict]]:
     batches = []
     current_batch = []
 
-    def seg_speaker(s):
-        # Group by (speaker, gender) so each batch uses one Edge voice
-        return (s.get("speaker"), s.get("speaker_gender"))
+    def seg_character(s):
+        """Phase 12 STRICT — group strictly by character_id (single source).
+
+        Trước Phase 12: group theo (speaker, speaker_gender) — bug khi raw
+        speaker thay đổi giữa segments cùng character (fusion FACE_XX vs
+        SPEAKER_XX) hoặc speaker_gender fluctuate per segment.
+
+        Sau Phase 12: chỉ character_id. KHÔNG dùng raw_speaker, KHÔNG dùng
+        speaker_gender. Mỗi batch character-stable → batch voice consistent.
+        """
+        return s.get("character_id") or "_missing_char_"
 
     for seg in segments:
         text = (seg.get("speech_text") or seg["translated_text"] or "").strip()
@@ -4012,11 +4027,11 @@ def _group_segments_into_batches(segments: list[dict]) -> list[list[dict]]:
         gap = seg["start"] - prev["end"]
         batch_duration = seg["end"] - current_batch[0]["start"]
 
-        # Start new batch if: too long, too many segments, big gap, or speaker change
+        # Start new batch if: too long, too many segments, big gap, or CHARACTER change
         if (batch_duration > MAX_BATCH_DURATION
                 or len(current_batch) >= MAX_BATCH_SEGMENTS
                 or gap > MIN_SEGMENT_GAP
-                or seg_speaker(seg) != seg_speaker(prev)):
+                or seg_character(seg) != seg_character(prev)):
             batches.append(current_batch)
             current_batch = [seg]
         else:
@@ -4261,8 +4276,29 @@ def _process_one_batch_audio(
         batch_end = batch[-1]["end"]
         target_duration = batch_end - batch_start
 
-        edge_voice = _pick_edge_voice_for_segment(batch[0], project)
-        gender = (batch[0].get("speaker_gender") or "").lower()
+        # Phase 12 STRICT — voice từ character_id của batch, KHÔNG từ batch[0].
+        # Sau Item 2 (batch grouping by character_id), TẤT CẢ segments trong
+        # batch share character_id. Pick voice qua registry strict resolver.
+        batch_character_id = batch[0].get("character_id")  # safe — batch
+        # character-stable per Item 2 _group_segments_into_batches
+        edge_voice, _vfb_reason = _resolve_voice_by_character_id(
+            batch_character_id, project,
+        )
+        if _vfb_reason:
+            _log_voice_fallback(
+                project, batch[0], batch_character_id, edge_voice, _vfb_reason,
+            )
+
+        # Gender CHỈ dùng cho log (KHÔNG dùng cho voice selection).
+        # Source = registry profile (NOT batch[0].speaker_gender — vi phạm Rule 1).
+        _char_summary_list = (
+            (project.get("character_registry_summary") or {}).get("characters") or []
+        )
+        _profile = next(
+            (c for c in _char_summary_list if c.get("character_id") == batch_character_id),
+            None,
+        )
+        gender = (_profile.get("gender") if _profile else "") or ""
 
         batch_mp3 = seg_dir / f"_batch_{batch_idx}.mp3"
         batch_wav = seg_dir / f"_batch_{batch_idx}.wav"
