@@ -162,7 +162,7 @@ def test_build_character_registry_prompt_block():
     assert "lines=120" in block
     assert "CHAR_003 [LOCKED]" in block
     assert "neutral-safe required" in block  # for CHAR_002 unknown
-    assert "RULES:" in block
+    assert "RULES" in block  # Phase 12: "RULES (CRITICAL..." instead of "RULES:"
     assert "LOCKED characters" in block
     print(f"✓ test_build_character_registry_prompt_block — "
           f"block len={len(block)}, contains all keys")

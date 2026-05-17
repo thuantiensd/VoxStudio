@@ -352,7 +352,7 @@ def test_dispatcher_helper_builds_registry_block():
     assert "CHAR_001" in block
     assert "Wang Wei" in block
     assert "Lin Xiao" in block
-    assert "RULES:" in block
+    assert "RULES" in block  # Phase 12: "RULES (CRITICAL..."
     print(f"✓ test_dispatcher_helper_builds_registry_block — len={len(block)}")
 
 

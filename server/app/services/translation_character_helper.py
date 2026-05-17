@@ -126,22 +126,45 @@ def build_character_registry_prompt_block(
             )
 
     lines.append("")
-    lines.append("RULES:")
+    lines.append("RULES (CRITICAL — phân biệt SELF-REFERENCE vs ADDRESSEE):")
+    lines.append("")
+    lines.append("SELF-REFERENCE (speaker xưng MÌNH):")
     lines.append(
-        f"- gender_confidence >= {GENDER_HIGH}: follow profile gender strictly "
-        "(use correct anh/em/cô/chị)."
+        f"  - gender_confidence >= {GENDER_HIGH}: dùng đúng anh/em/cô/chị/bố/mẹ "
+        "theo profile gender."
     )
     lines.append(
-        "- 0.60 <= gender_confidence < 0.80: use profile but allow neutral "
-        "Vietnamese (tôi/cậu) if ambiguous."
+        "  - 0.60 <= gender_confidence < 0.80: dùng profile nhưng cho phép "
+        "neutral (tôi/mình) khi ambiguous."
     )
     lines.append(
-        "- gender_confidence < 0.60 or unknown: use neutral-safe Vietnamese "
-        "(tôi/cậu/người đó). Do NOT invent anh/em/cô/chị."
+        "  - gender_confidence < 0.60 hoặc unknown: dùng NEUTRAL (tôi/mình/ta). "
+        "KHÔNG tự bịa anh/em/cô/chị cho self-reference."
     )
-    lines.append("- LOCKED characters: gender + pronoun MUST match profile.")
+    lines.append("")
+    lines.append("ADDRESSEE (gọi NGƯỜI KHÁC — kinship/vocative):")
     lines.append(
-        "- Don't invent xưng hô if source language is genuinely ambiguous."
+        "  - LUÔN giữ kinship form đúng theo NGUỒN, bất kể gender của speaker:"
+    )
+    lines.append(
+        "    • 父/お父さん/爸 → \"Bố\" (KHÔNG phải \"Tôi\")"
+    )
+    lines.append(
+        "    • 母/お母さん/妈 → \"Mẹ\""
+    )
+    lines.append(
+        "    • 兄/お兄さん/哥 → \"Anh\" (khi gọi anh trai)"
+    )
+    lines.append(
+        "    • 姉/お姉さん/姐 → \"Chị\" (khi gọi chị gái)"
+    )
+    lines.append(
+        "    • Tên riêng → giữ nguyên tên (transliteration nếu cần)"
+    )
+    lines.append("")
+    lines.append("LOCKED characters: gender + self-pronoun MUST match profile.")
+    lines.append(
+        "Don't invent xưng hô khi source genuinely ambiguous (không có kinship marker)."
     )
 
     return "\n".join(lines)
