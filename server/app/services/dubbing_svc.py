@@ -3169,6 +3169,19 @@ def translate_project(
     primary_error: Exception | None = None  # error của engine USER CHỌN
     last_error: Exception | None = None     # error của attempt gần nhất
     used_engine = eng
+
+    # Phase 12 Fix A — skip Pass-0 speaker_relationships analyze khi đã có
+    # character_registry (source of truth). character_registry_block đã được
+    # prepend vào topic_hint ở block trên → LLM có đầy đủ char info từ registry.
+    # Không cần Pass-0 redundant → giảm prompt confusion, dịch quality lên.
+    from app.services.voice_routing_svc import should_skip_pass0_analysis
+    _skip_pass0 = should_skip_pass0_analysis(project)
+    if _skip_pass0:
+        logger.info(
+            "Phase 12 Fix A: using character_registry_only_prompt=true, "
+            "skip_legacy_speaker_relationships=true",
+        )
+
     for idx, try_eng in enumerate(fallback_chain):
         try:
             translated = cloud_translate_svc.translate_texts(
@@ -3179,6 +3192,7 @@ def translate_project(
                 speaker_genders=speaker_genders_meta,
                 film_genre=film_genre_meta,
                 visual_context=project.get("visual_context") or None,
+                skip_speaker_analysis=_skip_pass0,
             )
             # Check thực sự có output (không phải all empty)
             non_empty = sum(1 for t in translated if t and t.strip())

@@ -108,6 +108,33 @@ def log_voice_fallback(
     )
 
 
+def should_skip_pass0_analysis(project: dict) -> bool:
+    """Phase 12 Fix A — quyết định skip Pass-0 LLM analyze speaker_relationships.
+
+    Spec: nếu character_registry_summary.characters > 0 → registry là source
+    of truth, skip Pass-0 để tránh 2 prompt section chồng nhau gây LLM rối
+    (2-voice mode dịch ngu hơn 1-voice).
+
+    Returns True (skip) khi:
+      - character_registry_summary.characters > 0
+      - AND USE_LEGACY_SPEAKER_RELATIONSHIPS_WITH_REGISTRY = False (default)
+
+    Returns False (use legacy Pass-0) khi:
+      - character_registry rỗng / không có (face-only path / pyannote skip)
+      - HOẶC USE_LEGACY_SPEAKER_RELATIONSHIPS_WITH_REGISTRY = True (rollback)
+    """
+    try:
+        from app.config import USE_LEGACY_SPEAKER_RELATIONSHIPS_WITH_REGISTRY
+    except ImportError:
+        USE_LEGACY_SPEAKER_RELATIONSHIPS_WITH_REGISTRY = False
+
+    if USE_LEGACY_SPEAKER_RELATIONSHIPS_WITH_REGISTRY:
+        return False  # rollback flag — always run Pass-0
+
+    chars = (project.get("character_registry_summary") or {}).get("characters") or []
+    return len(chars) > 0
+
+
 def enforce_gender_invariant(project: dict) -> list[dict]:
     """Phase 12 — enforce: gender_confidence < GENDER_MEDIUM → gender="unknown".
 

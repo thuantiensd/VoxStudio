@@ -261,13 +261,15 @@ def _gemini(texts: list[str], target: str, source: str, api_key: str,
             segments_meta: list[dict] | None = None,
             speaker_genders: dict | None = None,
             film_genre: str | None = None,
-            visual_context: dict | None = None) -> list[str]:
+            visual_context: dict | None = None,
+            skip_speaker_analysis: bool = False) -> list[str]:
     model = model or DEFAULT_MODELS["gemini"]
     if segments_meta:
         return _translate_3pass(
             "gemini", texts, target, source, api_key, model,
             topic_hint, glossary_block, segments_meta, speaker_genders,
             film_genre, visual_context,
+            skip_speaker_analysis=skip_speaker_analysis,
         )
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
     tgt_name = _lang_display(target)
@@ -330,10 +332,12 @@ def _translate_3pass(engine: str, texts: list[str], target: str, source: str,
                        segments_meta: list[dict] | None,
                        speaker_genders: dict | None,
                        film_genre: str | None,
-                       visual_context: dict | None = None) -> list[str]:
+                       visual_context: dict | None = None,
+                       skip_speaker_analysis: bool = False) -> list[str]:
     """3-pass translation cho OpenAI/Claude qua HTTP.
 
-    Pass-0: analyze speakers (skip nếu 1 speaker; có visual_context = ground truth)
+    Pass-0: analyze speakers (SKIP nếu skip_speaker_analysis=True — Phase 12
+            Fix A: character_registry là source of truth, không cần Pass-0).
     Pass-1: literal translator
     Pass-2: editor polish
     """
@@ -363,46 +367,54 @@ def _translate_3pass(engine: str, texts: list[str], target: str, source: str,
         logger.debug("entity_registry build skipped: %s", e)
 
     relationships: dict = {}
-    try:
-        relationships = run_analyze(
-            engine=engine, segments=segments_meta, source_lang=source,
-            api_key=api_key, model=model, film_genre=film_genre,
-            visual_context=visual_context,
-            entity_registry=entity_registry,
+    if skip_speaker_analysis:
+        # Phase 12 Fix A — character_registry source of truth, không cần Pass-0.
+        logger.info(
+            "Phase 12 Fix A: skip_legacy_speaker_relationships=True "
+            "(using character_registry_only_prompt=true). engine=%s",
+            engine,
         )
-        relationships = _merge_audio_gender_hints(relationships, speaker_genders)
+    else:
+        try:
+            relationships = run_analyze(
+                engine=engine, segments=segments_meta, source_lang=source,
+                api_key=api_key, model=model, film_genre=film_genre,
+                visual_context=visual_context,
+                entity_registry=entity_registry,
+            )
+            relationships = _merge_audio_gender_hints(relationships, speaker_genders)
         # Backward-compat: extract gender → cache cho dubbing_svc đọc lại.
-        # Store FULL info (character_name, age, role) để TTS routing + UI dùng.
-        if relationships and relationships.get("speakers"):
-            full_info = {
-                spk_id: {
-                    "gender": info.get("gender", "unsure"),
-                    "evidence": info.get("evidence", ""),
-                    "character_name": info.get("character_name", ""),
-                    "age": info.get("age", "adult"),
-                    "role": info.get("role", ""),
+            # Store FULL info (character_name, age, role) để TTS routing + UI dùng.
+            if relationships and relationships.get("speakers"):
+                full_info = {
+                    spk_id: {
+                        "gender": info.get("gender", "unsure"),
+                        "evidence": info.get("evidence", ""),
+                        "character_name": info.get("character_name", ""),
+                        "age": info.get("age", "adult"),
+                        "role": info.get("role", ""),
+                    }
+                    for spk_id, info in relationships["speakers"].items()
                 }
-                for spk_id, info in relationships["speakers"].items()
-            }
-            _store_llm_genders(engine, full_info)
+                _store_llm_genders(engine, full_info)
 
-        # Auto-detect genre từ Pass-0 — override film_genre nếu user pick
-        # "auto" / "generic" và confidence >= 0.5.
-        detected = (relationships.get("film_genre_primary") or "").strip()
-        conf = float(relationships.get("genre_confidence") or 0.0)
-        if detected and conf >= 0.5 and (not film_genre or film_genre in ("auto", "generic", "")):
-            logger.info(
-                "Genre auto-detected: %s (confidence=%.2f, signals=%s) — override user 'auto'",
-                detected, conf, relationships.get("genre_signals", [])[:3],
-            )
-            film_genre = detected
-        elif detected and conf < 0.5:
-            logger.info(
-                "Genre detected: %s (confidence=%.2f LOW) — keeping user pick=%s",
-                detected, conf, film_genre or "auto",
-            )
-    except Exception as e:
-        logger.warning("%s Pass-0 fail: %s", engine, e)
+            # Auto-detect genre từ Pass-0 — override film_genre nếu user pick
+            # "auto" / "generic" và confidence >= 0.5.
+            detected = (relationships.get("film_genre_primary") or "").strip()
+            conf = float(relationships.get("genre_confidence") or 0.0)
+            if detected and conf >= 0.5 and (not film_genre or film_genre in ("auto", "generic", "")):
+                logger.info(
+                    "Genre auto-detected: %s (confidence=%.2f, signals=%s) — override user 'auto'",
+                    detected, conf, relationships.get("genre_signals", [])[:3],
+                )
+                film_genre = detected
+            elif detected and conf < 0.5:
+                logger.info(
+                    "Genre detected: %s (confidence=%.2f LOW) — keeping user pick=%s",
+                    detected, conf, film_genre or "auto",
+                )
+        except Exception as e:
+            logger.warning("%s Pass-0 fail: %s", engine, e)
 
     # Pass-1 + Pass-2: ADAPTIVE BATCH + PARALLEL (phim dài)
     from app.services.llm.batch import adaptive_batch_size, run_parallel_batches
@@ -682,13 +694,15 @@ def _openai(texts: list[str], target: str, source: str, api_key: str,
             segments_meta: list[dict] | None = None,
             speaker_genders: dict | None = None,
             film_genre: str | None = None,
-            visual_context: dict | None = None) -> list[str]:
+            visual_context: dict | None = None,
+            skip_speaker_analysis: bool = False) -> list[str]:
     """OpenAI translate — 3-pass."""
     api_key = _sanitize_api_key(api_key, "OpenAI")
     model = model or DEFAULT_MODELS["openai"]
     return _translate_3pass("openai", texts, target, source, api_key, model,
                               topic_hint, glossary_block, segments_meta,
-                              speaker_genders, film_genre, visual_context)
+                              speaker_genders, film_genre, visual_context,
+                              skip_speaker_analysis=skip_speaker_analysis)
 
 
 def _claude(texts: list[str], target: str, source: str, api_key: str,
@@ -698,13 +712,15 @@ def _claude(texts: list[str], target: str, source: str, api_key: str,
             segments_meta: list[dict] | None = None,
             speaker_genders: dict | None = None,
             film_genre: str | None = None,
-            visual_context: dict | None = None) -> list[str]:
+            visual_context: dict | None = None,
+            skip_speaker_analysis: bool = False) -> list[str]:
     """Claude translate — 3-pass."""
     api_key = _sanitize_api_key(api_key, "Claude")
     model = model or DEFAULT_MODELS["claude"]
     return _translate_3pass("claude", texts, target, source, api_key, model,
                               topic_hint, glossary_block, segments_meta,
-                              speaker_genders, film_genre, visual_context)
+                              speaker_genders, film_genre, visual_context,
+                              skip_speaker_analysis=skip_speaker_analysis)
 
 
 # ── Helpers ────────────────────────────────────────────────
@@ -755,6 +771,7 @@ def translate_texts(
     speaker_genders: dict | None = None,
     film_genre: str | None = None,
     visual_context: dict | None = None,
+    skip_speaker_analysis: bool = False,
 ) -> list[str]:
     """Translate list of strings with chosen engine.
 
@@ -808,7 +825,8 @@ def translate_texts(
                                 segments_meta=sub_meta,
                                 speaker_genders=speaker_genders,
                                 film_genre=film_genre,
-                                visual_context=visual_context)
+                                visual_context=visual_context,
+                                skip_speaker_analysis=skip_speaker_analysis)
             else:
                 translated = fn(sub, target, source, api_key)
         except httpx.RequestError as e:

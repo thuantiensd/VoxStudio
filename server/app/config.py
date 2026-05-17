@@ -196,6 +196,13 @@ MAX_EMBEDDING_DURATION = 10.0  # đoạn tối đa (tránh embedding "averaged" 
 # segment_embedding_quality < này → rule 1b apply (low_confidence keep).
 EMBEDDING_QUALITY_MIN = 0.3
 
+# === Phase 12 Fix A — Translation prompt cleanup ===
+# Khi character_registry_summary.characters > 0 → SKIP Pass-0 LLM analyze
+# speaker_relationships. character_registry là source of truth, tránh 2
+# prompt section chồng nhau gây LLM rối (2-voice mode dịch ngu hơn 1-voice).
+# Set True nếu cần rollback về flow legacy.
+USE_LEGACY_SPEAKER_RELATIONSHIPS_WITH_REGISTRY = False
+
 # === Gender fusion (Phase 7) ===
 # Per-character gender quyết định ở fusion service, KHÔNG per-segment.
 # Threshold tier cho final gender_confidence:
