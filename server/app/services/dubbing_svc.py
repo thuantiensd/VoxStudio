@@ -3514,10 +3514,20 @@ def translate_project(
                 except Exception as e:
                     logger.warning("Voice map rebuild fail: %s", e)
                 if char_gender_updates:
+                    # Phase 12 fix: LLM override gender PHẢI set
+                    # gender_confidence cao (>= GENDER_MEDIUM) để pass invariant.
+                    # Trước fix: chỉ override gender, conf giữ 0.00 → vi phạm
+                    # spec "gender_conf < GENDER_MEDIUM → gender phải unknown".
+                    from app.config import LLM_GENDER_HINT_PIPELINE_LOW
                     for c in (project.get("character_registry_summary") or {}).get("characters") or []:
                         cid = c.get("character_id")
                         if cid in char_gender_updates:
                             c["gender"] = char_gender_updates[cid]
+                            # Set conf = LLM threshold (0.70) → pass invariant
+                            c["gender_confidence"] = max(
+                                float(c.get("gender_confidence") or 0.0),
+                                LLM_GENDER_HINT_PIPELINE_LOW,
+                            )
                 for seg in project.get("segments", []):
                     spk = seg.get("speaker")
                     cid = seg.get("character_id")
@@ -3525,6 +3535,20 @@ def translate_project(
                         seg["speaker_gender"] = char_gender_updates[cid]
                     elif spk in new_genders and new_genders[spk] in ("male", "female"):
                         seg["speaker_gender"] = new_genders[spk]
+
+        # Phase 12 invariant — enforce: gender_conf < GENDER_MEDIUM → unknown.
+        # Catch bất kỳ residual violation (LLM forgot confidence, legacy meta, ...).
+        try:
+            from app.services.voice_routing_svc import enforce_gender_invariant
+            _gender_fixes = enforce_gender_invariant(project)
+            if _gender_fixes:
+                logger.warning(
+                    "Phase 12 gender_invariant: reset %d chars (low conf male/female → unknown): %s",
+                    len(_gender_fixes),
+                    [(f["character_id"], f["old_gender"], f["old_confidence"]) for f in _gender_fixes],
+                )
+        except Exception as e:
+            logger.warning("Phase 12 gender_invariant fail: %s", e)
         # Clear cache cho project sau
         cloud_translate_svc.clear_llm_genders()
     except Exception as e:

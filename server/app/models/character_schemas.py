@@ -245,6 +245,23 @@ class VoiceConflict(BaseModel):
     reason: str = "same_character_multiple_voices"
 
 
+class GenderWarning(BaseModel):
+    """Phase 12 — gender invariant violation (gender_conf < GENDER_MEDIUM
+    nhưng gender=male/female). Auto-reset → unknown."""
+    model_config = ConfigDict(extra="forbid")
+
+    character_id: str
+    issue: str = Field(
+        ...,
+        description='enum: "gender_label_with_zero_confidence", '
+                    '"gender_below_medium_threshold", '
+                    '"llm_override_without_confidence"',
+    )
+    old_gender: str = ""
+    old_confidence: float = 0.0
+    fixed_gender: str = "unknown"
+
+
 class TimingWarning(BaseModel):
     """TTS overflow/underrun slot — log decision."""
     model_config = ConfigDict(extra="forbid")
@@ -312,5 +329,6 @@ class QAReport(BaseModel):
     voice_map_warnings: list[VoiceMapWarning] = Field(default_factory=list)
     voice_warnings: list[VoiceWarning] = Field(default_factory=list)
     voice_conflicts: list[VoiceConflict] = Field(default_factory=list)
+    gender_warnings: list[GenderWarning] = Field(default_factory=list)
     timing_warnings: list[TimingWarning] = Field(default_factory=list)
     system_errors: list[SystemError] = Field(default_factory=list)

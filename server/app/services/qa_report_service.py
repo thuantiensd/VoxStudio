@@ -25,6 +25,7 @@ from app.config import OWNERSHIP_LOW
 from app.models.character_schemas import (
     CharacterRegistry,
     GenderConflict,
+    GenderWarning,
     OwnershipWarning,
     PossibleMerge,
     QAReport,
@@ -199,6 +200,9 @@ def build_qa_report(
     voice_conflicts = _parse_warning_list(
         project.get("voice_conflicts"), VoiceConflict,
     )
+    gender_warnings = _parse_warning_list(
+        project.get("gender_warnings"), GenderWarning,
+    )
     timing_warnings = _parse_warning_list(
         project.get("timing_warnings"), TimingWarning,
     )
@@ -222,6 +226,7 @@ def build_qa_report(
         voice_map_warnings=voice_map_warnings,
         voice_warnings=voice_warnings,
         voice_conflicts=voice_conflicts,
+        gender_warnings=gender_warnings,
         timing_warnings=timing_warnings,
         system_errors=system_errors,
     )

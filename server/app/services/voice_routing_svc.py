@@ -108,6 +108,85 @@ def log_voice_fallback(
     )
 
 
+def enforce_gender_invariant(project: dict) -> list[dict]:
+    """Phase 12 — enforce: gender_confidence < GENDER_MEDIUM → gender="unknown".
+
+    Spec rule:
+      - Nếu confidence < 0.60 (GENDER_MEDIUM) thì gender phải = "unknown".
+      - Không được set gender="male"/"female" với confidence=0.00.
+
+    Scan character_registry_summary.characters. Reset offending entries +
+    log warning. Cũng reset seg["speaker_gender"] cho segments của char đó
+    nếu character đã bị reset.
+
+    Returns: list of warning dicts (1 per char reset).
+    Mutates: project["character_registry_summary"]["characters"][i].gender,
+             project["segments"][j]["speaker_gender"],
+             project["gender_warnings"].
+    """
+    try:
+        from app.config import GENDER_MEDIUM
+    except ImportError:
+        GENDER_MEDIUM = 0.60
+
+    char_summary = (project.get("character_registry_summary") or {}).get("characters") or []
+    warnings: list[dict] = []
+    fixed_char_ids: set = set()
+
+    for c in char_summary:
+        cid = c.get("character_id")
+        if not cid:
+            continue
+        gender = c.get("gender")
+        conf = float(c.get("gender_confidence") or 0.0)
+
+        # Invariant 1: conf=0 + gender=male/female → reset
+        if conf == 0.0 and gender in ("male", "female"):
+            warnings.append({
+                "character_id": cid,
+                "issue": "gender_label_with_zero_confidence",
+                "old_gender": gender,
+                "old_confidence": conf,
+                "fixed_gender": "unknown",
+            })
+            c["gender"] = "unknown"
+            fixed_char_ids.add(cid)
+            logger.warning(
+                "gender_invariant: %s gender=%s conf=0.00 → reset 'unknown'",
+                cid, gender,
+            )
+            continue
+
+        # Invariant 2: 0 < conf < GENDER_MEDIUM + gender=male/female → reset
+        if 0.0 < conf < GENDER_MEDIUM and gender in ("male", "female"):
+            warnings.append({
+                "character_id": cid,
+                "issue": "gender_below_medium_threshold",
+                "old_gender": gender,
+                "old_confidence": conf,
+                "fixed_gender": "unknown",
+            })
+            c["gender"] = "unknown"
+            fixed_char_ids.add(cid)
+            logger.warning(
+                "gender_invariant: %s gender=%s conf=%.2f < %.2f → reset 'unknown'",
+                cid, gender, conf, GENDER_MEDIUM,
+            )
+
+    # Cascade reset: seg["speaker_gender"] for affected chars
+    if fixed_char_ids:
+        for s in project.get("segments") or []:
+            if s.get("character_id") in fixed_char_ids:
+                # Keep seg metadata but reset to None (downstream chỉ debug)
+                s["speaker_gender"] = None
+
+    if warnings:
+        existing = project.setdefault("gender_warnings", [])
+        existing.extend(warnings)
+
+    return warnings
+
+
 def validate_character_voice_consistency(project: dict) -> list[dict]:
     """Phase 12 Item 6 — enforce 1 character → 1 voice_profile_id.
 
