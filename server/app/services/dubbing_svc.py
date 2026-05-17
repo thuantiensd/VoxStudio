@@ -2796,6 +2796,26 @@ def transcribe_project(project_id: str) -> dict:
                     vm_mode, len(voice_slot_objs), len(vm_warnings),
                     voice_map_final,
                 )
+
+                # Phase 12 invariant — enforce: gender_conf < GENDER_MEDIUM → unknown.
+                # Gọi NGAY sau summary persist. Catch chars có gender label
+                # với conf thấp (Phase 7a confidence < 0.60) → reset về unknown
+                # trước khi voice_map / TTS dùng làm signal.
+                try:
+                    from app.services.voice_routing_svc import enforce_gender_invariant
+                    _gender_fixes = enforce_gender_invariant(project)
+                    if _gender_fixes:
+                        logger.warning(
+                            "Phase 12 gender_invariant (transcribe end): "
+                            "reset %d chars: %s",
+                            len(_gender_fixes),
+                            [(f["character_id"], f["old_gender"], f["old_confidence"])
+                             for f in _gender_fixes],
+                        )
+                except Exception as e:
+                    logger.warning(
+                        "Phase 12 gender_invariant (transcribe) fail: %s", e,
+                    )
             else:
                 logger.warning(
                     "Phase 8 voice_map: registry exists but voice_slots rỗng → "
