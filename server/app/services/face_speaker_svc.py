@@ -788,11 +788,18 @@ def apply_face_speakers_to_segments(
         seg["face_confidence"] = round(conf, 2)
         if override_audio:
             seg["speaker"] = face_speaker_id
-            face_g = result.face_genders.get(face_id)
-            face_g_conf = result.face_gender_confs.get(face_id, 0.0)
-            # CHỈ override gender khi CNN+geo vote cao. Nếu thấp, giữ
-            # gender từ audio (F0) để cross-validate sau với LLM Pass-0.
-            if face_g and face_g != "unknown" and face_g_conf >= min_gender_confidence:
-                seg["speaker_gender"] = face_g
+        # Phase 12 Item 8 — KHÔNG overwrite seg["speaker_gender"] nữa.
+        # Face gender chỉ là 1 signal cho Phase 7a gender_detection_service
+        # (fuse audio + face + text → CharacterProfile.gender). Sau registry
+        # lock, KHÔNG được override per-segment. Lưu metadata riêng cho
+        # debug/QA, không ảnh hưởng TTS/EQ.
+        face_g = result.face_genders.get(face_id)
+        face_g_conf = result.face_gender_confs.get(face_id, 0.0)
+        if face_g and face_g != "unknown":
+            seg["face_gender_metadata"] = {
+                "gender": face_g,
+                "confidence": round(face_g_conf, 2),
+                "source": "face_speaker_cnn",
+            }
         updated += 1
     return updated

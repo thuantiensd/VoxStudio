@@ -763,64 +763,11 @@ def _resolve_voice_by_character_id(
     character_id: str | None,
     project: dict,
 ) -> tuple[str | None, str | None]:
-    """Phase 12 STRICT — character_id-only voice resolution.
-
-    Rule 1: TTS chỉ dùng character_id → registry → voice_profile_id.
-    Rule 2: missing character_id hoặc voice_profile_id null → fallback voice
-            + log (TUYỆT ĐỐI KHÔNG quay lại raw_speaker / speaker_gender).
-
-    Fallback tiers (no raw_speaker anywhere):
-      Tier 1: voice_map[character_id] direct hit (no fallback).
-      Tier 2: character_id None → first non-empty voice_slot, log "missing_char".
-      Tier 3: character has profile + gender → gender-matched slot (slot 0=male,
-              slot 1=female convention), log "voice_profile_null_gender_fallback".
-      Tier 4: no gender or no profile → first non-empty slot, log "default_slot".
-      Tier 5: nothing available → (None, "no_voice_available").
-
-    Returns: (voice_id, fallback_reason). fallback_reason=None nếu direct hit.
+    """Phase 12 wrapper — delegate sang voice_routing_svc cho testability.
+    Real logic ở `voice_routing_svc.resolve_voice_by_character_id`.
     """
-    voice_map = project.get("speaker_voice_map") or {}
-    voice_slots = project.get("voice_slots") or []
-    project_voice_id = project.get("voice_id")
-
-    # Tier 1: STRICT character_id lookup
-    if character_id and character_id in voice_map:
-        v = voice_map[character_id]
-        if v:
-            return (v, None)
-
-    # Tier 2: missing character_id
-    if not character_id:
-        for slot_v in voice_slots:
-            if slot_v:
-                return (slot_v, "missing_character_id")
-        if project_voice_id:
-            return (project_voice_id, "missing_character_id_use_project_default")
-        return (None, "missing_character_id_no_fallback")
-
-    # Tier 3: character_id present but voice_map missing/null → gender fallback
-    char_summary = (project.get("character_registry_summary") or {}).get("characters") or []
-    profile = next(
-        (c for c in char_summary if c.get("character_id") == character_id),
-        None,
-    )
-    if profile:
-        gender = profile.get("gender")
-        # Slot convention: slot 0=male, slot 1=female (hardcoded UI assumption)
-        if gender == "male" and len(voice_slots) >= 1 and voice_slots[0]:
-            return (voice_slots[0], "voice_profile_null_gender_male_fallback")
-        if gender == "female" and len(voice_slots) >= 2 and voice_slots[1]:
-            return (voice_slots[1], "voice_profile_null_gender_female_fallback")
-
-    # Tier 4: no gender match → first non-empty slot
-    for slot_v in voice_slots:
-        if slot_v:
-            return (slot_v, "voice_profile_null_default_slot_fallback")
-    if project_voice_id:
-        return (project_voice_id, "voice_profile_null_use_project_default")
-
-    # Tier 5: nothing
-    return (None, "no_voice_available")
+    from app.services.voice_routing_svc import resolve_voice_by_character_id
+    return resolve_voice_by_character_id(character_id, project)
 
 
 def _log_voice_fallback(
@@ -830,33 +777,9 @@ def _log_voice_fallback(
     voice_id: str | None,
     reason: str,
 ) -> None:
-    """Log voice fallback / warning vào project meta cho qa_report.
-
-    Phase 12 spec — qa_report.voice_warnings format:
-      {
-        "segment_id": ...,
-        "character_id": ...,
-        "issue": <reason>,
-        "fallback_used": <voice_id>,
-      }
-    """
-    warnings = project.setdefault("voice_warnings", [])
-    warnings.append({
-        "segment_id": seg.get("index", seg.get("id", "?")),
-        "character_id": character_id,
-        "issue": reason,
-        "fallback_used": voice_id or "(none)",
-    })
-    # Track segments missing character_id cho uncertain_segments
-    if not character_id:
-        uncert = project.setdefault("uncertain_segments_no_char", [])
-        seg_key = seg.get("index", seg.get("id", "?"))
-        if seg_key not in uncert:
-            uncert.append(seg_key)
-    logger.warning(
-        "voice_fallback: seg=%s char=%s reason=%s → voice=%s",
-        seg.get("index", "?"), character_id, reason, voice_id,
-    )
+    """Phase 12 wrapper — delegate sang voice_routing_svc."""
+    from app.services.voice_routing_svc import log_voice_fallback
+    log_voice_fallback(project, seg, character_id, voice_id, reason)
 
 
 def _pick_omni_voice_id_for_segment(seg: dict, project: dict) -> str | None:
@@ -3788,8 +3711,20 @@ def generate_segment(project_id: str, seg_id: str) -> dict:
                 import numpy as _np
                 import random as _rand
                 import hashlib as _hashlib
+                # Phase 12 Item 4 STRICT — seed_key dùng character_id, KHÔNG
+                # dùng raw_speaker. Cùng character (dù từ SPEAKER_00 hay
+                # SPEAKER_03 sau registry merge) sẽ ra cùng baseline voice.
                 if voice_count > 1:
-                    seed_key = (seg.get("speaker") or "unknown") + "|" + str(project_id)
+                    _char_id = seg.get("character_id")
+                    if _char_id:
+                        seed_key = f"{_char_id}|{project_id}"
+                    else:
+                        # Missing character_id → fallback (KHÔNG raw_speaker)
+                        seed_key = f"fallback|{project_id}"
+                        _log_voice_fallback(
+                            project, seg, None, "(omnivoice_baseline)",
+                            "missing_character_id_seed_fallback",
+                        )
                 else:
                     seed_key = str(project_id)
                 seed = int.from_bytes(_hashlib.md5(seed_key.encode()).digest()[:4], "big")
@@ -3913,7 +3848,21 @@ def generate_segment(project_id: str, seg_id: str) -> dict:
                 from app.services.audio_mix_svc import (
                     apply_voice_chain, normalize_loudness_rms,
                 )
-                gender = (seg.get("speaker_gender") or "").lower()
+                # Phase 12 Item 5 STRICT — gender từ registry character_id,
+                # KHÔNG đọc seg["speaker_gender"] (per-segment, fluctuate).
+                # speaker_gender chỉ giữ làm metadata/debug.
+                _cid = seg.get("character_id")
+                gender = "unknown"
+                if _cid:
+                    _char_summary = (
+                        (project.get("character_registry_summary") or {}).get("characters") or []
+                    )
+                    _profile = next(
+                        (c for c in _char_summary if c.get("character_id") == _cid),
+                        None,
+                    )
+                    if _profile:
+                        gender = (_profile.get("gender") or "unknown").lower()
                 audio_np = apply_voice_chain(audio_np, sr, gender=gender)
                 # RMS loudness norm — gentler -23dBFS, cap ±5dB (less harsh)
                 audio_np = normalize_loudness_rms(audio_np, target_dbfs=-23.0, max_gain_db=5.0)
@@ -3957,6 +3906,25 @@ def generate_all(project_id: str):
     project = _load_meta(project_id)
     if not project:
         raise ValueError("Project not found")
+
+    # ── Phase 12 Item 6: pre-TTS validation — 1 character → 1 voice ──
+    # Detect & auto-resolve conflicts BEFORE TTS. Cùng character bị gán
+    # multiple voices → rewrite về expected (registry voice_map) + log
+    # voice_conflicts vào qa_report.
+    try:
+        from app.services.voice_routing_svc import (
+            validate_character_voice_consistency,
+        )
+        _conflicts = validate_character_voice_consistency(project)
+        if _conflicts:
+            logger.warning(
+                "Phase 12 Item 6: %d voice_conflicts auto-resolved trước TTS: %s",
+                len(_conflicts),
+                [(c["character_id"], c["voices_found"]) for c in _conflicts],
+            )
+            _save_meta(project)
+    except Exception as e:
+        logger.warning("Phase 12 Item 6 voice consistency validation fail: %s", e)
 
     tts_engine = project.get("tts_engine", "edge")
 

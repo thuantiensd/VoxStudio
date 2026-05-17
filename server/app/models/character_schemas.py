@@ -218,6 +218,33 @@ class VoiceMapWarning(BaseModel):
     reason: str = ""
 
 
+class VoiceWarning(BaseModel):
+    """Phase 12 — TTS-time voice resolver fallback warning."""
+    model_config = ConfigDict(extra="forbid")
+
+    segment_id: SegmentId
+    character_id: Optional[str] = None
+    issue: str = Field(
+        ...,
+        description='enum: "missing_character_id", "missing_voice_profile_id", '
+                    '"voice_profile_null_gender_male_fallback", '
+                    '"voice_profile_null_gender_female_fallback", '
+                    '"voice_profile_null_default_slot_fallback", '
+                    '"missing_character_id_seed_fallback"',
+    )
+    fallback_used: str = Field("", description="voice_id fallback applied")
+
+
+class VoiceConflict(BaseModel):
+    """Phase 12 — cùng character bị gán nhiều voice (rare bug)."""
+    model_config = ConfigDict(extra="forbid")
+
+    character_id: str
+    voices_found: list[str] = Field(default_factory=list, min_length=2)
+    resolved_to: str
+    reason: str = "same_character_multiple_voices"
+
+
 class TimingWarning(BaseModel):
     """TTS overflow/underrun slot — log decision."""
     model_config = ConfigDict(extra="forbid")
@@ -283,5 +310,7 @@ class QAReport(BaseModel):
     ownership_warnings: list[OwnershipWarning] = Field(default_factory=list)
     translation_warnings: list[TranslationWarning] = Field(default_factory=list)
     voice_map_warnings: list[VoiceMapWarning] = Field(default_factory=list)
+    voice_warnings: list[VoiceWarning] = Field(default_factory=list)
+    voice_conflicts: list[VoiceConflict] = Field(default_factory=list)
     timing_warnings: list[TimingWarning] = Field(default_factory=list)
     system_errors: list[SystemError] = Field(default_factory=list)

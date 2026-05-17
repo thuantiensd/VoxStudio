@@ -32,7 +32,9 @@ from app.models.character_schemas import (
     SystemError,
     TimingWarning,
     TranslationWarning,
+    VoiceConflict,
     VoiceMapWarning,
+    VoiceWarning,
 )
 
 logger = logging.getLogger(__name__)
@@ -190,9 +192,22 @@ def build_qa_report(
     voice_map_warnings = _parse_warning_list(
         project.get("voice_map_warnings"), VoiceMapWarning,
     )
+    # Phase 12 Item 7 — TTS-time voice routing warnings + conflicts
+    voice_warnings = _parse_warning_list(
+        project.get("voice_warnings"), VoiceWarning,
+    )
+    voice_conflicts = _parse_warning_list(
+        project.get("voice_conflicts"), VoiceConflict,
+    )
     timing_warnings = _parse_warning_list(
         project.get("timing_warnings"), TimingWarning,
     )
+
+    # Merge uncertain_segments_no_char (Phase 12) vào uncertain_segs
+    extra_uncert = project.get("uncertain_segments_no_char") or []
+    for sid in extra_uncert:
+        if sid not in uncertain_segs:
+            uncertain_segs.append(sid)
 
     report = QAReport(
         project_id=project_id,
@@ -205,6 +220,8 @@ def build_qa_report(
         ownership_warnings=ownership_warnings,
         translation_warnings=translation_warnings,
         voice_map_warnings=voice_map_warnings,
+        voice_warnings=voice_warnings,
+        voice_conflicts=voice_conflicts,
         timing_warnings=timing_warnings,
         system_errors=system_errors,
     )
