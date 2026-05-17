@@ -220,11 +220,55 @@ def _deepl(texts: list[str], target: str, source: str, api_key: str) -> list[str
 
 # ── Gemini ─────────────────────────────────────────────────
 
+def _attach_speaker_gender_hints(
+    segments_meta: list[dict] | None,
+    speaker_genders: dict | None,
+) -> list[dict] | None:
+    if not segments_meta:
+        return None
+    out = []
+    for seg in segments_meta:
+        item = dict(seg)
+        spk = item.get("speaker")
+        if spk and speaker_genders and not item.get("speaker_gender"):
+            gender = speaker_genders.get(spk)
+            if gender:
+                item["speaker_gender"] = gender
+        out.append(item)
+    return out
+
+
+def _merge_audio_gender_hints(relationships: dict, speaker_genders: dict | None) -> dict:
+    if not relationships or not speaker_genders or not relationships.get("speakers"):
+        return relationships or {}
+    merged = dict(relationships)
+    speakers = {}
+    for spk, info in (relationships.get("speakers") or {}).items():
+        item = dict(info or {})
+        audio_gender = speaker_genders.get(spk)
+        if audio_gender in ("male", "female") and item.get("gender") not in ("male", "female"):
+            item["gender"] = audio_gender
+            item["evidence"] = ((item.get("evidence") or "") + " | audio gender hint").strip(" |")
+        speakers[spk] = item
+    merged["speakers"] = speakers
+    return merged
+
+
 def _gemini(texts: list[str], target: str, source: str, api_key: str,
             model: str | None = None,
             topic_hint: str | None = None,
-            glossary_block: str | None = None) -> list[str]:
+            glossary_block: str | None = None,
+            segments_meta: list[dict] | None = None,
+            speaker_genders: dict | None = None,
+            film_genre: str | None = None,
+            visual_context: dict | None = None) -> list[str]:
     model = model or DEFAULT_MODELS["gemini"]
+    if segments_meta:
+        return _translate_3pass(
+            "gemini", texts, target, source, api_key, model,
+            topic_hint, glossary_block, segments_meta, speaker_genders,
+            film_genre, visual_context,
+        )
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
     tgt_name = _lang_display(target)
     src_name = _lang_display(source) if source and source.lower() != "auto" else "auto-detected source"
@@ -284,6 +328,7 @@ def _translate_3pass(engine: str, texts: list[str], target: str, source: str,
                        api_key: str, model: str | None,
                        topic_hint: str | None, glossary_block: str | None,
                        segments_meta: list[dict] | None,
+                       speaker_genders: dict | None,
                        film_genre: str | None,
                        visual_context: dict | None = None) -> list[str]:
     """3-pass translation cho OpenAI/Claude qua HTTP.
@@ -301,6 +346,7 @@ def _translate_3pass(engine: str, texts: list[str], target: str, source: str,
              "original_text": t}
             for i, t in enumerate(texts)
         ]
+    segments_meta = _attach_speaker_gender_hints(segments_meta, speaker_genders) or segments_meta
 
     # Pass-0: speaker analysis + auto-detect genre.
     # entity_registry (từ Python scan toàn file) inject vào Pass-0 prompt
@@ -324,6 +370,7 @@ def _translate_3pass(engine: str, texts: list[str], target: str, source: str,
             visual_context=visual_context,
             entity_registry=entity_registry,
         )
+        relationships = _merge_audio_gender_hints(relationships, speaker_genders)
         # Backward-compat: extract gender → cache cho dubbing_svc đọc lại.
         # Store FULL info (character_name, age, role) để TTS routing + UI dùng.
         if relationships and relationships.get("speakers"):
@@ -640,8 +687,8 @@ def _openai(texts: list[str], target: str, source: str, api_key: str,
     api_key = _sanitize_api_key(api_key, "OpenAI")
     model = model or DEFAULT_MODELS["openai"]
     return _translate_3pass("openai", texts, target, source, api_key, model,
-                              topic_hint, glossary_block, segments_meta, film_genre,
-                              visual_context)
+                              topic_hint, glossary_block, segments_meta,
+                              speaker_genders, film_genre, visual_context)
 
 
 def _claude(texts: list[str], target: str, source: str, api_key: str,
@@ -656,8 +703,8 @@ def _claude(texts: list[str], target: str, source: str, api_key: str,
     api_key = _sanitize_api_key(api_key, "Claude")
     model = model or DEFAULT_MODELS["claude"]
     return _translate_3pass("claude", texts, target, source, api_key, model,
-                              topic_hint, glossary_block, segments_meta, film_genre,
-                              visual_context)
+                              topic_hint, glossary_block, segments_meta,
+                              speaker_genders, film_genre, visual_context)
 
 
 # ── Helpers ────────────────────────────────────────────────
@@ -732,6 +779,12 @@ def translate_texts(
     sub_meta = None
     if segments_meta:
         sub_meta = [segments_meta[i] for i in non_empty_idx if i < len(segments_meta)]
+        if len(sub_meta) != len(sub):
+            logger.warning(
+                "segments_meta length mismatch (%d meta for %d texts) — dùng meta tối giản",
+                len(sub_meta), len(sub),
+            )
+            sub_meta = None
 
     from app.services import glossary_svc
     glossary = glossary or []
@@ -747,7 +800,7 @@ def translate_texts(
         if not api_key:
             raise ValueError(f"Thiếu API key cho {engine}. Vào Cài đặt → AI & API keys để thêm.")
         try:
-            if engine in ("openai", "claude"):
+            if engine in ("openai", "claude", "gemini"):
                 # Mới: pass full meta để builder dùng unified rich prompt
                 translated = fn(sub, target, source, api_key, model=model,
                                 topic_hint=topic_block or None,
@@ -756,11 +809,6 @@ def translate_texts(
                                 speaker_genders=speaker_genders,
                                 film_genre=film_genre,
                                 visual_context=visual_context)
-            elif engine == "gemini":
-                # Gemini path cũ giữ tương thích — đã có rich prompt riêng
-                translated = fn(sub, target, source, api_key, model=model,
-                                topic_hint=topic_block or None,
-                                glossary_block=glossary_block or None)
             else:
                 translated = fn(sub, target, source, api_key)
         except httpx.RequestError as e:

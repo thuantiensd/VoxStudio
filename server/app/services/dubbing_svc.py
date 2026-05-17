@@ -803,8 +803,25 @@ def _pick_omni_voice_id_for_segment(seg: dict, project: dict) -> str | None:
     # 2. STRICT character_id resolution
     character_id = seg.get("character_id")
     voice_id, fallback_reason = _resolve_voice_by_character_id(character_id, project)
-    if fallback_reason:
+    if voice_id and fallback_reason:
         _log_voice_fallback(project, seg, character_id, voice_id, fallback_reason)
+    # Last-resort safety net (Phase 12 spec rule 2 — log warning).
+    # Trigger CHỈ khi resolver Tier 1-5 đều trả None (project meta hỏng:
+    # voice_slots=[], voice_id=None, registry empty). Avoid silent TTS fail.
+    if not voice_id and int(project.get("voice_count") or 1) > 1:
+        speaker_id = character_id or seg.get("speaker") or seg.get("id")
+        gender = seg.get("speaker_gender")
+        if not gender and seg.get("speaker"):
+            gender = (project.get("speaker_genders") or {}).get(seg.get("speaker"))
+        default_path = default_voices_svc.get_default_voice_path_for_speaker(
+            speaker_id, gender,
+        )
+        if default_path:
+            _log_voice_fallback(
+                project, seg, character_id, default_path.stem,
+                "last_resort_default_voice_pool",
+            )
+            return default_path.stem
     return voice_id
 
 
@@ -902,7 +919,22 @@ def _pick_edge_voice_for_segment(seg: dict, project: dict) -> str | None:
             _log_voice_fallback(project, seg, character_id, voice_id, fallback_reason)
         return voice_id
 
-    # 4. Lang-based default (only when single-voice mode + no character path worked)
+    # 4. Last-resort safety net (Phase 12 spec rule 2 — log warning).
+    # Trigger CHỈ khi resolver Tier 1-5 fail. Multi-voice dùng gender segment
+    # để tự đổi nam/nữ khi user chưa set slot.
+    if voice_count > 1 and target_lang:
+        gender = seg.get("speaker_gender")
+        if not gender and seg.get("speaker"):
+            gender = (project.get("speaker_genders") or {}).get(seg.get("speaker"))
+        gender_voice = _default_edge_voice(target_lang, gender)
+        if gender_voice:
+            _log_voice_fallback(
+                project, seg, seg.get("character_id"), gender_voice,
+                "last_resort_lang_default_with_gender_hint",
+            )
+            return gender_voice
+
+    # 5. Single-voice lang default
     if voice_count <= 1 and target_lang:
         lang = target_lang.lower().strip()
         pair = DEFAULT_EDGE_VOICES_BY_LANG.get(lang)
@@ -966,12 +998,14 @@ def _split_long_segment(seg: dict, max_duration: float = 12.0) -> list[dict]:
             right_text = "".join(w["word"] for w in right_words).strip()
             if left_text and right_text:
                 left_seg = {
+                    **seg,
                     "start": seg["start"],
                     "end": left_words[-1]["end"],
                     "text": left_text,
                     "words": left_words,
                 }
                 right_seg = {
+                    **seg,
                     "start": right_words[0]["start"],
                     "end": seg["end"],
                     "text": right_text,
@@ -1010,9 +1044,11 @@ def _split_long_segment(seg: dict, max_duration: float = 12.0) -> list[dict]:
         sub_start = cursor
         sub_end = seg["end"] if i == len(parts) - 1 else cursor + sub_dur
         subs.append({
+            **seg,
             "start": round(sub_start, 2),
             "end": round(sub_end, 2),
             "text": p,
+            "words": [],
         })
         cursor = sub_end
 
@@ -1378,6 +1414,8 @@ def _merge_short_segments(segments: list[dict], min_duration: float = 2.5,
                 })
             prev["end"] = seg["end"]
             prev["text"] = (prev["text"] + " " + seg["text"]).strip()
+            if prev.get("words") or seg.get("words"):
+                prev["words"] = list(prev.get("words") or []) + list(seg.get("words") or [])
         else:
             new_seg = dict(seg)
             new_seg.setdefault("internal_pauses", [])
@@ -1786,60 +1824,52 @@ def get_accompaniment_path(project_id: str) -> Path | None:
 
 def _detect_genders_for_whisperx_speakers(
     segments: list[dict], audio_path: str, speakers: list[str],
-) -> dict:
+) -> tuple[dict[str, str], dict[str, float]]:
     """Detect gender per WhisperX/pyannote speaker bằng Resemblyzer pitch.
 
     Pyannote chỉ assign label (SPEAKER_00, SPEAKER_01...) chứ không detect
     gender. Dùng Resemblyzer F0 estimator (librosa.pyin + octave correction)
     trên audio chunks của từng speaker để suy gender.
 
-    Trả {"SPEAKER_00": "male", "SPEAKER_01": "female", ...}
+    Trả (speaker_genders, speaker_gender_confidences).
     """
-    import numpy as np
-    import soundfile as sf
-    from collections import Counter
-
-    audio, sr = sf.read(audio_path)
-    if audio.ndim > 1:
-        audio = audio.mean(axis=1)
-    audio = audio.astype(np.float32)
-
-    # Singleton diarize để gọi _estimate_pitch / _gender_from_pitch
-    rd = resemblyzer_diarize_svc.diarize
-
-    speaker_genders = {}
-    for spk in speakers:
-        per_turn_features = []
-        count = 0
-        for seg in segments:
-            if seg.get("speaker") != spk:
-                continue
-            dur = seg["end"] - seg["start"]
-            if dur < 1.0:
-                continue
-            start_sample = int(seg["start"] * sr)
-            end_sample = min(int(seg["end"] * sr), len(audio))
-            chunk = audio[start_sample:end_sample]
-            if dur > 4.0:
-                chunk = chunk[: int(sr * 4.0)]
-            feats = rd._estimate_voice_features(chunk, sr)
-            if feats and feats.get("f0", 0) > 0:
-                per_turn_features.append(feats)
-            count += 1
-            if count >= 8:
-                break
-        if not per_turn_features:
-            continue
-        per_turn_gender = [rd._gender_from_features(f) for f in per_turn_features]
-        votes = Counter(g for g in per_turn_gender if g != "unknown")
-        final_gender = votes.most_common(1)[0][0] if votes else "unknown"
-        speaker_genders[spk] = final_gender
-        f0s = [f["f0"] for f in per_turn_features]
-        logger.info(
-            "  WhisperX %s: F0_median=%.0fHz → %s (votes=%s)",
-            spk, float(np.median(f0s)), final_gender, dict(votes),
+    try:
+        from app.services.speaker_pipeline.gender import (
+            detect_speaker_genders_with_confidence,
         )
-    return speaker_genders
+        from app.services.speaker_pipeline.types import DiarizationTurn
+    except Exception as e:
+        logger.warning("WhisperX gender helper unavailable: %s", e)
+        return {}, {}
+
+    turns = []
+    for seg in segments:
+        spk = seg.get("speaker")
+        if not spk:
+            continue
+        start = float(seg.get("start", 0.0) or 0.0)
+        end = float(seg.get("end", 0.0) or 0.0)
+        if end - start < 0.35:
+            continue
+        turns.append(DiarizationTurn(start=start, end=end, speaker=str(spk)))
+    if not turns:
+        return {}, {}
+
+    full = detect_speaker_genders_with_confidence(audio_path, turns, speakers)
+    speaker_genders = {
+        spk: info.get("gender", "unknown")
+        for spk, info in full.items()
+    }
+    gender_confidences = {
+        spk: float(info.get("confidence") or 0.0)
+        for spk, info in full.items()
+    }
+    logger.info(
+        "WhisperX gender detection: %s",
+        {spk: f"{speaker_genders.get(spk, 'unknown')}:{gender_confidences.get(spk, 0):.2f}"
+         for spk in speakers},
+    )
+    return speaker_genders, gender_confidences
 
 
 def transcribe_project(project_id: str) -> dict:
@@ -2141,20 +2171,35 @@ def transcribe_project(project_id: str) -> dict:
     fusion = None  # type: ignore[assignment]
     face_result = None  # cũng cần ngoài scope cho gender_detection wire
 
+    if used_whisperx and whisperx_speakers:
+        try:
+            wx_genders, wx_confs = _detect_genders_for_whisperx_speakers(
+                merged, audio_path, whisperx_speakers,
+            )
+            if wx_genders:
+                speaker_genders.update(wx_genders)
+                gender_confidences.update(wx_confs)
+                for seg in merged:
+                    spk = seg.get("speaker")
+                    if spk:
+                        seg["audio_speaker"] = spk
+                        seg["audio_speaker_gender"] = speaker_genders.get(spk)
+                        seg["speaker_gender"] = speaker_genders.get(spk)
+        except Exception as e:
+            logger.warning("WhisperX gender detection failed: %s", e)
+
     # Skip speaker pipeline khi:
     # 1. User explicit skip qua env (VOX_SKIP_SPEAKER_PIPELINE=true)
-    # 2. voice_count = 1 (single voice) → KHÔNG cần phân biệt speaker.
-    #    Tiết kiệm 60-180s phim ngắn (skip diarize + embedding + transcribe).
-    # 3. WhisperX path đã chạy + có speakers → speaker_pipeline trùng việc.
+    # 2. WhisperX path đã chạy + có speakers → speaker_pipeline trùng việc.
+    # voice_count=1 vẫn chạy speaker analysis vì dịch Việt cần biết nam/nữ
+    # và quan hệ nhân vật để xưng hô đúng, dù TTS chỉ dùng một giọng.
     skip_speaker = (
         os.environ.get("VOX_SKIP_SPEAKER_PIPELINE", "").lower() == "true"
-        or voice_count_meta == 1
         or (used_whisperx and len(whisperx_speakers) > 0)
     )
     if skip_speaker:
         reason = (
             "env" if os.environ.get("VOX_SKIP_SPEAKER_PIPELINE", "").lower() == "true"
-            else "voice_count=1" if voice_count_meta == 1
             else "whisperx_already_has_speakers"
         )
         logger.info("Skip speaker_pipeline (reason=%s) — saves 60-180s", reason)
@@ -2817,6 +2862,17 @@ def transcribe_project(project_id: str) -> dict:
             if _seg_gender == "unknown":
                 _seg_gender = None
 
+        word_items = []
+        for w in seg.get("words") or []:
+            if w.get("start") is None or w.get("end") is None:
+                continue
+            word_items.append({
+                "word": w.get("word") or w.get("text") or "",
+                "start": round(float(w.get("start") or 0.0), 3),
+                "end": round(float(w.get("end") or 0.0), 3),
+                "score": float(w.get("score") or w.get("probability") or 0.0),
+            })
+
         segments.append({
             "id": uuid.uuid4().hex[:8],
             "index": i,
@@ -2829,6 +2885,7 @@ def transcribe_project(project_id: str) -> dict:
             "voice_id": None,
             "speaker": seg.get("speaker"),
             "speaker_gender": _seg_gender,
+            "words": word_items,
             # Face detection fields — set bởi face_speaker_svc hook ở trên
             "face_id": seg.get("face_id"),
             "face_confidence": seg.get("face_confidence"),
@@ -2848,6 +2905,10 @@ def transcribe_project(project_id: str) -> dict:
     project["segments"] = segments
     project["source_language"] = result.get("language")
     project["speaker_genders"] = speaker_genders
+    if gender_confidences:
+        existing_confs = project.get("speaker_gender_confs") or {}
+        existing_confs.update(gender_confidences)
+        project["speaker_gender_confs"] = existing_confs
     project["status"] = "editing"
     _save_meta(project)
     logger.info("Transcribed %d segments for project %s", len(segments), project_id)
@@ -2900,6 +2961,11 @@ def translate_project(
 
     target_lang = project["target_language"]
     source_lang = project.get("source_language") or "auto"
+    try:
+        from app.services import cloud_translate_svc as _cloud_translate_for_cache
+        _cloud_translate_for_cache.clear_llm_genders()
+    except Exception:
+        pass
 
     # Normalize engine alias (legacy "google" == "google_free")
     eng = (engine or "google_free").lower()
@@ -3401,6 +3467,7 @@ def translate_project(
                 # (CHAR_XXX từ character_registry_summary nếu có) → gender source
                 # ưu tiên CharacterProfile-derived genders đã store trong meta.
                 # Fallback raw SPEAKER_XX cho legacy projects chưa có registry.
+                char_gender_updates: dict[str, str] = {}
                 try:
                     from app.services.speaker_pipeline import build_speaker_voice_map
                     voice_slots = project.get("voice_slots") or []
@@ -3423,6 +3490,7 @@ def translate_project(
                             cid = spk_to_char.get(raw_spk)
                             if cid:
                                 char_genders_rebuild[cid] = new_g
+                                char_gender_updates[cid] = new_g
                         new_voice_map = build_speaker_voice_map(
                             speakers=sorted(char_genders_rebuild.keys()),
                             voice_slots=voice_slots,
@@ -3451,6 +3519,18 @@ def translate_project(
                         )
                 except Exception as e:
                     logger.warning("Voice map rebuild fail: %s", e)
+                if char_gender_updates:
+                    for c in (project.get("character_registry_summary") or {}).get("characters") or []:
+                        cid = c.get("character_id")
+                        if cid in char_gender_updates:
+                            c["gender"] = char_gender_updates[cid]
+                for seg in project.get("segments", []):
+                    spk = seg.get("speaker")
+                    cid = seg.get("character_id")
+                    if cid in char_gender_updates:
+                        seg["speaker_gender"] = char_gender_updates[cid]
+                    elif spk in new_genders and new_genders[spk] in ("male", "female"):
+                        seg["speaker_gender"] = new_genders[spk]
         # Clear cache cho project sau
         cloud_translate_svc.clear_llm_genders()
     except Exception as e:
@@ -3687,18 +3767,10 @@ def generate_segment(project_id: str, seg_id: str) -> dict:
             # ── OmniVoice (local GPU) ──
             voice_prompt = None
 
-            # Voice resolution — chỉ 2 trường hợp:
-            #   1. User PICK voice clone trong slot → load .pt embedding đó
-            #   2. User KHÔNG pick gì → voice_prompt=None + all-source seed
-            #      (system tự sinh giọng baseline, consistent qua seed)
-            #
-            # voice_count=1 + no pick: 1 giọng baseline cố định cho cả video
-            # voice_count>1 + no pick: mỗi speaker 1 seed riêng → mỗi speaker
-            #    1 giọng baseline khác nhau, ổn định xuyên suốt.
-            #
-            # KHÔNG auto-load pool .pt (BLV/Châu Tinh Trì/Nữ) — user đã nói
-            # "không dùng giọng clone" khi không pick. Pool .pt là clone đã
-            # bake sẵn, dùng auto sẽ vi phạm UX.
+            # Voice resolution:
+            #   1. User pick voice clone/preset trong slot → dùng đúng slot đó.
+            #   2. Multi-voice không pick slot → tự chọn preset nam/nữ mặc định.
+            #   3. Single-voice không pick → baseline seed cố định cho cả video.
             voice_id = _pick_omni_voice_id_for_segment(seg, project)
             voice_count = int(project.get("voice_count") or 1)
 
@@ -4893,7 +4965,14 @@ def generate_srt(project_id: str, use_translated: bool = True) -> str:
         raise ValueError("Project not found")
 
     lines = []
-    for i, seg in enumerate(project["segments"]):
+    sub_cues: list[dict] = []
+    for seg in project["segments"]:
+        sub_cues.extend(_split_segment_for_subtitle(seg, max_chars=50, use_translated=use_translated))
+    sub_cues = _normalize_subtitle_cues(
+        sub_cues,
+        video_duration=float(project.get("video_duration") or 0.0) or None,
+    )
+    for i, seg in enumerate(sub_cues):
         text = seg["translated_text"] if use_translated and seg["translated_text"].strip() else seg["original_text"]
         if not text.strip():
             continue
@@ -4917,7 +4996,14 @@ def generate_vtt(project_id: str, use_translated: bool = True) -> str:
         raise ValueError("Project not found")
 
     lines = ["WEBVTT", ""]
+    sub_cues: list[dict] = []
     for seg in project["segments"]:
+        sub_cues.extend(_split_segment_for_subtitle(seg, max_chars=50, use_translated=use_translated))
+    sub_cues = _normalize_subtitle_cues(
+        sub_cues,
+        video_duration=float(project.get("video_duration") or 0.0) or None,
+    )
+    for seg in sub_cues:
         text = seg["translated_text"] if use_translated and seg["translated_text"].strip() else seg["original_text"]
         if not text.strip():
             continue
@@ -5080,32 +5166,144 @@ def _split_text_for_subtitle(text: str, max_chars: int = 50) -> list[str]:
     return [c for c in final if c.strip()]
 
 
-def _split_segment_for_subtitle(seg: dict, max_chars: int = 50) -> list[dict]:
-    """Split 1 segment thành nhiều subtitle cues, phân bổ timing theo char count."""
-    text = (seg.get("translated_text") or seg.get("original_text") or "").strip()
+def _valid_word_times(seg: dict) -> list[dict]:
+    words = []
+    seg_start = float(seg.get("start", 0.0) or 0.0)
+    seg_end = float(seg.get("end", seg_start) or seg_start)
+    for w in seg.get("words") or []:
+        if w.get("start") is None or w.get("end") is None:
+            continue
+        start = float(w.get("start") or 0.0)
+        end = float(w.get("end") or 0.0)
+        if end <= start:
+            continue
+        if end < seg_start - 0.2 or start > seg_end + 0.2:
+            continue
+        words.append({
+            "word": w.get("word") or w.get("text") or "",
+            "start": start,
+            "end": end,
+            "score": w.get("score") or w.get("probability") or 0.0,
+        })
+    return sorted(words, key=lambda item: item["start"])
+
+
+def _timed_ranges_for_chunks(seg: dict, chunks: list[str]) -> list[tuple[float, float, list[dict]]]:
+    """Map subtitle chunks vào timeline. Ưu tiên word timestamps thật."""
+    seg_start = float(seg.get("start", 0.0) or 0.0)
+    seg_end = float(seg.get("end", seg_start) or seg_start)
+    duration = max(0.05, seg_end - seg_start)
+    if len(chunks) <= 1:
+        return [(seg_start, seg_end, _valid_word_times(seg))]
+
+    words = _valid_word_times(seg)
+    if len(words) >= len(chunks):
+        weights = [max(1, len(str(w.get("word") or "").strip())) for w in words]
+        total_weight = sum(weights) or len(words)
+        total_units = sum(max(1, len(c)) for c in chunks) or len(chunks)
+        cum_weights = []
+        cursor = 0
+        for weight in weights:
+            cursor += weight
+            cum_weights.append(cursor)
+
+        ranges: list[tuple[float, float, list[dict]]] = []
+        start_idx = 0
+        used_units = 0
+        prev_end = seg_start
+        for i, chunk in enumerate(chunks):
+            used_units += max(1, len(chunk))
+            if i == len(chunks) - 1:
+                end_idx = len(words) - 1
+            else:
+                target = total_weight * (used_units / total_units)
+                end_idx = start_idx
+                while end_idx < len(words) - 1 and cum_weights[end_idx] < target:
+                    end_idx += 1
+                # Giữ tối thiểu 1 word cho mỗi cue còn lại.
+                max_end = len(words) - (len(chunks) - i)
+                end_idx = min(max(end_idx, start_idx), max_end)
+            chunk_words = words[start_idx:end_idx + 1]
+            start = max(seg_start, chunk_words[0]["start"]) if i == 0 else max(prev_end, chunk_words[0]["start"])
+            end = min(seg_end, chunk_words[-1]["end"])
+            if end <= start:
+                frac_start = sum(max(1, len(c)) for c in chunks[:i]) / total_units
+                frac_end = used_units / total_units
+                start = seg_start + frac_start * duration
+                end = seg_start + frac_end * duration
+            ranges.append((start, end, chunk_words))
+            prev_end = end
+            start_idx = min(end_idx + 1, len(words) - 1)
+        return ranges
+
+    total_chars = sum(max(1, len(c)) for c in chunks) or len(chunks)
+    ranges = []
+    acc_chars = 0
+    for chunk in chunks:
+        cue_start = seg_start + (acc_chars / total_chars) * duration
+        acc_chars += max(1, len(chunk))
+        cue_end = seg_start + (acc_chars / total_chars) * duration
+        ranges.append((cue_start, cue_end, []))
+    return ranges
+
+
+def _normalize_subtitle_cues(
+    cues: list[dict],
+    video_duration: float | None = None,
+    min_duration: float = 0.35,
+    gap: float = 0.02,
+) -> list[dict]:
+    out: list[dict] = []
+    for cue in sorted(cues, key=lambda c: float(c.get("start", 0.0) or 0.0)):
+        start = max(0.0, float(cue.get("start", 0.0) or 0.0))
+        end = max(start + 0.05, float(cue.get("end", start + min_duration) or start + min_duration))
+        if out and start < out[-1]["end"] + gap:
+            prev = out[-1]
+            if start - prev["start"] >= min_duration:
+                prev["end"] = round(max(prev["start"] + min_duration, start - gap), 3)
+            start = max(start, prev["end"] + gap)
+        if end < start + min_duration:
+            end = start + min_duration
+        if video_duration and video_duration > 0 and end > video_duration:
+            end = video_duration
+            if start >= end:
+                start = max(0.0, end - min_duration)
+        clean = dict(cue)
+        clean["start"] = round(start, 3)
+        clean["end"] = round(max(start + 0.05, end), 3)
+        out.append(clean)
+    return out
+
+
+def _split_segment_for_subtitle(
+    seg: dict,
+    max_chars: int = 50,
+    use_translated: bool = True,
+) -> list[dict]:
+    """Split 1 segment thành nhiều subtitle cues, ưu tiên word-level timing."""
+    text = (
+        seg.get("translated_text")
+        if use_translated and (seg.get("translated_text") or "").strip()
+        else seg.get("original_text")
+    ) or ""
+    text = text.strip()
     if not text:
-        return [seg]
+        return []
     cues_text = _split_text_for_subtitle(text, max_chars)
     if len(cues_text) <= 1:
-        return [seg]
+        cue = dict(seg)
+        cue["translated_text"] = text
+        cue["original_text"] = text
+        return [cue]
 
-    total_chars = sum(len(c) for c in cues_text)
-    if total_chars == 0:
-        return [seg]
-
-    seg_start = seg["start"]
-    seg_dur = seg["end"] - seg["start"]
     out = []
-    acc_chars = 0
-    for i, ctxt in enumerate(cues_text):
-        cue_start = seg_start + (acc_chars / total_chars) * seg_dur
-        acc_chars += len(ctxt)
-        cue_end = seg_start + (acc_chars / total_chars) * seg_dur
+    for ctxt, (cue_start, cue_end, cue_words) in zip(cues_text, _timed_ranges_for_chunks(seg, cues_text)):
         cue = dict(seg)
         cue["start"] = cue_start
         cue["end"] = cue_end
         cue["translated_text"] = ctxt
         cue["original_text"] = ctxt  # subtitle dùng text đã chia
+        cue["words"] = cue_words
         out.append(cue)
     return out
 
@@ -5272,7 +5470,11 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         s_text = (seg.get("translated_text") if use_translated else "") or seg.get("original_text") or ""
         if not s_text.strip():
             continue
-        sub_cues.extend(_split_segment_for_subtitle(seg, max_chars=50))
+        sub_cues.extend(_split_segment_for_subtitle(seg, max_chars=50, use_translated=use_translated))
+    sub_cues = _normalize_subtitle_cues(
+        sub_cues,
+        video_duration=float(project.get("video_duration") or 0.0) or None,
+    )
 
     for seg in sub_cues:
         text = seg["translated_text"] if use_translated and seg["translated_text"].strip() else seg["original_text"]
@@ -5460,22 +5662,18 @@ def auto_chunk_project_segments(project_id: str) -> dict:
         if len(chunks) <= 1:
             new_segments.append(seg)
             continue
-        total_chars = sum(len(c) for c in chunks)
-        dur = max(0.1, seg["end"] - seg["start"])
-        elapsed = 0
-        for i, ch in enumerate(chunks):
-            frac_start = elapsed / total_chars
-            elapsed += len(ch)
-            frac_end = elapsed / total_chars
-            sub_start = round(seg["start"] + frac_start * dur, 2)
-            sub_end = round(seg["start"] + frac_end * dur, 2)
+        timed_ranges = _timed_ranges_for_chunks(seg, chunks)
+        for i, (ch, (sub_start, sub_end, cue_words)) in enumerate(zip(chunks, timed_ranges)):
+            source_chunk = "".join(w.get("word", "") for w in cue_words).strip()
             new_segments.append({
                 **seg,
                 "id": uuid.uuid4().hex[:8],
-                "start": sub_start,
-                "end": sub_end,
+                "start": round(sub_start, 2),
+                "end": round(sub_end, 2),
+                "original_text": source_chunk or seg.get("original_text", ""),
                 "translated_text": ch,
                 "speech_text": ch,
+                "words": cue_words,
                 # Reset TTS status vì text thay đổi
                 "status": "pending",
             })

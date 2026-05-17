@@ -52,7 +52,7 @@ def translate_segments(
             return _translate_uncached(
                 uncached, target_language, source_language,
                 topic_hint, glossary, film_genre, visual_context,
-                character_registry_block,
+                character_registry_block, speaker_genders,
             )
 
         return cached_translate_segments(
@@ -68,7 +68,7 @@ def translate_segments(
         return _translate_uncached(
             segments, target_language, source_language,
             topic_hint, glossary, film_genre, visual_context,
-            character_registry_block,
+            character_registry_block, speaker_genders,
         )
 
 
@@ -81,11 +81,18 @@ def _translate_uncached(
     film_genre: str | None,
     visual_context: dict | None = None,
     character_registry_block: str | None = None,
+    speaker_genders: dict | None = None,
 ) -> list[dict]:
     """Internal — gọi 3-pass thực sự (sau cache miss)."""
     from app.services.llm import run_analyze, run_translate, run_edit
     from app.services.llm.prompts import _max_chars
     from app.services import glossary_svc
+    from app.services.cloud_translate_svc import (
+        _attach_speaker_gender_hints,
+        _merge_audio_gender_hints,
+    )
+
+    segments = _attach_speaker_gender_hints(segments, speaker_genders) or segments
 
     glossary_block = glossary_svc.format_for_prompt(glossary) if glossary else None
     topic_block = glossary_svc.format_topic_hint_for_prompt(topic_hint) if topic_hint else None
@@ -113,6 +120,7 @@ def _translate_uncached(
             film_genre=film_genre,
             visual_context=visual_context,
         )
+        relationships = _merge_audio_gender_hints(relationships, speaker_genders)
         # Backward-compat: store FULL info (character_name, age, role) cho
         # dubbing_svc đọc lại — TTS routing + UI hiển thị nhân vật.
         if relationships and relationships.get("speakers"):

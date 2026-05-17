@@ -1317,10 +1317,17 @@ def build_translator_prompt(
                        "tiên_hiệp", "tien_hiep",
                    )
 
+    audio_gender_hints: dict[str, str] = {}
+    for seg in segments:
+        spk = seg.get("speaker")
+        gender = (seg.get("speaker_gender") or seg.get("audio_speaker_gender") or "").lower()
+        if spk and gender in ("male", "female", "unknown"):
+            audio_gender_hints[str(spk)] = gender
+
     # Build seg lines với anchor
     has_rels = bool(speaker_relationships and speaker_relationships.get("speakers"))
     seg_lines = []
-    for seg in segments:
+    for line_no, seg in enumerate(segments, 1):
         text = (seg.get("original_text") or "").strip()
         if not text:
             continue
@@ -1329,9 +1336,12 @@ def build_translator_prompt(
             anchor = _per_segment_anchor(seg, speaker_relationships)
             prefix = f'[{seg["speaker"]}: {anchor}, max {budget} chars]' if anchor \
                      else f'[{seg["speaker"]}, max {budget} chars]'
+        elif seg.get("speaker"):
+            gender = audio_gender_hints.get(str(seg.get("speaker")), "unknown")
+            prefix = f'[{seg["speaker"]}:{gender}, max {budget} chars]'
         else:
             prefix = f'[max {budget} chars]'
-        seg_lines.append(f'{seg["index"] + 1}. {prefix} {text}')
+        seg_lines.append(f"{line_no}. {prefix} {text}")
 
     anchor_block = ""
     if has_rels:
@@ -1397,6 +1407,13 @@ BƯỚC 4 — TRƯỚC KHI XUẤT OUTPUT:
    • Nếu có "Vợ"/"Em yêu"/"Bà xã" vocative → speaker xưng "anh".
    • Nếu có "Chồng"/"Anh yêu"/"Ông xã" vocative → speaker xưng "em".
 """
+        if audio_gender_hints:
+            gender_lines = ", ".join(f"{spk}={gender}" for spk, gender in sorted(audio_gender_hints.items()))
+            anchor_block = (
+                "🔊 AUDIO GENDER HINTS (dùng để chọn xưng hô, không thay thế context):\n"
+                f"   {gender_lines}\n\n"
+                + anchor_block
+            )
     else:
         # Non-Vietnamese, no speaker map: ask LLM to self-detect & keep
         # pronouns / forms of address consistent per inferred speaker.
@@ -1424,6 +1441,13 @@ STEP 4 — BEFORE producing output, re-read line 1 and the last line: if the
 If only 1-2 lines and context is unclear, default to the warmer/more intimate
 register typical for the genre, not the formal one.
 """
+        if audio_gender_hints:
+            gender_lines = ", ".join(f"{spk}={gender}" for spk, gender in sorted(audio_gender_hints.items()))
+            anchor_block = (
+                "🔊 AUDIO GENDER HINTS (use as speaker metadata, still infer relationship from text):\n"
+                f"   {gender_lines}\n\n"
+                + anchor_block
+            )
 
     # Glossary từ Pass-0 (name_map / term_map / place_map). Đây là bảng tra
     # cứu authoritative — đặt ngang tầm anchor_block (không vùi vào extra).
@@ -1963,8 +1987,7 @@ def build_editor_prompt(
 
     # Build item lines: # | speaker(role) | original | literal | max
     item_lines = []
-    for it in items:
-        idx = it["index"]
+    for idx, it in enumerate(items, 1):
         spk = it.get("speaker") or ""
         role = role_map.get(spk, "")
         spk_label = f"{spk}({role})" if role else (spk or "?")
@@ -1972,7 +1995,7 @@ def build_editor_prompt(
         lit = (it.get("literal") or "").strip()
         max_c = it.get("max_chars", 50)
         item_lines.append(
-            f"{idx + 1}. [{spk_label}, max {max_c}] gốc: {orig!r} | literal: {lit!r}"
+            f"{idx}. [{spk_label}, max {max_c}] gốc: {orig!r} | literal: {lit!r}"
         )
 
     scene_block = ""
