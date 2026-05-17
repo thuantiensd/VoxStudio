@@ -377,6 +377,37 @@ def test_risk_2_majority_by_char_count_not_line_count():
           f"female wins (3 chars > 1)")
 
 
+def test_phase_12_known_gender_priority_over_unknown_top():
+    """Phase 12 fix critical: 1 male + 2 unknown chars, 2 slots [male, female]
+    → male char PHẢI lấy male slot, unknown chars KHÔNG được chiếm trước.
+
+    Bug trước fix: nếu unknown char có line_count cao hơn male, nó claim
+    ANY unused slot (vd male slot) → male char đến sau bị mất slot match
+    → cùng voice. Fix: 2-pass — known gender first.
+    """
+    chars = _make_chars([
+        # CHAR_000 unknown line=100 (top by line_count)
+        ("CHAR_000", "unknown", 100, 200.0),
+        # CHAR_002 male line=80 (rank 2 — would lose slot 0 without fix)
+        ("CHAR_002", "male", 80, 160.0),
+        # CHAR_001 unknown line=50 (rank 3, not top with 2 slots)
+        ("CHAR_001", "unknown", 50, 100.0),
+    ])
+    slots = _slots(("nam_long_vu", "male"), ("nu_co_ba", "female"))
+    vm, warnings = build_character_voice_map(chars, slots, mode="multi_voice")
+
+    # CHAR_002 (male) phải lấy nam_long_vu (male slot)
+    assert vm["CHAR_002"] == "nam_long_vu", \
+        f"Male char phải claim male slot, got {vm['CHAR_002']}"
+    # CHAR_000 (top unknown) phải lấy nu_co_ba (slot còn lại)
+    assert vm["CHAR_000"] == "nu_co_ba", \
+        f"Unknown top phải lấy slot còn lại (nu_co_ba), got {vm['CHAR_000']}"
+    # 2 voices distinct cho top 2 chars
+    assert vm["CHAR_000"] != vm["CHAR_002"]
+    print(f"✓ test_phase_12_known_gender_priority_over_unknown_top — "
+          f"CHAR_002 (male) → nam_long_vu, CHAR_000 (unknown top) → nu_co_ba")
+
+
 def test_phase_12_multi_voice_2_unknown_chars_distinct_voices():
     """Phase 12 fix: voice_count=2 + 2 chars unknown gender + 2 slots gendered.
     Expected: 2 chars → 2 distinct voices (NOT collapse vào cùng slot[0])."""
@@ -454,6 +485,7 @@ def main():
         test_risk_1_tie_breaker_deterministic,
         test_risk_2_majority_by_char_count_not_line_count,
         test_risk_3_fallback_priority_explicit_over_majority,
+        test_phase_12_known_gender_priority_over_unknown_top,
         test_phase_12_multi_voice_2_unknown_chars_distinct_voices,
         test_legacy_build_speaker_voice_map_still_works,
     ]

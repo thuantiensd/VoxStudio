@@ -138,8 +138,38 @@ def build_character_voice_map(
         majority_g = _compute_majority_gender(characters)
         used_slot_indices: set[int] = set()
 
-        # Top N: assign từng slot riêng (prefer gender match)
-        for rank, (char_id, profile) in enumerate(sorted_chars[:n_slots]):
+        # Phase 12 fix — 2-PASS top N assignment để tránh unknown char chiếm
+        # slot trước khi known-gender char claim.
+        # Bug trước: top 1 = unknown is_top → fallback chiếm ANY unused slot
+        # (vd slot 0 = male) → top 2 = male char đến SAU bị mất slot match
+        # → reuse same voice → COLLAPSE.
+        # Fix: Pass 1 — known-gender chars (male/female) claim matching slot
+        #               TRƯỚC. Pass 2 — unknown chars claim slot còn lại SAU.
+        top_chars = sorted_chars[:n_slots]
+        known_gender_chars = [
+            (cid, p) for cid, p in top_chars if p.gender in ("male", "female")
+        ]
+        unknown_gender_chars = [
+            (cid, p) for cid, p in top_chars if p.gender not in ("male", "female")
+        ]
+
+        # Pass 1: known-gender chars first (claim matching gender slots)
+        for char_id, profile in known_gender_chars:
+            voice_id, warning = _resolve_voice_for_character(
+                char_id=char_id,
+                profile=profile,
+                voice_slots=voice_slots,
+                fallback_voice_id=fallback_voice_id,
+                majority_gender=majority_g,
+                is_top_priority=True,
+                used_slots=used_slot_indices,
+            )
+            voice_map[char_id] = voice_id
+            if warning:
+                warnings.append(warning)
+
+        # Pass 2: unknown chars last (take whatever slot remains)
+        for char_id, profile in unknown_gender_chars:
             voice_id, warning = _resolve_voice_for_character(
                 char_id=char_id,
                 profile=profile,
