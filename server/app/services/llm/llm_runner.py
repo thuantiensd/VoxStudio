@@ -283,7 +283,9 @@ def _call_llm(engine: str, prompt: dict,
               api_key: Optional[str], model: Optional[str]) -> str:
     """Dispatch tới engine. Trả raw text response."""
     if engine == "gemini":
-        return _call_gemini_sdk(prompt, model=model)
+        # Phase 12 fix: pass api_key cho BYOK. Nếu không có api_key arg,
+        # fallback env GEMINI_API_KEY (server-side mode).
+        return _call_gemini_sdk(prompt, model=model, api_key=api_key)
     if engine == "gemini_http":
         return _call_gemini_http(prompt, api_key=api_key, model=model)
     if engine == "openai":
@@ -293,14 +295,27 @@ def _call_llm(engine: str, prompt: dict,
     raise ValueError(f"engine không support: {engine!r}")
 
 
-def _call_gemini_sdk(prompt: dict, model: Optional[str] = None) -> str:
-    """Gemini via SDK. Hard timeout via threading."""
+def _call_gemini_sdk(
+    prompt: dict,
+    model: Optional[str] = None,
+    api_key: Optional[str] = None,
+) -> str:
+    """Gemini via SDK. Hard timeout via threading.
+
+    Phase 12 fix — accept api_key (BYOK) hoặc fallback env GEMINI_API_KEY:
+      - api_key explicit (user provided in UI) → ưu tiên
+      - env GEMINI_API_KEY (server-side) → fallback
+    """
     import google.generativeai as genai
     from app.config import GEMINI_API_KEY
 
-    if not GEMINI_API_KEY:
-        raise ValueError("GEMINI_API_KEY not set")
-    genai.configure(api_key=GEMINI_API_KEY)
+    effective_key = api_key or GEMINI_API_KEY
+    if not effective_key:
+        raise ValueError(
+            "GEMINI_API_KEY not set. Provide api_key (BYOK) or set "
+            "GEMINI_API_KEY env var."
+        )
+    genai.configure(api_key=effective_key)
     # Default flagship pro (chất lượng dịch tốt nhất). Flash chỉ dùng khi
     # user explicit pick (test/cost saving).
     m = genai.GenerativeModel(model or "gemini-2.5-pro")
