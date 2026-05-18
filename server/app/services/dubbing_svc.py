@@ -3906,25 +3906,20 @@ def generate_segment(project_id: str, seg_id: str) -> dict:
                                    seg.get("id", "?"), MAX_SPEED_FACTOR,
                                    (actual_dur / MAX_SPEED_FACTOR - target_duration) * 1000)
             elif actual_dur < target_duration * 0.9:
-                # Audio ngắn hơn slot rõ rệt → gentle slowdown để khớp timing
-                # thay vì cụt + silence pad gây cảm giác "đứt" giữa câu.
-                # Tier theo độ dài text — text càng dài, slowdown càng nhẹ để
-                # tránh muddy (atempo < 0.92 cho text dài → voice méo).
+                # Audio ngắn hơn slot → gentle slowdown CHỈ cho text dài để giữ
+                # rhythm. Câu ngắn (≤25 chars) GIỮ tốc độ bình thường, silence
+                # tự fill — tự nhiên hơn slowdown 2 từ thành 2s.
+                #
+                # User feedback: "câu 2 từ đọc quá chậm" — Tier 1 cũ slowdown
+                # text rất ngắn xuống 0.88x làm "Xảo Duyệt." kéo 2s. BỎ Tier 1.
                 n_chars = len(tts_text.strip())
                 slow_factor = 1.0
-                # Tier 1: text RẤT ngắn (≤12 chars) + slot dài → slow aggressive
-                if (n_chars <= 12 and target_duration > 1.5
-                        and actual_dur < target_duration * 0.65):
-                    desired_dur = target_duration * 0.85
-                    slow_factor = max(0.88, actual_dur / desired_dur)
-                # Tier 2 (MỚI): text MEDIUM (13-40 chars) + slot khá dài
-                # → slow nhẹ hơn (floor 0.92) để fill timing không bị đứt
-                elif (13 <= n_chars <= 40 and target_duration > 2.0
-                        and actual_dur < target_duration * 0.75):
-                    desired_dur = target_duration * 0.88
-                    slow_factor = max(0.92, actual_dur / desired_dur)
-                # Tier 3 (MỚI): text DÀI (41-80 chars) + slot dài hơn nhiều
-                # → slow rất nhẹ (floor 0.95) — tránh muddy nhưng vẫn fill
+                # Tier 2: text MEDIUM (26-40 chars) + slot khá dài → slow nhẹ
+                if (26 <= n_chars <= 40 and target_duration > 2.5
+                        and actual_dur < target_duration * 0.70):
+                    desired_dur = target_duration * 0.90
+                    slow_factor = max(0.93, actual_dur / desired_dur)
+                # Tier 3: text DÀI (41-80 chars) + slot dài hơn nhiều
                 elif (41 <= n_chars <= 80 and target_duration > 3.5
                         and actual_dur < target_duration * 0.80):
                     desired_dur = target_duration * 0.92
@@ -3933,8 +3928,7 @@ def generate_segment(project_id: str, seg_id: str) -> dict:
                 if slow_factor < 0.97:
                     logger.info("[dub] gentle slowdown tier %s: %d chars · "
                                 "actual=%.2fs target=%.2fs speed=%.2fx",
-                                ("short" if n_chars <= 12 else
-                                 "medium" if n_chars <= 40 else "long"),
+                                ("medium" if n_chars <= 40 else "long"),
                                 n_chars, actual_dur, target_duration, slow_factor)
                     seg_dir = _segments_dir(project_id)
                     raw_wav = seg_dir / f"{seg_id}_raw.wav"
