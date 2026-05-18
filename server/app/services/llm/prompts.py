@@ -1267,6 +1267,54 @@ def _per_segment_anchor(seg: dict, relationships: dict) -> str:
 
 
 # ═══════════════════════════════════════════════════════════════
+# KINSHIP HARD RULES — primary source of truth cho ADDRESSEE pronoun.
+# Inject LUÔN khi target=VN (regardless speaker_relationships / registry).
+# Đây là rule deterministic dễ verify, không bị bias bởi LLM context.
+# ═══════════════════════════════════════════════════════════════
+KINSHIP_HARD_RULES_VN = """
+🚨 KINSHIP HARD RULES (BẮT BUỘC — ưu tiên TUYỆT ĐỐI cao hơn mọi default):
+   Khi source có vocative kinship → speaker bị KHOÁ pronoun theo bảng:
+
+   • Vocative "妈/妈妈/娘/老妈" (Trung) HOẶC "Mẹ/Má/Mẹ ơi" (Việt)
+     → speaker là CON → tự xưng "con", gọi addressee "mẹ"/"má".
+     → KHÔNG được xưng "em"/"tôi"/"con gái" làm self.
+
+   • Vocative "爸/爸爸/爹/老爸" HOẶC "Bố/Ba/Cha/Bố ơi"
+     → speaker là CON → tự xưng "con", gọi addressee "bố"/"ba"/"cha".
+
+   • Vocative "儿子/女儿/孩子" HOẶC "Con/Con yêu/Con ơi"
+     → speaker là CHA/MẸ → tự xưng "ba"/"mẹ" theo gender, gọi addressee "con".
+     → KHÔNG được xưng "tôi"/"em" làm self khi rõ là cha mẹ.
+
+   • Vocative "老公/相公" HOẶC "Chồng/Anh ơi" (từ vợ)
+     → speaker là VỢ → tự xưng "em", gọi addressee "anh".
+
+   • Vocative "老婆/媳妇/夫人" HOẶC "Vợ/Em ơi" (từ chồng)
+     → speaker là CHỒNG → tự xưng "anh", gọi addressee "em".
+
+   • Vocative "爷爷/奶奶/外公/外婆" HOẶC "Ông/Bà"
+     → speaker là CHÁU → tự xưng "cháu".
+
+   • Vocative "哥/哥哥" HOẶC "Anh + tên" (gọi anh trai/anh lớn tuổi)
+     → speaker là EM → tự xưng "em", gọi addressee "anh".
+   • Vocative "姐/姐姐" HOẶC "Chị + tên"
+     → speaker là EM → tự xưng "em", gọi addressee "chị".
+
+⚡ Default khi KHÔNG có vocative kinship + KHÔNG xác định được quan hệ:
+   • Có chỉ dấu romance (1 cặp speaker, tone tình cảm, lời thoại mật thiết)
+     → "anh/em".
+   • Không có chỉ dấu romance, formal/business context → "tôi/anh/chị".
+   • KHÔNG mặc định "anh/em" cho mọi case — phải kiểm tra vocative trước.
+
+📌 KIỂM TRA CUỐI trước khi xuất output:
+   • Nếu có "Mẹ"/"Bố"/"Cha"/"Má" làm vocative → speaker line đó BẮT BUỘC
+     xưng "con" (không "em"/"tôi").
+   • Nếu có "Vợ"/"Em yêu"/"Bà xã" vocative → speaker xưng "anh".
+   • Nếu có "Chồng"/"Anh yêu"/"Ông xã" vocative → speaker xưng "em".
+"""
+
+
+# ═══════════════════════════════════════════════════════════════
 # Pass-1: TRANSLATOR — literal nhưng pronoun đúng + budget
 # ═══════════════════════════════════════════════════════════════
 
@@ -1345,8 +1393,13 @@ def build_translator_prompt(
 
     anchor_block = ""
     if has_rels:
+        # Có speaker_relationships (Pass-0 LLM analyze) → dùng nó như anchor.
+        # KINSHIP RULES vẫn append phía dưới để LLM luôn có rule deterministic.
         anchor_block = "\n" + _format_speaker_anchor_block(speaker_relationships) + "\n"
+        if is_vn:
+            anchor_block += KINSHIP_HARD_RULES_VN
     elif is_vn:
+        # Không có speaker_relationships → LLM tự suy luận speaker + KINSHIP rules.
         anchor_block = """
 🎭 KHÔNG CÓ SPEAKER MAP — TỰ SUY LUẬN (CỰC QUAN TRỌNG):
 
@@ -1366,47 +1419,7 @@ BƯỚC 3 — Sau khi suy luận, ASSIGN pronoun NHẤT QUÁN:
    • Đánh nhãn nội bộ: SPEAKER A, SPEAKER B, SPEAKER C, ...
    • Mỗi speaker chỉ dùng 1 self_pronoun cho CÙNG addressee xuyên suốt batch
    • Mỗi cặp speaker chỉ dùng 1 cách xưng hô lẫn nhau
-
-🚨 KINSHIP HARD RULES (BẮT BUỘC — ưu tiên TUYỆT ĐỐI cao hơn mọi default):
-   Khi source có vocative kinship → speaker bị KHOÁ pronoun theo bảng:
-
-   • Vocative "妈/妈妈/娘/老妈" (Trung) HOẶC "Mẹ/Má/Mẹ ơi" (Việt)
-     → speaker là CON → tự xưng "con", gọi addressee "mẹ"/"má".
-     → KHÔNG được xưng "em"/"tôi"/"con gái" làm self.
-
-   • Vocative "爸/爸爸/爹/老爸" HOẶC "Bố/Ba/Cha/Bố ơi"
-     → speaker là CON → tự xưng "con", gọi addressee "bố"/"ba"/"cha".
-
-   • Vocative "儿子/女儿/孩子" HOẶC "Con/Con yêu/Con ơi"
-     → speaker là CHA/MẸ → tự xưng "ba"/"mẹ" theo gender, gọi addressee "con".
-     → KHÔNG được xưng "tôi"/"em" làm self khi rõ là cha mẹ.
-
-   • Vocative "老公/相公" HOẶC "Chồng/Anh ơi" (từ vợ)
-     → speaker là VỢ → tự xưng "em", gọi addressee "anh".
-
-   • Vocative "老婆/媳妇/夫人" HOẶC "Vợ/Em ơi" (từ chồng)
-     → speaker là CHỒNG → tự xưng "anh", gọi addressee "em".
-
-   • Vocative "爷爷/奶奶/外公/外婆" HOẶC "Ông/Bà"
-     → speaker là CHÁU → tự xưng "cháu".
-
-   • Vocative "哥/哥哥" HOẶC "Anh + tên" (gọi anh trai/anh lớn tuổi)
-     → speaker là EM → tự xưng "em", gọi addressee "anh".
-   • Vocative "姐/姐姐" HOẶC "Chị + tên"
-     → speaker là EM → tự xưng "em", gọi addressee "chị".
-
-⚡ Default khi KHÔNG có vocative kinship + KHÔNG xác định được quan hệ:
-   • Có chỉ dấu romance (1 cặp speaker, tone tình cảm, lời thoại mật thiết)
-     → "anh/em".
-   • Không có chỉ dấu romance, formal/business context → "tôi/anh/chị".
-   • KHÔNG mặc định "anh/em" cho mọi case — phải kiểm tra vocative trước.
-
-BƯỚC 4 — TRƯỚC KHI XUẤT OUTPUT:
-   • Quét lại từng line: nếu có "Mẹ"/"Bố"/"Cha"/"Má" làm vocative
-     → speaker line đó BẮT BUỘC xưng "con" (không "em"/"tôi").
-   • Nếu có "Vợ"/"Em yêu"/"Bà xã" vocative → speaker xưng "anh".
-   • Nếu có "Chồng"/"Anh yêu"/"Ông xã" vocative → speaker xưng "em".
-"""
+""" + KINSHIP_HARD_RULES_VN
         if audio_gender_hints:
             gender_lines = ", ".join(f"{spk}={gender}" for spk, gender in sorted(audio_gender_hints.items()))
             anchor_block = (

@@ -125,10 +125,12 @@ def build_character_registry_prompt_block(
                 f"evidences={pm.evidences_count})"
             )
 
+    # Phase 12+1 (Option B): KINSHIP RULES là primary source trong
+    # build_translator_prompt (anchor_block). Registry block CHỈ giữ
+    # SELF-REFERENCE rules (gender-confidence) — KHÔNG repeat ADDRESSEE
+    # rules (kinship/vocative) ở đây, tránh chồng chéo với anchor_block.
     lines.append("")
-    lines.append("RULES (CRITICAL — phân biệt SELF-REFERENCE vs ADDRESSEE):")
-    lines.append("")
-    lines.append("SELF-REFERENCE (speaker xưng MÌNH):")
+    lines.append("SELF-REFERENCE RULES (speaker xưng MÌNH theo gender profile):")
     lines.append(
         f"  - gender_confidence >= {GENDER_HIGH}: dùng đúng anh/em/cô/chị/bố/mẹ "
         "theo profile gender."
@@ -142,30 +144,10 @@ def build_character_registry_prompt_block(
         "KHÔNG tự bịa anh/em/cô/chị cho self-reference."
     )
     lines.append("")
-    lines.append("ADDRESSEE (gọi NGƯỜI KHÁC — kinship/vocative):")
     lines.append(
-        "  - LUÔN giữ kinship form đúng theo NGUỒN, bất kể gender của speaker:"
+        "ADDRESSEE rules (gọi người khác) → xem KINSHIP HARD RULES trong anchor block."
     )
-    lines.append(
-        "    • 父/お父さん/爸 → \"Bố\" (KHÔNG phải \"Tôi\")"
-    )
-    lines.append(
-        "    • 母/お母さん/妈 → \"Mẹ\""
-    )
-    lines.append(
-        "    • 兄/お兄さん/哥 → \"Anh\" (khi gọi anh trai)"
-    )
-    lines.append(
-        "    • 姉/お姉さん/姐 → \"Chị\" (khi gọi chị gái)"
-    )
-    lines.append(
-        "    • Tên riêng → giữ nguyên tên (transliteration nếu cần)"
-    )
-    lines.append("")
     lines.append("LOCKED characters: gender + self-pronoun MUST match profile.")
-    lines.append(
-        "Don't invent xưng hô khi source genuinely ambiguous (không có kinship marker)."
-    )
 
     return "\n".join(lines)
 
