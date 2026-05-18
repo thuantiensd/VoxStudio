@@ -1921,17 +1921,9 @@ def transcribe_project(project_id: str) -> dict:
     pdir = _project_dir(project_id)
     audio_path = str(pdir / "original_audio.wav")
 
-    # Step 1: Auto-separate vocals (Demucs) — CHỈ chạy khi cần thiết.
-    # Demucs tốn 30-60s. Skip khi voice_count=1 + không cần music separated:
-    #   - voice_count=1: 1 giọng cho cả video, không cần phân tích speaker
-    #   - keep_accompaniment=False: user không cần giữ nhạc nền
-    # Khi skip → Whisper transcribe trên audio gốc (giảm chút accuracy nhưng
-    # nhanh hơn nhiều). Multi-voice (count>1) hoặc keep music thì vẫn chạy.
-    voice_count = int(project.get("voice_count") or 1)
-    keep_music = bool(project.get("keep_accompaniment", True))
-    need_separation = voice_count > 1 or keep_music
-
-    if need_separation and not vocal_separator_svc.is_separated(str(pdir)):
+    # Step 1: Auto-separate vocals (Demucs) if not already done
+    # Transcribing on clean vocals gives much better accuracy
+    if not vocal_separator_svc.is_separated(str(pdir)):
         try:
             logger.info("Auto-separating vocals before transcription (Demucs)...")
             vocal_separator_svc.separate(audio_path, str(pdir))
@@ -1939,8 +1931,6 @@ def transcribe_project(project_id: str) -> dict:
             _save_meta(project)
         except Exception as e:
             logger.warning("Vocal separation failed, transcribing full audio: %s", e)
-    elif not need_separation:
-        logger.info("Single voice + no music → skip Demucs (faster pipeline)")
 
     # Step 2: Pre-amplify vocals (compressor + LUFS norm) so Whisper catches
     # quiet whispers / internal monologues that VAD would otherwise filter as silence.
