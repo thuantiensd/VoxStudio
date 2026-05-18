@@ -1906,17 +1906,14 @@ def transcribe_project(project_id: str) -> dict:
     pdir = _project_dir(project_id)
     audio_path = str(pdir / "original_audio.wav")
 
-    # Step 1: Auto-separate vocals (Demucs) — CHỈ chạy khi cần thiết.
-    # Demucs tốn 30-60s. Skip khi voice_count=1 + không cần music separated:
-    #   - voice_count=1: 1 giọng cho cả video, không cần phân tích speaker
-    #   - keep_accompaniment=False: user không cần giữ nhạc nền
-    # Khi skip → Whisper transcribe trên audio gốc (giảm chút accuracy nhưng
-    # nhanh hơn nhiều). Multi-voice (count>1) hoặc keep music thì vẫn chạy.
-    voice_count = int(project.get("voice_count") or 1)
-    keep_music = bool(project.get("keep_accompaniment", True))
-    need_separation = voice_count > 1 or keep_music
-
-    if need_separation and not vocal_separator_svc.is_separated(str(pdir)):
+    # Step 1: Auto-separate vocals (Demucs) — LUÔN chạy.
+    # Lý do:
+    #   - STT trên vocals sạch nhạc → accuracy cao hơn
+    #   - Export mix LUÔN có accompaniment.wav + vocals.wav → không bao giờ
+    #     fallback dùng original_audio.wav (sẽ kéo cả tiếng người gốc vào mix
+    #     dù user đã tắt "Giữ giọng gốc").
+    # Cost: 30-60s/video. Idempotent — đã tách 1 lần thì skip.
+    if not vocal_separator_svc.is_separated(str(pdir)):
         try:
             logger.info("Auto-separating vocals before transcription (Demucs)...")
             vocal_separator_svc.separate(audio_path, str(pdir))
@@ -1924,8 +1921,6 @@ def transcribe_project(project_id: str) -> dict:
             _save_meta(project)
         except Exception as e:
             logger.warning("Vocal separation failed, transcribing full audio: %s", e)
-    elif not need_separation:
-        logger.info("Single voice + no music → skip Demucs (faster pipeline)")
 
     # Step 2: Pre-amplify vocals (compressor + LUFS norm) so Whisper catches
     # quiet whispers / internal monologues that VAD would otherwise filter as silence.
@@ -4832,46 +4827,76 @@ def export_video(project_id: str, keep_original_audio: bool = False,
                         logger.warning("Master chain failed in per-segment path: %s", e)
 
             # ── Mix accompaniment (nhạc nền + SFX, đã loại giọng) ──
+            # CHỈ dùng accompaniment.wav (đã loại giọng qua Demucs).
+            # KHÔNG fallback dùng original_audio.wav — file đó chứa cả giọng
+            # người gốc, sẽ kéo tiếng gốc vào mix dù user đã tắt
+            # "Giữ giọng gốc". Nếu accompaniment.wav không có (Demucs fail)
+            # → skip block này, log warning để user biết.
             if keep_accomp:
                 accomp_path = pdir / "accompaniment.wav"
-                orig_audio_path = pdir / "original_audio.wav"
-                bg_path = accomp_path if accomp_path.exists() else orig_audio_path
-                if bg_path.exists():
-                    bg_audio, bg_sr = sf.read(str(bg_path), dtype="float32")
+                if not accomp_path.exists():
+                    logger.warning(
+                        "keep_accompaniment=True nhưng accompaniment.wav không có "
+                        "(Demucs chưa chạy hoặc fail) — SKIP mix BGM. "
+                        "KHÔNG fallback original_audio.wav để tránh kéo giọng gốc vào mix."
+                    )
+                else:
+                    bg_audio, bg_sr = sf.read(str(accomp_path), dtype="float32")
                     if len(bg_audio) != total_samples:
                         from scipy.signal import resample
                         bg_audio = resample(bg_audio, total_samples).astype(np.float32)
 
-                    if enable_ducking and accomp_path.exists():
+                    if enable_ducking:
                         # Pro mix: voice EQ + sidechain compressor + LUFS normalize.
                         used_pro = False
                         if use_pro_mix:
                             try:
                                 from app.services.audio_mix_svc import pro_mix
-                                logger.info("Applying PRO audio mix (LUFS target=%.1f)", target_lufs)
+                                logger.info(
+                                    "Applying PRO audio mix (LUFS=%.1f, bgm_vol=%.2f)",
+                                    target_lufs, accomp_vol,
+                                )
                                 bg_mono = bg_audio.mean(axis=1) if bg_audio.ndim > 1 else bg_audio
+                                # Convert linear vol (0-1) → dB gain. Vol=1.0 → 0dB,
+                                # vol=0.5 → -6dB, vol=0.1 → -20dB. Floor ở -40dB.
+                                import math
+                                bgm_gain_db = 20.0 * math.log10(max(accomp_vol, 0.01))
                                 full_audio = pro_mix(
                                     voice=full_audio,
                                     bgm=bg_mono,
                                     sr=sr,
+                                    bgm_gain_db=bgm_gain_db,
                                     target_lufs=target_lufs,
                                 )
                                 used_pro = True
+                            except TypeError:
+                                # pro_mix signature cũ không nhận bgm_gain_db
+                                logger.warning("pro_mix legacy signature — bgm_gain_db ignored")
+                                try:
+                                    full_audio = pro_mix(
+                                        voice=full_audio,
+                                        bgm=bg_mono,
+                                        sr=sr,
+                                        target_lufs=target_lufs,
+                                    )
+                                    used_pro = True
+                                except Exception as e:
+                                    logger.warning("Pro mix failed: %s", e)
                             except Exception as e:
                                 logger.warning("Pro mix failed, falling back to envelope ducking: %s", e)
 
                         if not used_pro:
-                            logger.info("Applying legacy audio ducking (level=%.2f)", duck_level)
+                            logger.info("Applying legacy audio ducking (level=%.2f, vol=%.2f)",
+                                        duck_level, accomp_vol)
                             full_audio = _apply_ducking(
-                                bg_audio, full_audio, sr,
+                                bg_audio * accomp_vol, full_audio, sr,
                                 duck_level=duck_level,
                                 attack=duck_attack,
                                 release=duck_release,
                             )
                     else:
                         mix_len = min(len(full_audio), len(bg_audio))
-                        vol = accomp_vol if not accomp_path.exists() else min(accomp_vol * 3, 1.0)
-                        full_audio[:mix_len] += bg_audio[:mix_len] * vol
+                        full_audio[:mix_len] += bg_audio[:mix_len] * accomp_vol
 
             # ── Mix vocals (giọng người gốc, đã tách qua Demucs) — KHÔNG ducking ──
             if keep_vocals:
