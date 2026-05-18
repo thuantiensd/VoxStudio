@@ -1267,6 +1267,59 @@ def _per_segment_anchor(seg: dict, relationships: dict) -> str:
 
 
 # ═══════════════════════════════════════════════════════════════
+# SUBJECT INFERENCE RULES — Trung/Nhật/Hàn drop subject thường xuyên.
+# LLM PHẢI infer subject từ context preceding segments. KHÔNG được tự
+# bịa subject (thường default về "tôi/con") nếu source đã elide.
+#
+# General — áp dụng mọi phim, mọi genre.
+# ═══════════════════════════════════════════════════════════════
+SUBJECT_INFERENCE_RULES_VN = """
+🧭 SUBJECT INFERENCE (CỰC QUAN TRỌNG — drop-subject languages):
+
+Tiếng Trung/Nhật/Hàn THƯỜNG XUYÊN ẨN CHỦ NGỮ. Một câu như "身体不好" (sức
+khỏe không tốt) KHÔNG nói RÕ ai bệnh — phải nhìn context preceding để biết.
+
+🔑 NGUYÊN TẮC INFERENCE:
+
+1. TOPIC CONTINUITY — chủ đề được lập từ vài segment trước thì giữ nguyên:
+   • Nếu segment trước nói "Bố con tim không khỏe" → segment sau nhắc
+     "身体的事" (chuyện sức khỏe) PHẢI ám chỉ BỐ, không phải speaker.
+   • Sai phổ biến: dịch "Chuyện sức khỏe của con" trong khi context cả
+     đoạn nói về sức khỏe của BỐ → "Chuyện sức khỏe của bố".
+   • Quy tắc: chỉ chuyển topic khi source DÙNG TỪ MỚI để chuyển
+     (vd: "我自己的事 / 你自己" — "của tôi / của bạn").
+
+2. POSSESSIVE INFERENCE — sở hữu cách (của ai) phải match topic gần nhất:
+   • "他的病" sau khi nói về bố → "bệnh của bố"
+   • "公司的事" sau khi nhắc công ty của ai → "chuyện công ty của [người đó]"
+   • Đừng auto-default "của tôi/con" khi source không có 我的/我.
+
+3. DROPPED SUBJECT IN ACTION VERBS:
+   • "去看医生" (đi khám bác sĩ) sau khi nói bố ốm → "[BỐ] đi khám"
+     hoặc "đi khám bố" tuỳ context (action vs object).
+   • "吃药" sau khi mẹ chồng ốm → "(mẹ chồng) uống thuốc".
+
+4. CONVERSATIONAL ELLIPSIS — câu trả lời thường ẩn subject:
+   • A: "你身体怎么样?" (Sức khỏe sao rồi?)
+     B: "还行" (Tạm được) → "[Sức khỏe của tôi] tạm được" hoặc đơn giản
+        "Cũng tạm" — B đang nói về MÌNH (vì A hỏi about B).
+   • NHƯNG nếu A hỏi "爸的身体?" thì B: "还行" → "Sức khỏe của bố cũng
+     tạm" — context shift.
+
+5. CHECK LẠI TRƯỚC OUTPUT:
+   • Đọc lại 3 segments trước batch hiện tại
+   • Identify topic (ai/cái gì đang được thảo luận)
+   • Verify mỗi câu mình dịch CÓ subject thì subject ĐÚNG topic
+   • Nếu câu mình dịch tự thêm "tôi/con/anh/em" mà source KHÔNG có →
+     hỏi lại: source thật sự nói về speaker, hay về topic đang thảo luận?
+
+⚠️ CẤM: bịa subject "tôi/con/em" cho câu không có subject trong source.
+   Thà giữ câu mơ hồ ("Chuyện sức khỏe đó cũng không thể biết trước được")
+   còn hơn gán nhầm subject ("Chuyện sức khỏe của con...").
+"""
+
+
+# ═══════════════════════════════════════════════════════════════
 # KINSHIP HARD RULES — primary source of truth cho ADDRESSEE pronoun.
 # Inject LUÔN khi target=VN (regardless speaker_relationships / registry).
 # Đây là rule deterministic dễ verify, không bị bias bởi LLM context.
@@ -1397,7 +1450,7 @@ def build_translator_prompt(
         # KINSHIP RULES vẫn append phía dưới để LLM luôn có rule deterministic.
         anchor_block = "\n" + _format_speaker_anchor_block(speaker_relationships) + "\n"
         if is_vn:
-            anchor_block += KINSHIP_HARD_RULES_VN
+            anchor_block += KINSHIP_HARD_RULES_VN + SUBJECT_INFERENCE_RULES_VN
     elif is_vn:
         # Không có speaker_relationships → LLM tự suy luận speaker + KINSHIP rules.
         anchor_block = """
@@ -1419,7 +1472,7 @@ BƯỚC 3 — Sau khi suy luận, ASSIGN pronoun NHẤT QUÁN:
    • Đánh nhãn nội bộ: SPEAKER A, SPEAKER B, SPEAKER C, ...
    • Mỗi speaker chỉ dùng 1 self_pronoun cho CÙNG addressee xuyên suốt batch
    • Mỗi cặp speaker chỉ dùng 1 cách xưng hô lẫn nhau
-""" + KINSHIP_HARD_RULES_VN
+""" + KINSHIP_HARD_RULES_VN + SUBJECT_INFERENCE_RULES_VN
         if audio_gender_hints:
             gender_lines = ", ".join(f"{spk}={gender}" for spk, gender in sorted(audio_gender_hints.items()))
             anchor_block = (
