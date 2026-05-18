@@ -1612,8 +1612,46 @@ BƯỚC 2 — TRƯỚC KHI DỊCH, GHI NHỚ:
 
 BƯỚC 3 — DỊCH TỪNG LINE theo thứ tự, dùng context từ BƯỚC 1+2.
 
-BƯỚC 4 — TRƯỚC KHI XUẤT JSON: scan lại TẤT CẢ "translated" — đảm bảo
-   tên + pronoun + register nhất quán. Nếu thấy slip → SỬA NGAY.
+BƯỚC 4 — LOGIC REVIEW (BẮT BUỘC trước khi xuất JSON):
+
+   Đọc lại TOÀN BỘ output mình vừa dịch như là 1 đoạn hội thoại liền
+   mạch — KHÔNG phải check rule riêng lẻ, mà check Ý NGHĨA TỔNG THỂ.
+
+   4.1 — COHERENCE (mạch logic hợp lý):
+      • Đọc lần lượt N line. Mỗi line có flow tự nhiên với line trước không?
+      • Câu trả lời có match câu hỏi không? (vd: hỏi "khi nào?" → trả lời
+        thời gian, không phải địa điểm)
+      • Tone có hợp với scene không? (đám tang đừng có "vui quá!")
+      • Có line nào ngữ pháp lạ / vô nghĩa không?
+
+   4.2 — SUBJECT/OBJECT CHECK (sai subject = sai nghĩa lớn nhất):
+      • Mỗi câu mình tự thêm "tôi/con/anh/em" — verify lại từ context:
+        source có nói về speaker thật không, hay đang nói về người khác?
+      • Vd: context 3 line trước nói "Bố ốm" → line này "身体不好" PHẢI
+        ám chỉ BỐ, KHÔNG được auto-default "tôi/con".
+      • Possessive "của X" — X phải đúng người (BỐ ốm thì "thuốc của bố",
+        không phải "thuốc của con").
+
+   4.3 — CHARACTER NAME CONSISTENCY:
+      • Cùng 1 nhân vật trong batch → cùng 1 cách viết tên.
+      • Sai phổ biến: "Kiều Việt" line 5, "Kiều Viễn" line 12 — same char
+        khác tên. SỬA về 1 cách duy nhất.
+
+   4.4 — PRONOUN CONSISTENCY:
+      • Mỗi speaker chỉ dùng 1 self_pronoun xuyên batch.
+      • Mỗi cặp speaker chỉ 1 cách gọi nhau xuyên batch.
+      • Đầu "anh/em" thì cuối cũng "anh/em" (trừ khi source explicit đổi).
+
+   4.5 — REGISTER LOCK:
+      • Cổ trang → KHÔNG có từ modern (ok, bạn, kết hôn → thành thân, etc.)
+      • Modern → KHÔNG có từ cổ trang (đa tạ, tại hạ → cảm ơn, tôi).
+
+   4.6 — ACTION ITEM khi phát hiện sai:
+      • Nếu tìm ra slip → SỬA NGAY trong JSON output trước khi return.
+      • Đừng tự bào chữa "vì source ambiguous". Source ambiguous nghĩa là
+        phải INFER ĐÚNG từ context, không phải gán bừa subject/pronoun.
+      • Thà giữ câu mơ hồ ("Chuyện đó không thể biết trước") còn hơn
+        gán nhầm subject ("Chuyện sức khỏe của con...").
 
 NHIỆM VỤ Pass này:
 1. Nghĩa ĐÚNG (không paraphrase quá xa, không bịa)
