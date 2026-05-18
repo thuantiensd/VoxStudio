@@ -1350,14 +1350,16 @@ def _merge_short_segments(segments: list[dict], min_duration: float = 2.5,
     """Merge short segments with their neighbors for better dubbing timing.
 
     Merge rules (theo độ ưu tiên):
-      1. SENTENCE COMPLETION: Nếu prev kết thúc bằng comma/no-punct (chưa
-         đủ câu) AND gap nhỏ AND combined không quá dài → MERGE.
-         → Tránh sub kiểu "Chú Lâm nói anh ta là đồ vô dụng," | "chỉ làm
-         con bị bạn bè cười nhạo." (1 câu bị tách 2 dòng)
-      2. SHORT-DURATION FALLBACK: Nếu prev/cur quá ngắn (< min_duration) AND
-         gap nhỏ → MERGE (giúp dubbing có timing đủ thoải mái cho TTS).
-      3. KHÔNG merge nếu prev đã kết thúc câu rõ ràng (period/?/!) và cả
-         hai đều đủ dài → giữ subtitle riêng.
+      1. SENTENCE COMPLETION: prev kết thúc bằng comma/no-punct (chưa đủ
+         câu) AND gap nhỏ AND combined không quá dài → MERGE.
+      2. SHORT FRAGMENT: prev/cur quá ngắn (< 1.5s HOẶC < 8 chars) AND gap
+         nhỏ → MERGE dù có period (Whisper hay add period sai vào pause).
+      3. SHORT-DURATION FALLBACK: cả prev/cur < min_duration → MERGE.
+      4. KHÔNG merge nếu KHÁC speaker (giữ separate per user request).
+      5. KHÔNG merge nếu cả 2 đều đủ dài VÀ kết thúc rõ ràng.
+
+    Speaker rule (user spec): câu của người nào thì tách riêng người đấy.
+    → nếu prev_spk != cur_spk và cả 2 đều có speaker → KHÔNG merge.
 
     Tier 1.2: ghi lại "internal_pauses" trong segment đã merge để post-TTS
     insert silence tại đúng vị trí tương đối, giữ rhythm/cảm xúc gốc.
@@ -1375,17 +1377,27 @@ def _merge_short_segments(segments: list[dict], min_duration: float = 2.5,
         gap = seg["start"] - prev["end"]
         combined_dur = seg["end"] - prev["start"]
 
-        # Speaker check: KHÔNG merge nếu khác speaker (multi-voice mode mới
-        # gán; single voice thì cả 2 đều None → check pass)
+        # Speaker check: KHÔNG merge nếu KHÁC speaker rõ ràng (user spec
+        # "câu của người nào tách riêng người đấy"). Cả 2 None → coi same.
         prev_spk = prev.get("speaker")
         cur_spk = seg.get("speaker")
-        same_speaker = prev_spk == cur_spk or prev_spk is None or cur_spk is None
+        if prev_spk is None and cur_spk is None:
+            same_speaker = True  # cả 2 chưa diarize → assume same
+        elif prev_spk is None or cur_spk is None:
+            same_speaker = True  # 1 trong 2 chưa có → conservative merge
+        else:
+            same_speaker = prev_spk == cur_spk
 
         prev_text = (prev.get("text") or "").strip()
+        cur_text = (seg.get("text") or "").strip()
         prev_complete = _ends_complete_sentence(prev_text)
 
+        # Đếm Chinese chars (Hán tự) — fragment short khi < 8 chars
+        import re
+        prev_char_count = len(re.sub(r"[\s\W]+", "", prev_text))
+        cur_char_count = len(re.sub(r"[\s\W]+", "", cur_text))
+
         # Rule 1: prev chưa kết thúc câu → merge nếu gap nhỏ + combined OK
-        # (more aggressive — chấp nhận combined dài hơn để giữ câu nguyên vẹn)
         sentence_continues = (
             same_speaker
             and not prev_complete
@@ -1393,7 +1405,21 @@ def _merge_short_segments(segments: list[dict], min_duration: float = 2.5,
             and combined_dur <= max_combined + 2.0
         )
 
-        # Rule 2: short-duration merge (legacy)
+        # Rule 2 (MỚI): SHORT FRAGMENT — merge dù prev có period nếu
+        # prev/cur cực ngắn (< 1.5s hoặc < 8 Chinese chars). Whisper hay
+        # add period nhầm vào pause giữa câu → fragment ngắn ⇒ likely 1
+        # câu bị cắt sai, merge để giữ context cho LLM.
+        short_fragment = (
+            same_speaker
+            and gap < max_gap
+            and combined_dur <= max_combined
+            and (
+                prev_dur < 1.5 or cur_dur < 1.5
+                or prev_char_count < 8 or cur_char_count < 8
+            )
+        )
+
+        # Rule 3: short-duration legacy merge
         short_merge = (
             same_speaker
             and (prev_dur < min_duration or cur_dur < min_duration)
@@ -1401,7 +1427,7 @@ def _merge_short_segments(segments: list[dict], min_duration: float = 2.5,
             and combined_dur <= max_combined
         )
 
-        should_merge = sentence_continues or short_merge
+        should_merge = sentence_continues or short_fragment or short_merge
         if should_merge:
             # Record pause position RELATIVE TO START of merged segment.
             # Vd: prev=0-3s, gap=0.4s, cur=3.4-5s → merged 0-5s với pause
