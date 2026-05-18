@@ -3905,31 +3905,30 @@ def generate_segment(project_id: str, seg_id: str) -> dict:
                                    "%.2fx — dub will be %.0fms longer than slot",
                                    seg.get("id", "?"), MAX_SPEED_FACTOR,
                                    (actual_dur / MAX_SPEED_FACTOR - target_duration) * 1000)
-            elif actual_dur < target_duration * 0.9:
-                # Audio ngắn hơn slot → gentle slowdown CHỈ cho text dài để giữ
-                # rhythm. Câu ngắn (≤25 chars) GIỮ tốc độ bình thường, silence
-                # tự fill — tự nhiên hơn slowdown 2 từ thành 2s.
+            elif actual_dur < target_duration * 0.85:
+                # Audio ngắn hơn slot rõ rệt → gentle slowdown cho phép ở
+                # mức tự nhiên, KHÔNG chipmunk. Range mới hẹp [0.92, 1.0] —
+                # max 8% slow, an toàn cho mọi length.
                 #
-                # User feedback: "câu 2 từ đọc quá chậm" — Tier 1 cũ slowdown
-                # text rất ngắn xuống 0.88x làm "Xảo Duyệt." kéo 2s. BỎ Tier 1.
+                # User feedback: cho phép kéo giãn ở mức độ cho phép.
+                # Thay vì 3 tier với floors khác nhau, dùng 1 floor chung
+                # 0.92 — đủ slow để fill timing tự nhiên, không muddy.
                 n_chars = len(tts_text.strip())
                 slow_factor = 1.0
-                # Tier 2: text MEDIUM (26-40 chars) + slot khá dài → slow nhẹ
-                if (26 <= n_chars <= 40 and target_duration > 2.5
-                        and actual_dur < target_duration * 0.70):
-                    desired_dur = target_duration * 0.90
-                    slow_factor = max(0.93, actual_dur / desired_dur)
-                # Tier 3: text DÀI (41-80 chars) + slot dài hơn nhiều
-                elif (41 <= n_chars <= 80 and target_duration > 3.5
-                        and actual_dur < target_duration * 0.80):
-                    desired_dur = target_duration * 0.92
-                    slow_factor = max(0.95, actual_dur / desired_dur)
+                # Câu ngắn (≤15 chars) + slot rất dài (>2.5s) → silence fill
+                # (slowdown 2 từ ra 2.5s nghe gượng). Range silence OK.
+                if n_chars <= 15 and target_duration > 2.5:
+                    slow_factor = 1.0  # KHÔNG slow, để silence fill
+                # Câu medium-long (16+ chars) + actual < 80% target → slow nhẹ
+                elif actual_dur < target_duration * 0.80:
+                    desired_dur = target_duration * 0.92  # target 92% slot
+                    slow_factor = max(MIN_SPEED_FACTOR, actual_dur / desired_dur)
 
                 if slow_factor < 0.97:
-                    logger.info("[dub] gentle slowdown tier %s: %d chars · "
-                                "actual=%.2fs target=%.2fs speed=%.2fx",
-                                ("medium" if n_chars <= 40 else "long"),
-                                n_chars, actual_dur, target_duration, slow_factor)
+                    logger.info("[dub] gentle slowdown: %d chars · "
+                                "actual=%.2fs target=%.2fs speed=%.2fx (floor=%.2f)",
+                                n_chars, actual_dur, target_duration,
+                                slow_factor, MIN_SPEED_FACTOR)
                     seg_dir = _segments_dir(project_id)
                     raw_wav = seg_dir / f"{seg_id}_raw.wav"
                     stretched_wav = seg_dir / f"{seg_id}_stretched.wav"
@@ -4221,24 +4220,24 @@ def _atempo_stretch(in_path: Path, out_path: Path, tempo: float):
 
 
 # ── TTS speed matching ──
-# Speedup tối đa 1.40x (Edge TTS giữ chất lượng tốt đến ~1.30x, push lên
-# 1.40 cho overflow nặng — nghe hơi nhanh nhưng không chipmunk).
-# Nếu vẫn không đủ, trim trailing silence + cap cứng để KHÔNG bleed.
+# User feedback: 1.40x quá nhanh, 0.85 quá chậm. Thu hẹp range về [0.90, 1.25]
+# — tự nhiên cho cả 2 hướng, không chipmunk, không muddy.
+#
+# Range biện minh:
+#   • 1.25x: speedup tối đa nghe vẫn tự nhiên (Edge TTS bắt đầu chipmunk
+#     từ 1.30+). Câu Việt thường +25-35% dài hơn tiếng Trung — 1.25 cover
+#     phần lớn case. Extreme overflow → trim silence + cap cứng.
+#   • 0.90x: slowdown tối đa atempo vẫn giữ chất lượng. < 0.90 → voice
+#     muddy, mất "K" attack.
 SPEED_TOLERANCE = 0.05      # 5% — chỉ skip atempo nếu lệch < 5%
-# 1.40x: kinh nghiệm thực tế phim Trung — câu Việt thường +25-35% dài hơn
-# tiếng Trung do thừa các tiểu từ ("đó", "nhỉ", "thế..."). Cap 1.30 cũ
-# vẫn để overflow nhẹ (5-10% segments bleed). 1.40 chấp nhận speedup mạnh
-# hơn cho extreme case — vẫn nghe tự nhiên, không chipmunk.
-MAX_SPEED_FACTOR = 1.40     # speedup tối đa (atempo)
-# Slowdown được phép cho text ngắn/medium (fill slot dài). Floor cứng 0.85
-# vì atempo < 0.85 → voice muddy. Caller (gentle slowdown logic) chọn
-# floor riêng theo độ dài text (0.88 short / 0.92 medium / 0.95 long).
-MIN_SPEED_FACTOR = 0.85     # slowdown tối đa (atempo)
-MAX_EDGE_SPEED = 1.40       # Edge TTS rate max (đồng bộ với atempo)
-MIN_EDGE_SPEED = 1.0        # KHÔNG slowdown Edge TTS (regenerate phải tốc bình thường)
-# Sau khi đã max speed, cho phép overflow X% rồi mới hard-trim. 15% grace
-# để cuối câu không bị cụt giật khi ratio nhỏ (1.10–1.20x).
-OVERFLOW_GRACE = 1.15
+MAX_SPEED_FACTOR = 1.25     # speedup tối đa (giảm từ 1.40 vì quá nhanh)
+MIN_SPEED_FACTOR = 0.90     # slowdown tối đa (giảm từ 0.85 vì muddy)
+MAX_EDGE_SPEED = 1.25       # Edge TTS rate max (đồng bộ với atempo)
+MIN_EDGE_SPEED = 1.0        # Edge regenerate KHÔNG slowdown (re-gen phải bình thường)
+# Sau khi đã max speed, cho phép overflow X% rồi mới hard-trim. 20% grace
+# (tăng từ 15%) — bù cho MAX_SPEED giảm về 1.25, cần grace lớn hơn để
+# segment dài không bị cụt giật.
+OVERFLOW_GRACE = 1.20
 # Tốc độ nói tiếng Việt trung bình (chars/sec, không tính space/punct).
 # Dùng làm fallback khi không tính được rate gốc (vd Whisper không có
 # original_text, hoặc segment có text rỗng).
@@ -4257,24 +4256,24 @@ def _count_meaningful_chars(text: str) -> int:
 
 
 def _emotion_speed_cap(emotion: str | None) -> float:
-    """Speed cap thông minh theo emotion. Production: phim cảnh khác cảnh,
-    không thể dùng 1 cap cứng nhắc.
+    """Speed cap thông minh theo emotion (post user-feedback: dùng range
+    hẹp hơn để tránh quá nhanh/quá chậm).
 
     - angry/argument/cao trào: chấp nhận nhanh hơn (dồn nhịp tự nhiên)
     - whisper/sad/cảm xúc: cap thấp hơn (giữ giọng truyền cảm)
     - happy/surprised/fearful: trung bình
-    - neutral / default: cap chuẩn
+    - neutral / default: cap chuẩn = MAX_SPEED_FACTOR (1.25)
     """
     if not emotion:
         return MAX_SPEED_FACTOR
     e = emotion.lower().strip()
     if e in ("angry", "argument", "shouting"):
-        return 1.45  # Cãi nhau/giận → nhanh OK (cao hơn neutral 1.40)
+        return 1.30  # Cãi nhau/giận → chỉ +5% so với neutral (max 1.30)
     if e in ("whisper", "sad", "tender", "intimate"):
-        return 1.20  # Truyền cảm → giữ chậm
+        return 1.15  # Truyền cảm → giữ chậm
     if e in ("happy", "surprised", "fearful", "excited"):
-        return 1.38  # Cảm xúc tăng — nhẹ hơn neutral
-    return MAX_SPEED_FACTOR  # neutral / unknown → 1.40
+        return 1.22  # Cảm xúc tăng — nhẹ hơn neutral chút
+    return MAX_SPEED_FACTOR  # neutral / unknown → 1.25
 
 
 def _compute_target_speed(seg: dict, target_dur: float, dub_text: str,
