@@ -3790,9 +3790,9 @@ def generate_segment(project_id: str, seg_id: str) -> dict:
             edge_voice = _pick_edge_voice_for_segment(seg, project)
             lang = project["target_language"] or "vietnamese"
 
-            # Pass 1: generate at 1x
+            # Pass 1: generate at baseline 1.05x (VN voice tự nhiên hơi chậm)
             _edge_generate_sync(tts_text, str(mp3_path), language=lang,
-                                voice=edge_voice, speed=1.0)
+                                voice=edge_voice, speed=1.05)
             _mp3_to_wav(mp3_path, out_path)
 
             audio_np, sr = sf.read(str(out_path))
@@ -3931,42 +3931,13 @@ def generate_segment(project_id: str, seg_id: str) -> dict:
                                    "%.2fx — dub will be %.0fms longer than slot",
                                    seg.get("id", "?"), MAX_SPEED_FACTOR,
                                    (actual_dur / MAX_SPEED_FACTOR - target_duration) * 1000)
-            elif actual_dur < target_duration * 0.85:
-                # Audio ngắn hơn slot rõ rệt → gentle slowdown cho phép ở
-                # mức tự nhiên, KHÔNG chipmunk. Range mới hẹp [0.92, 1.0] —
-                # max 8% slow, an toàn cho mọi length.
-                #
-                # User feedback: cho phép kéo giãn ở mức độ cho phép.
-                # Thay vì 3 tier với floors khác nhau, dùng 1 floor chung
-                # 0.92 — đủ slow để fill timing tự nhiên, không muddy.
-                n_chars = len(tts_text.strip())
-                slow_factor = 1.0
-                # Câu ngắn (≤15 chars) + slot rất dài (>2.5s) → silence fill
-                # (slowdown 2 từ ra 2.5s nghe gượng). Range silence OK.
-                if n_chars <= 15 and target_duration > 2.5:
-                    slow_factor = 1.0  # KHÔNG slow, để silence fill
-                # Câu medium-long (16+ chars) + actual < 80% target → slow nhẹ
-                elif actual_dur < target_duration * 0.80:
-                    desired_dur = target_duration * 0.92  # target 92% slot
-                    slow_factor = max(MIN_SPEED_FACTOR, actual_dur / desired_dur)
-
-                if slow_factor < 0.97:
-                    logger.info("[dub] gentle slowdown: %d chars · "
-                                "actual=%.2fs target=%.2fs speed=%.2fx (floor=%.2f)",
-                                n_chars, actual_dur, target_duration,
-                                slow_factor, MIN_SPEED_FACTOR)
-                    seg_dir = _segments_dir(project_id)
-                    raw_wav = seg_dir / f"{seg_id}_raw.wav"
-                    stretched_wav = seg_dir / f"{seg_id}_stretched.wav"
-                    sf.write(str(raw_wav), audio_np, sr)
-                    try:
-                        _atempo_stretch(raw_wav, stretched_wav, slow_factor)
-                        audio_np, sr = sf.read(str(stretched_wav))
-                        actual_dur = len(audio_np) / sr
-                    finally:
-                        raw_wav.unlink(missing_ok=True)
-                        stretched_wav.unlink(missing_ok=True)
-                logger.info("Vox Premium short-fill: actual=%.2fs target=%.2fs (silence padding)",
+            elif actual_dur < target_duration * 0.9:
+                # User feedback: "giọng đọc vẫn hơi chậm, nhiều lúc chậm quá".
+                # → BỎ HẲN slowdown. TTS luôn đọc ở natural rate. Phần dư
+                # = silence (lip pause của giọng gốc) — tự nhiên hơn nhiều
+                # so với kéo giãn TTS muddy.
+                logger.info("Vox Premium short-fill: actual=%.2fs target=%.2fs "
+                            "(silence padding, no slowdown)",
                             actual_dur, target_duration)
 
         # Tier 1.2: Insert internal pauses để giữ rhythm gốc
@@ -4409,9 +4380,11 @@ def _process_one_batch_audio(
         batch_mp3 = seg_dir / f"_batch_{batch_idx}.mp3"
         batch_wav = seg_dir / f"_batch_{batch_idx}.wav"
 
-        # Step 2: Edge TTS @ 1x
+        # Step 2: Edge TTS @ baseline 1.05x — Vietnamese Edge voice natural
+        # rate hơi chậm so với Chinese speaker. Bump 5% để TTS đọc rõ ràng
+        # mà không chipmunk. Vẫn re-gen nhanh hơn nếu overflow.
         _edge_generate_sync(combined_text, str(batch_mp3),
-                            language=target_lang, voice=edge_voice, speed=1.0)
+                            language=target_lang, voice=edge_voice, speed=1.05)
         _mp3_to_wav(batch_mp3, batch_wav)
         batch_audio, _ = sf.read(str(batch_wav))
         actual_duration = len(batch_audio) / sr
