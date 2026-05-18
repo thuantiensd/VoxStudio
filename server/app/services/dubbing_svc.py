@@ -4469,10 +4469,35 @@ def _process_one_batch_audio(
                 logger.warning("Batch %d: studio chain failed (%s) — placing raw",
                                batch_idx + 1, e)
 
+        # Smart pause adjustment: split batch_audio thành per-segment chunks
+        # theo char proportion. Mỗi chunk place tại seg["start"] gốc → tự nhiên
+        # giữ pause giữa segments (sync với scene cut / lip pause của giọng gốc).
+        chunks = _split_batch_into_segment_chunks(batch_audio, batch, sr)
+
+        # Persist per-segment .wav (idempotent — lần sau skip batch này thì
+        # _load_existing_into_track tìm thấy file). Apply fade edges 20ms cho
+        # mỗi chunk để place vào silent track không click.
+        if chunks:
+            try:
+                from app.services.audio_mix_svc import fade_edges as _fade
+            except Exception:
+                _fade = None
+            for c in chunks:
+                ca = c["audio"]
+                if _fade is not None and len(ca) > int(0.05 * sr):
+                    ca = _fade(ca, sr, fade_ms=20.0)
+                    c["audio"] = ca
+                seg_wav = seg_dir / f"{c['seg_id']}.wav"
+                try:
+                    sf.write(str(seg_wav), ca.astype(np.float32), sr)
+                except Exception as e:
+                    logger.warning("Save per-seg wav %s fail: %s", c['seg_id'], e)
+
         return {
             "batch_idx": batch_idx,
             "batch_start": batch_start,
             "audio": batch_audio,
+            "chunks": chunks,  # ← NEW: per-segment chunks, place tại start gốc
             "segments": batch,
             "target_duration": target_duration,
             "ok": True,
@@ -4575,27 +4600,45 @@ def _generate_all_batched(project_id: str, project: dict):
                 _save_meta(project)
 
     # ── Phase C: Sequential placement in full track ──
-    # Phải sequential vì có overlap detection + np.pad có thể realloc array.
-    # Sort theo batch_idx để placement đúng thứ tự thời gian.
-    # GIỮ batch_start nguyên — không shift để không lệch lip-sync. Smoothness
-    # đến từ cosine fade-out (80ms) ở cuối mỗi batch, đủ làm mềm transition.
+    # Smart pause adjustment: place TỪNG CHUNK của batch tại seg["start"] gốc
+    # (không phải place toàn bộ batch_audio tại batch_start). Pause giữa các
+    # segments trong batch → tự nhiên = silence trong full_track → sync với
+    # scene cut / lip pause của giọng gốc.
+    #
+    # Fallback: nếu batch không có chunks (failure), dùng cách cũ
+    # (place batch_audio tại batch_start).
     for bi in pending_indices:
         res = results.get(bi)
         if not res or not res.get("ok"):
             continue
-        batch_audio = res["audio"]
-        if batch_audio is None or len(batch_audio) == 0:
-            continue
-        start_sample = int(res["batch_start"] * sr)
-        end_sample = start_sample + len(batch_audio)
-        if end_sample > len(full_track):
-            full_track = np.pad(full_track, (0, end_sample - len(full_track)))
-        # Mix additive (consistent with old behavior). Trường hợp prev batch
-        # overflow vào start_sample (rare khi MAX_SPEED_FACTOR=1.30 đã trim),
-        # additive mix tạo blend tự nhiên với cosine fade-out của prev.
-        full_track[start_sample:start_sample + len(batch_audio)] += batch_audio
-        logger.info("Batch %d placed: %d segs, dur=%.1fs",
-                    bi + 1, len(res["segments"]), res.get("target_duration", 0))
+        chunks = res.get("chunks") or []
+        if chunks:
+            # Smart per-segment placement
+            for c in chunks:
+                chunk_audio = c["audio"]
+                if chunk_audio is None or len(chunk_audio) == 0:
+                    continue
+                start_sample = int(c["start_time"] * sr)
+                end_sample = start_sample + len(chunk_audio)
+                if end_sample > len(full_track):
+                    full_track = np.pad(full_track, (0, end_sample - len(full_track)))
+                full_track[start_sample:start_sample + len(chunk_audio)] += chunk_audio
+            logger.info("Batch %d placed: %d chunks per-seg (smart pause), dur=%.1fs",
+                        bi + 1, len(chunks), res.get("target_duration", 0))
+        else:
+            # Fallback (chunk split fail): cách cũ — place toàn batch tại batch_start.
+            batch_audio = res.get("audio")
+            if batch_audio is None or len(batch_audio) == 0:
+                continue
+            start_sample = int(res["batch_start"] * sr)
+            end_sample = start_sample + len(batch_audio)
+            if end_sample > len(full_track):
+                full_track = np.pad(full_track, (0, end_sample - len(full_track)))
+            full_track[start_sample:start_sample + len(batch_audio)] += batch_audio
+            logger.warning(
+                "Batch %d FALLBACK placement (no chunks): %d segs, dur=%.1fs",
+                bi + 1, len(res["segments"]), res.get("target_duration", 0),
+            )
 
     # ── Phase D: Master bus chain trước khi save dubbed_track ──
     # Glue compression + true-peak limiter. LUFS final normalize sẽ apply
@@ -4630,6 +4673,53 @@ def _generate_all_batched(project_id: str, project: dict):
     sf.write(str(track_path), full_track.astype(np.float32), sr)
     logger.info("Dubbed track saved: %s (%.1fs) — parallel x%d",
                 track_path, len(full_track) / sr, MAX_TTS_WORKERS)
+
+
+def _split_batch_into_segment_chunks(
+    batch_audio: np.ndarray,
+    batch: list[dict],
+    sr: int,
+) -> list[dict]:
+    """Split batch_audio thành per-segment chunks theo tỷ lệ char.
+
+    Tôn trọng timing gốc: mỗi chunk place tại seg["start"] gốc, KHÔNG
+    join thành 1 audio liên tục tại batch_start. Pause giữa segments tự
+    nhiên (silence trong full_track) → sync với scene/pause giọng gốc.
+
+    Trả: list[{seg_id, start_time, audio}].
+    """
+    if len(batch_audio) == 0 or not batch:
+        return []
+
+    # Total chars trong batch (dùng để chia proportional)
+    seg_chars = []
+    for s in batch:
+        txt = (s.get("speech_text") or s.get("translated_text") or "").strip()
+        seg_chars.append(len(txt))
+    total_chars = sum(seg_chars)
+    if total_chars == 0:
+        return []
+
+    chunks: list[dict] = []
+    char_cum = 0
+    n_samples = len(batch_audio)
+    for i, s in enumerate(batch):
+        sc = seg_chars[i]
+        if sc == 0:
+            continue
+        # Audio slice tương ứng với portion char của segment này
+        audio_start = int(round(n_samples * char_cum / total_chars))
+        audio_end = int(round(n_samples * (char_cum + sc) / total_chars))
+        chunk_audio = batch_audio[audio_start:audio_end]
+        if len(chunk_audio) > 0:
+            chunks.append({
+                "seg_id": s["id"],
+                "start_time": s["start"],
+                "audio": chunk_audio,
+            })
+        char_cum += sc
+
+    return chunks
 
 
 def _load_existing_into_track(full_track: np.ndarray, batch: list[dict],
