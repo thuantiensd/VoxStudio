@@ -5047,7 +5047,10 @@ def export_video(project_id: str, keep_original_audio: bool = False,
                         f"(iw-min(iw,ih*{tw}/{th}))/2", f"(ih-min(ih,iw*{th}/{tw}))/2",
                     )
             if do_subtitle and ass_path:
-                stream = stream.filter("ass", str(ass_path))
+                # ffmpeg 8.x: dùng `subtitles` filter với named param
+                # `filename=`. Filter `ass` legacy syntax `ass=path` không
+                # còn parse được trong ffmpeg 8.1+ (cần option name).
+                stream = stream.filter("subtitles", filename=str(ass_path))
             return stream
 
         # Audio input
