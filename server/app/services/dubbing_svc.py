@@ -5001,9 +5001,27 @@ def export_video(project_id: str, keep_original_audio: bool = False,
 
         # ── Step 2: Generate ASS subtitle if enabled ──
         ass_path = None
+        burn_subtitle = False  # default: chỉ generate .srt/.ass, KHÔNG burn vào video
         if do_subtitle:
             generate_ass(project_id, use_translated=True)
             ass_path = pdir / "subtitles.ass"
+            # Check libass có available không (ffmpeg subtitles filter cần).
+            # Homebrew default ffmpeg KHÔNG có libass → skip burn, vẫn save
+            # .ass + .srt cho user dùng external.
+            try:
+                import subprocess as _sp
+                _r = _sp.run(["ffmpeg", "-hide_banner", "-filters"],
+                             capture_output=True, text=True, timeout=10)
+                if "subtitles" in _r.stdout:
+                    burn_subtitle = True
+                else:
+                    logger.warning(
+                        "ffmpeg KHÔNG có libass — skip burn subtitle vào video. "
+                        "File .ass + .srt vẫn được tạo. Install: "
+                        "brew install homebrew-ffmpeg/ffmpeg/ffmpeg --with-libass"
+                    )
+            except Exception as e:
+                logger.warning("Không check được libass support (%s) — skip burn", e)
 
         # ── Step 3: Build ffmpeg command with trim + crop ──
         has_trim = trim_s > 0 or trim_e < project["video_duration"]
@@ -5017,7 +5035,7 @@ def export_video(project_id: str, keep_original_audio: bool = False,
         crop_ratios = {"16:9": (16, 9), "9:16": (9, 16), "4:5": (4, 5), "1:1": (1, 1),
                        "16:9w": (16, 9)}
         needs_crop = aspect_ratio in crop_ratios
-        needs_encode = needs_crop or do_subtitle  # crop/subtitle requires re-encode
+        needs_encode = needs_crop or burn_subtitle  # crop/subtitle burn requires re-encode
 
         def apply_video_filters(stream):
             """Apply crop/letterbox + subtitle filters to video stream."""
@@ -5046,10 +5064,11 @@ def export_video(project_id: str, keep_original_audio: bool = False,
                         f"min(iw,ih*{tw}/{th})", f"min(ih,iw*{th}/{tw})",
                         f"(iw-min(iw,ih*{tw}/{th}))/2", f"(ih-min(ih,iw*{th}/{tw}))/2",
                     )
-            if do_subtitle and ass_path:
+            if burn_subtitle and ass_path:
                 # ffmpeg 8.x: dùng `subtitles` filter với named param
                 # `filename=`. Filter `ass` legacy syntax `ass=path` không
-                # còn parse được trong ffmpeg 8.1+ (cần option name).
+                # còn parse được trong ffmpeg 8.1+. Chỉ apply nếu libass
+                # available (đã check ở Step 2).
                 stream = stream.filter("subtitles", filename=str(ass_path))
             return stream
 
