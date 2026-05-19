@@ -127,7 +127,6 @@ def _cross_match_audio_face(
 def _decide_segment(
     seg: dict,
     audio_to_face: dict[str, int],
-    audio_unmatched_to_char: dict[str, str],
     audio_speaker_confidences: dict[str, float],
     *,
     audio_strong_threshold: float,
@@ -317,12 +316,9 @@ def fuse_speakers(
     gender_conflicts: list[dict] = []
 
     for seg in segments:
-        # Phase 7b: audio_unmatched_to_char arg DEPRECATED — pass empty dict
-        # (kept signature cho compat, _decide_segment không dùng nữa).
         raw_winner, reason, ownership = _decide_segment(
             seg,
             audio_to_face=audio_to_face,
-            audio_unmatched_to_char={},
             audio_speaker_confidences=audio_speaker_confidences,
             audio_strong_threshold=audio_strong_threshold,
             ownership_keep_threshold=ownership_keep_threshold,

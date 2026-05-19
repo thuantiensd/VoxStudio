@@ -2309,14 +2309,16 @@ def transcribe_project(project_id: str) -> dict:
             logger.exception("speaker_pipeline full traceback:")
 
     # ── PHASE 1: FACE DETECTION SPEAKER MAPPING (HeyGen-style) ──
-    # Override pyannote/whisperx speaker_id bằng face_id từ video — ground
-    # truth chính xác hơn nhiều cho video có người nói rõ trên screen.
-    # Skip nếu: voice_count=1 (không cần phân biệt), video file không có
-    # (audio-only), hoặc env disable.
+    # OPT-IN: default OFF vì face detection tốn 2-3 phút/video + đôi khi gây
+    # voice swap khi face mờ. Bật bằng env VOX_ENABLE_FACE_SPEAKER=true.
+    #
+    # Audio-only pipeline (pyannote diarization) đủ cho hầu hết case dubbing.
+    # Face detection chỉ add value cho phim có nhân vật on-screen rõ và user
+    # có thời gian chờ.
     video_path = _project_dir(project_id) / "original.mp4"
     skip_face_reason = None
-    if os.environ.get("VOX_SKIP_FACE_SPEAKER", "").lower() == "true":
-        skip_face_reason = "env VOX_SKIP_FACE_SPEAKER=true"
+    if os.environ.get("VOX_ENABLE_FACE_SPEAKER", "").lower() != "true":
+        skip_face_reason = "default OFF — set VOX_ENABLE_FACE_SPEAKER=true để bật"
     elif voice_count_meta == 1:
         skip_face_reason = "voice_count=1 (single voice mode → không cần phân biệt speaker)"
     elif not video_path.exists():
