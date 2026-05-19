@@ -262,11 +262,11 @@ export function BatchProvider({ children }) {
           )
         );
 
-        // Export MP4 + tải về thư mục đã chọn (nếu có)
-        await exportVideo(next.projectId, {
-          keep_original_audio: true,
-          original_audio_volume: 0.3,
-        });
+        // Export MP4 + tải về thư mục đã chọn (nếu có).
+        // Phase A cleanup: bỏ legacy keep_original_audio + original_audio_volume.
+        // Mix settings (keep_accompaniment, keep_original_voice, vol) đã lưu
+        // trong project meta qua settings UI — backend tự đọc từ đó.
+        await exportVideo(next.projectId, {});
         const p = await getDubbingProject(next.projectId);
         const url = exportDownloadURL(next.projectId);
 

@@ -37,7 +37,8 @@ const MAX_SIZE_MB = 2048;
  *   enable_dubbing, enable_subtitle, target_language, voice_id,
  *   source_language_input, tts_engine, edge_voice, aspect_ratio,
  *   trim_start, trim_end,
- *   keep_original_audio, original_audio_volume,
+ *   keep_accompaniment, accompaniment_volume,
+ *   keep_original_voice, original_voice_volume,
  *   crop_mode, default_emotion,
  *   auto_font_size, auto_pace, smart_chunk, highlight_keywords.
  */

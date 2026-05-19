@@ -683,13 +683,6 @@ async def export_video(
     try:
         dubbing_svc.export_video(
             project_id,
-            keep_original_audio=body.keep_original_audio,
-            original_audio_volume=body.original_audio_volume,
-            enable_ducking=body.enable_ducking,
-            duck_level=body.duck_level,
-            duck_attack=body.duck_attack,
-            duck_release=body.duck_release,
-            use_pro_mix=body.use_pro_mix,
             target_lufs=body.target_lufs,
         )
         return {"ok": True, "download_url": f"/api/v1/dubbing/projects/{project_id}/export/download"}

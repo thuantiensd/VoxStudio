@@ -4735,79 +4735,22 @@ def get_segment_audio_path(project_id: str, seg_id: str) -> Path | None:
 
 # ── Export Video ────────────────────────────────────
 
-def _apply_ducking(bgm: np.ndarray, dubbed: np.ndarray, sr: int,
-                   duck_level: float = 0.15, attack: float = 0.05,
-                   release: float = 0.3) -> np.ndarray:
-    """Apply smart audio ducking — reduce BGM volume when dubbed voice is present.
 
-    Uses an envelope follower with attack/release smoothing:
-    - When voice detected → BGM fades down to duck_level
-    - When voice stops → BGM fades back up (release time)
-    """
-    # Handle stereo BGM → convert to mono for processing, remix later
-    bgm_stereo = None
-    if bgm.ndim == 2:
-        bgm_stereo = bgm.copy()
-        bgm = np.mean(bgm, axis=1)
-    if dubbed.ndim == 2:
-        dubbed = np.mean(dubbed, axis=1)
+def export_video(project_id: str, target_lufs: float = -16.0) -> str:
+    """Assemble dubbed audio + final mix + export video.
 
-    # Ensure same length
-    max_len = max(len(bgm), len(dubbed))
-    if len(bgm) < max_len:
-        bgm = np.pad(bgm, (0, max_len - len(bgm)))
-    if len(dubbed) < max_len:
-        dubbed = np.pad(dubbed, (0, max_len - len(dubbed)))
-    if bgm_stereo is not None:
-        if len(bgm_stereo) < max_len:
-            bgm_stereo = np.pad(bgm_stereo, ((0, max_len - len(bgm_stereo)), (0, 0)))
+    Audio mix (pro_mix duy nhất):
+      output = dubbed_track
+             + accompaniment × accompaniment_volume  if keep_accompaniment
+             + vocals × original_voice_volume        if keep_original_voice
 
-    # Create voice presence envelope from dubbed audio
-    envelope = np.abs(dubbed).astype(np.float64)
+    Settings từ project meta (set qua UI):
+      - keep_accompaniment (default True): mix BGM/SFX vào output
+      - accompaniment_volume (default 0.35)
+      - keep_original_voice (default False): mix giọng gốc vào output
+      - original_voice_volume (default 0.20)
 
-    # Smooth with attack/release follower
-    attack_coeff = np.exp(-1.0 / (sr * max(attack, 0.001)))
-    release_coeff = np.exp(-1.0 / (sr * max(release, 0.01)))
-    smoothed = np.zeros_like(envelope)
-    for i in range(1, len(envelope)):
-        if envelope[i] > smoothed[i - 1]:
-            smoothed[i] = attack_coeff * smoothed[i - 1] + (1 - attack_coeff) * envelope[i]
-        else:
-            smoothed[i] = release_coeff * smoothed[i - 1] + (1 - release_coeff) * envelope[i]
-
-    # Normalize envelope to 0-1
-    peak = np.max(smoothed)
-    if peak > 0:
-        smoothed = smoothed / peak
-
-    # Apply gain curve: 1.0 when no voice → duck_level when voice present
-    gain = 1.0 - smoothed * (1.0 - duck_level)
-
-    # Apply ducking to stereo or mono BGM
-    if bgm_stereo is not None:
-        ducked_bgm = bgm_stereo * gain[:, np.newaxis]
-        # Mix: stereo BGM + mono dubbed (broadcast to both channels)
-        mixed = ducked_bgm + dubbed[:, np.newaxis]
-    else:
-        ducked_bgm = bgm * gain
-        mixed = ducked_bgm + dubbed
-    # Normalize to prevent clipping
-    mix_peak = np.max(np.abs(mixed))
-    if mix_peak > 0.95:
-        mixed = mixed * (0.95 / mix_peak)
-
-    return mixed.astype(np.float32)
-
-
-def export_video(project_id: str, keep_original_audio: bool = False,
-                 original_audio_volume: float = 0.1,
-                 enable_ducking: bool = True, duck_level: float = 0.15,
-                 duck_attack: float = 0.05, duck_release: float = 0.3,
-                 use_pro_mix: bool = True, target_lufs: float = -16.0) -> str:
-    """Assemble dubbed audio and/or burn subtitles based on project toggles.
-
-    use_pro_mix=True (default): use pedalboard + LUFS chain for broadcast-quality mix.
-    Falls back to legacy envelope-follower ducking if pro_mix fails.
+    target_lufs: loudness target. YouTube=-14, streaming=-16, conservative=-18.
     """
     project = _load_meta(project_id)
     if not project:
@@ -4824,21 +4767,11 @@ def export_video(project_id: str, keep_original_audio: bool = False,
     aspect_ratio = project.get("aspect_ratio", "original")
     trim_s = project.get("trim_start", 0)
     trim_e = project.get("trim_end", project["video_duration"])
-
-    # User config từ project settings override API params (nếu user đã set ở UI)
-    if project.get("keep_original_audio") is not None:
-        keep_original_audio = bool(project["keep_original_audio"])
-    if project.get("original_audio_volume") is not None:
-        original_audio_volume = float(project["original_audio_volume"])
     crop_mode = project.get("crop_mode", "smart")  # smart | center | letterbox
 
-    # ── 2 luồng audio mix riêng (mới) ──
-    # accompaniment = nhạc nền/SFX (đã loại giọng qua Demucs) — default ON
-    # vocals        = giọng người gốc (đã tách) — default OFF
-    keep_accomp = project.get("keep_accompaniment",
-                              keep_original_audio if keep_original_audio else True)
-    accomp_vol  = float(project.get("accompaniment_volume",
-                                    original_audio_volume if original_audio_volume else 0.35))
+    # Audio mix settings (single source — project meta)
+    keep_accomp = bool(project.get("keep_accompaniment", True))
+    accomp_vol  = float(project.get("accompaniment_volume", 0.35))
     keep_vocals = bool(project.get("keep_original_voice", False))
     vocals_vol  = float(project.get("original_voice_volume", 0.20))
 
@@ -4927,58 +4860,24 @@ def export_video(project_id: str, keep_original_audio: bool = False,
                     if len(bg_audio) != total_samples:
                         from scipy.signal import resample
                         bg_audio = resample(bg_audio, total_samples).astype(np.float32)
+                    bg_mono = bg_audio.mean(axis=1) if bg_audio.ndim > 1 else bg_audio
 
-                    if enable_ducking:
-                        # Pro mix: voice EQ + sidechain compressor + LUFS normalize.
-                        used_pro = False
-                        if use_pro_mix:
-                            try:
-                                from app.services.audio_mix_svc import pro_mix
-                                logger.info(
-                                    "Applying PRO audio mix (LUFS=%.1f, bgm_vol=%.2f)",
-                                    target_lufs, accomp_vol,
-                                )
-                                bg_mono = bg_audio.mean(axis=1) if bg_audio.ndim > 1 else bg_audio
-                                # Convert linear vol (0-1) → dB gain. Vol=1.0 → 0dB,
-                                # vol=0.5 → -6dB, vol=0.1 → -20dB. Floor ở -40dB.
-                                import math
-                                bgm_gain_db = 20.0 * math.log10(max(accomp_vol, 0.01))
-                                full_audio = pro_mix(
-                                    voice=full_audio,
-                                    bgm=bg_mono,
-                                    sr=sr,
-                                    bgm_gain_db=bgm_gain_db,
-                                    target_lufs=target_lufs,
-                                )
-                                used_pro = True
-                            except TypeError:
-                                # pro_mix signature cũ không nhận bgm_gain_db
-                                logger.warning("pro_mix legacy signature — bgm_gain_db ignored")
-                                try:
-                                    full_audio = pro_mix(
-                                        voice=full_audio,
-                                        bgm=bg_mono,
-                                        sr=sr,
-                                        target_lufs=target_lufs,
-                                    )
-                                    used_pro = True
-                                except Exception as e:
-                                    logger.warning("Pro mix failed: %s", e)
-                            except Exception as e:
-                                logger.warning("Pro mix failed, falling back to envelope ducking: %s", e)
-
-                        if not used_pro:
-                            logger.info("Applying legacy audio ducking (level=%.2f, vol=%.2f)",
-                                        duck_level, accomp_vol)
-                            full_audio = _apply_ducking(
-                                bg_audio * accomp_vol, full_audio, sr,
-                                duck_level=duck_level,
-                                attack=duck_attack,
-                                release=duck_release,
-                            )
-                    else:
-                        mix_len = min(len(full_audio), len(bg_audio))
-                        full_audio[:mix_len] += bg_audio[:mix_len] * accomp_vol
+                    # Single mix path — pro_mix với sidechain ducking + LUFS norm.
+                    # bgm_gain_db từ user slider: 1.0→0dB, 0.5→-6dB, 0.1→-20dB.
+                    import math
+                    from app.services.audio_mix_svc import pro_mix
+                    bgm_gain_db = 20.0 * math.log10(max(accomp_vol, 0.01))
+                    logger.info(
+                        "Applying PRO audio mix (LUFS=%.1f, bgm_vol=%.2f → %.1fdB)",
+                        target_lufs, accomp_vol, bgm_gain_db,
+                    )
+                    full_audio = pro_mix(
+                        voice=full_audio,
+                        bgm=bg_mono,
+                        sr=sr,
+                        bgm_gain_db=bgm_gain_db,
+                        target_lufs=target_lufs,
+                    )
 
             # ── Mix vocals (giọng người gốc, đã tách qua Demucs) — KHÔNG ducking ──
             if keep_vocals:
@@ -5705,8 +5604,6 @@ def update_project_settings(project_id: str, settings: dict) -> dict:
         #  · vocals (giọng người gốc) — default OFF (tránh đụng giọng dub)
         "keep_accompaniment", "accompaniment_volume",
         "keep_original_voice", "original_voice_volume",
-        # Backward compat — flag cũ, vẫn đọc nếu set
-        "keep_original_audio", "original_audio_volume",
         # Crop mode — apply trong ffmpeg ở export_video
         "crop_mode",
         # Cảm xúc mặc định — fallback khi LLM không set
@@ -6233,12 +6130,11 @@ def auto_dub(
             logger.info("Skip TTS step (enable_dubbing=false)")
 
         _check_cancel()
-        # Step 4: Export
+        # Step 4: Export — export_video chỉ nhận target_lufs.
+        # Mix settings (keep_accompaniment, keep_original_voice, vol) đã
+        # lưu trong project meta qua /settings endpoint.
         for tick in _run_step_with_progress(
-            export_video, [project_id], {
-                "keep_original_audio": not do_dubbing,
-                "enable_ducking": do_dubbing,
-            },
+            export_video, [project_id], {},
             start_pct=r_export[0], end_pct=r_export[1],
             label=steps[3][1], estimated_sec=15,
         ):

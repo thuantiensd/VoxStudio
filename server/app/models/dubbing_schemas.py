@@ -79,11 +79,13 @@ class ReorderRequest(BaseModel):
 
 
 class ExportOptions(BaseModel):
-    keep_original_audio: bool = False
-    original_audio_volume: float = 0.1
-    enable_ducking: bool = True       # Smart audio ducking — reduce BGM when voice plays
-    duck_level: float = 0.15          # BGM volume when voice is present (0.0-1.0) [legacy]
-    duck_attack: float = 0.05         # Ducking attack time in seconds [legacy]
-    duck_release: float = 0.3         # Ducking release time in seconds [legacy]
-    use_pro_mix: bool = True          # Use professional pedalboard chain (recommended)
-    target_lufs: float = -16.0        # YouTube=-14, most streaming=-16, conservative=-18
+    """Export settings — 5 params duy nhất sau cleanup Phase A.
+
+    Audio mix architecture: pro_mix luôn dùng (sidechain ducking built-in).
+    KHÔNG còn legacy ducking, KHÔNG còn monolithic original_audio params.
+
+    Project meta là source of truth cho 4 params kia (keep_accompaniment,
+    accompaniment_volume, keep_original_voice, original_voice_volume) —
+    set qua /settings endpoint, override ở UI.
+    """
+    target_lufs: float = -16.0        # YouTube=-14, streaming=-16, conservative=-18
