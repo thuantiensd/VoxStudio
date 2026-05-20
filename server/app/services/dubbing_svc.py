@@ -4443,43 +4443,51 @@ def _process_one_batch_audio(
 
         batch_wav.unlink(missing_ok=True)
 
-        # Step 6-8: Studio chain (gender EQ + loudness + fade edges)
-        # Bật/tắt qua project["studio_mix"] (default True). Tắt → place raw
-        # audio để giữ tone gốc của Edge TTS (không nhuộm phòng thu).
+        # Step 6-7: Studio chain (gender EQ + loudness) — KHÔNG fade ở
+        # batch level vì sẽ split thành chunks → mỗi chunk fade riêng
+        # ở Step 8 dưới. Fade 2 lần làm mất tiếng đầu chunk 0 (~50ms
+        # silent ramp). User report "mất câu đầu" → fix bằng cách chỉ
+        # fade chunk-level.
         studio_on = bool(project.get("studio_mix", True))
         if studio_on:
             try:
                 from app.services.audio_mix_svc import (
-                    apply_voice_chain, normalize_loudness_rms, fade_edges,
+                    apply_voice_chain, normalize_loudness_rms,
                 )
                 batch_audio = apply_voice_chain(batch_audio, sr, gender=gender)
                 # RMS loudness norm — target -23dBFS (gentler than -20 để
                 # tránh over-amplify noise floor → âm thanh chói).
                 # Cap gain ±5dB (was ±8) để không boost segment quá quiet.
                 batch_audio = normalize_loudness_rms(batch_audio, target_dbfs=-23.0, max_gain_db=5.0)
-                # Fade edges 30ms để place vào silent track không click
-                batch_audio = fade_edges(batch_audio, sr, fade_ms=30.0)
             except Exception as e:
                 logger.warning("Batch %d: studio chain failed (%s) — placing raw",
                                batch_idx + 1, e)
 
         # Smart pause adjustment: split batch_audio thành per-segment chunks
-        # theo char proportion. Mỗi chunk place tại seg["start"] gốc → tự nhiên
-        # giữ pause giữa segments (sync với scene cut / lip pause của giọng gốc).
+        # theo silence detection. Mỗi chunk place tại seg["start"] gốc → tự
+        # nhiên giữ pause giữa segments (sync với scene cut / lip pause).
         chunks = _split_batch_into_segment_chunks(batch_audio, batch, sr)
 
-        # Persist per-segment .wav (idempotent — lần sau skip batch này thì
-        # _load_existing_into_track tìm thấy file). Apply fade edges 20ms cho
-        # mỗi chunk để place vào silent track không click.
+        # Step 8: fade-out 80ms ONLY cho chunk cuối batch + fade-out giữa
+        # các chunks. KHÔNG fade-in chunk 0 (giữ tiếng đầu).
+        # Persist per-segment .wav để load lại nếu skip batch sau này.
         if chunks:
             try:
                 from app.services.audio_mix_svc import fade_edges as _fade
             except Exception:
                 _fade = None
-            for c in chunks:
+            for i, c in enumerate(chunks):
                 ca = c["audio"]
+                is_first = (i == 0)
+                is_last = (i == len(chunks) - 1)
                 if _fade is not None and len(ca) > int(0.05 * sr):
-                    ca = _fade(ca, sr, fade_ms=20.0)
+                    # fade_in chỉ 5ms cho chunk 0 (chống click nhưng không
+                    # nuốt tiếng); fade_in 15ms cho chunks giữa (đủ smooth).
+                    # fade_out 80ms cho chunk cuối, 30ms cho chunks giữa.
+                    fade_in_ms = 5.0 if is_first else 15.0
+                    fade_out_ms = 80.0 if is_last else 30.0
+                    ca = _fade(ca, sr, fade_in_ms=fade_in_ms,
+                                fade_out_ms=fade_out_ms)
                     c["audio"] = ca
                 seg_wav = seg_dir / f"{c['seg_id']}.wav"
                 try:
