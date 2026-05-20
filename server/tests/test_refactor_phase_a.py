@@ -143,6 +143,30 @@ class TestLLMPromptBlocks:
         assert "KHÔNG bịa subject" in SUBJECT_INFERENCE_RULES_VN or \
                "CẤM: bịa subject" in SUBJECT_INFERENCE_RULES_VN
 
+    def test_power_dynamics_rules_constant_exists(self):
+        """Power dynamics — pronoun match theo tone arrogant/hostile."""
+        from app.services.llm.prompts import POWER_DYNAMICS_RULES_VN
+        assert "POWER DYNAMICS" in POWER_DYNAMICS_RULES_VN
+        # Phải có power levels A-G
+        assert "SUPERIOR → INFERIOR" in POWER_DYNAMICS_RULES_VN
+        assert "HOSTILE MOB" in POWER_DYNAMICS_RULES_VN
+        # Phải có marker hostile/arrogant
+        assert "tao" in POWER_DYNAMICS_RULES_VN
+        assert "mày" in POWER_DYNAMICS_RULES_VN
+        # Anti-patterns
+        assert "Quỳ xuống cho tôi" in POWER_DYNAMICS_RULES_VN  # ví dụ SAI
+
+    def test_power_dynamics_in_anchor_block(self):
+        """POWER DYNAMICS phải inject vào prompt khi target=VN."""
+        from app.services.llm.prompts import build_translator_prompt
+        prompt = build_translator_prompt(
+            segments=[{"original_text": "给我跪下", "speaker": "SPEAKER_00",
+                       "speaker_gender": "male"}],
+            target_lang="vietnamese",
+            source_lang="chinese",
+        )
+        assert "POWER DYNAMICS" in prompt["system"]
+
     def test_kinship_in_anchor_block_for_vn(self):
         """KINSHIP RULES phải inject vào prompt khi target=vietnamese."""
         from app.services.llm.prompts import build_translator_prompt

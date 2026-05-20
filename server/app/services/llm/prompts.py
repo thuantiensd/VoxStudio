@@ -1267,6 +1267,90 @@ def _per_segment_anchor(seg: dict, relationships: dict) -> str:
 
 
 # ═══════════════════════════════════════════════════════════════
+# POWER DYNAMICS RULES — match register pronoun theo POWER RELATION
+# + TONE giữa speaker và addressee. Tránh dùng "tôi/anh" default khi
+# context arrogant/contempt/hostile.
+#
+# Generated từ SRT analysis: arrogant character + hostile mob context
+# thường bị dịch "tôi/anh" quá lịch sự → mất tone phim.
+# ═══════════════════════════════════════════════════════════════
+POWER_DYNAMICS_RULES_VN = """
+⚡ POWER DYNAMICS — MATCH PRONOUN VỚI TONE + RELATION:
+
+Tiếng Việt có nhiều cấp pronoun (mày-tao, anh-em, ngài-tôi, ngươi-ta).
+Chọn SAI cấp = mất tone phim ("tôi" cho kẻ ngạo mạn = nghe yếu).
+
+🔥 BẢNG POWER × TONE → PRONOUN:
+
+A. SUPERIOR → INFERIOR (kẻ trên nói xuống) + HOSTILE/ARROGANT:
+   • Self = "tao" / "ta" (cổ trang)
+   • Gọi addressee = "mày" / "thằng + name" / "ngươi" (cổ trang)
+   • Markers: 命令/羞辱/嘲讽/威胁 — ra lệnh, sỉ nhục, đe dọa, mỉa mai
+   • Vd: 给我跪下 (Quỳ xuống cho tao) — KHÔNG dịch "Quỳ xuống cho tôi"
+   • Vd: 你算什么东西 (Mày là cái thứ gì) — KHÔNG dịch "Anh là gì"
+
+B. INFERIOR → SUPERIOR (kẻ dưới nói lên) + RESPECTFUL/DEFERENTIAL:
+   • Self = "tôi" / "tại hạ" (cổ trang) / "thiếp" (vợ)
+   • Gọi addressee = "ngài" / "đại nhân" / "tiền bối" / "vị này"
+   • Vd: 大人饶命 (Đại nhân tha mạng) — KHÔNG dịch "Ngài tha cho anh"
+
+C. HOSTILE MOB / BYSTANDER (đám đông hùa theo) + CONTEMPT:
+   • Self = "tao" / "chúng tao" / "ông"
+   • Gọi target = "thằng + name" / "cái thằng này" / "mày"
+   • Vd: 这小子 (Cái thằng này) — KHÔNG dịch "Anh này"
+   • Vd: 哥们儿 / 兄弟 (chum greeting trong context hostile) → "Ê"/"Này"
+     KHÔNG dịch "Anh bạn" (sai context — nghe chummy).
+
+D. PEER FRIENDLY (bạn bè ngang vai):
+   • Self = "tôi" / "tớ" / "tao" (thân)
+   • Gọi = "cậu" / "ông" / "mày" (thân)
+   • Phụ thuộc tone — formal "tôi/cậu", thân "tao/mày".
+
+E. ROMANTIC (đôi yêu/vợ chồng):
+   • "anh/em" (default)
+   • Vợ chồng cổ trang: "thiếp/chàng", "phu nhân/nàng"
+
+F. FORMAL BUSINESS (công sở, lạ mặt):
+   • Self = "tôi"
+   • Gọi = "anh" / "chị" (cùng tuổi) / "em" (younger) / "bác" (older)
+
+G. KINSHIP — đã có KINSHIP HARD RULES (mẹ/con, bố/con, etc.)
+
+📌 HOSTILE/ARROGANT MARKERS CẦN PHÁT HIỆN:
+
+Trong câu source TQ, tìm:
+   • 你算什么 / 你算老几 / 什么东西  → contempt, dịch "tao-mày"
+   • 给我 + verb (ra lệnh)            → "tao", target "mày"
+   • 跪下 / 滚 / 滚开 / 闭嘴            → command demeaning
+   • 小子 / 这家伙 / 这种人              → "thằng/cái thằng"
+   • 算了吧你 / 别给脸不要脸             → mỉa mai, hostile
+   • 配吗 / 配不配                     → challenge
+   • 廢物 / 垃圾 / 蠢货                 → insult, lower pronoun
+   • Nhân vật chính giàu/quyền + đang ra oai → tự xưng "tao" với target
+
+KHI THẤY MARKER → pronoun phải MATCH tone, không default "tôi/anh".
+
+📌 SHIFT REGISTER MID-SCENE (cực phổ biến trong phim TQ):
+
+Cảnh A: arrogant character nói với "mày/tao" → bystander
+Cảnh B: cùng character nhận ra target có quyền lực → đột ngột "ngài/em"
+
+Vd trong SRT này:
+- Line 27-28: Tiêu thiếu ra oai với Cố Nhan → "Quỳ xuống cho TAO"
+- Line 39: Tiêu thiếu nhận ra Cố Nhan có thế lực → "Vị tiên sinh này"
+- Line 40: "Thiệt hại ANH gây ra" — đột ngột lịch sự lại
+
+→ MUST capture shift này. Không cào bằng "anh-tôi" cả phim.
+
+⚠️ DEFAULT KHI KHÔNG CHẮC:
+- Có ≥ 1 hostile marker → POWER A or C → "tao/mày"
+- Tone tha thiết / nhẹ → POWER D-F → "tôi/anh"
+- Câu lệnh ngắn, gắt → POWER A → "tao/mày"
+- KHÔNG default "anh-tôi" cho mọi câu — phải scan tone trước.
+"""
+
+
+# ═══════════════════════════════════════════════════════════════
 # SUBJECT INFERENCE RULES — Trung/Nhật/Hàn drop subject thường xuyên.
 # LLM PHẢI infer subject từ context preceding segments. KHÔNG được tự
 # bịa subject (thường default về "tôi/con") nếu source đã elide.
@@ -1450,7 +1534,7 @@ def build_translator_prompt(
         # KINSHIP RULES vẫn append phía dưới để LLM luôn có rule deterministic.
         anchor_block = "\n" + _format_speaker_anchor_block(speaker_relationships) + "\n"
         if is_vn:
-            anchor_block += KINSHIP_HARD_RULES_VN + SUBJECT_INFERENCE_RULES_VN
+            anchor_block += KINSHIP_HARD_RULES_VN + POWER_DYNAMICS_RULES_VN + SUBJECT_INFERENCE_RULES_VN
     elif is_vn:
         # Không có speaker_relationships → LLM tự suy luận speaker + KINSHIP rules.
         anchor_block = """
@@ -1472,7 +1556,7 @@ BƯỚC 3 — Sau khi suy luận, ASSIGN pronoun NHẤT QUÁN:
    • Đánh nhãn nội bộ: SPEAKER A, SPEAKER B, SPEAKER C, ...
    • Mỗi speaker chỉ dùng 1 self_pronoun cho CÙNG addressee xuyên suốt batch
    • Mỗi cặp speaker chỉ dùng 1 cách xưng hô lẫn nhau
-""" + KINSHIP_HARD_RULES_VN + SUBJECT_INFERENCE_RULES_VN
+""" + KINSHIP_HARD_RULES_VN + POWER_DYNAMICS_RULES_VN + SUBJECT_INFERENCE_RULES_VN
         if audio_gender_hints:
             gender_lines = ", ".join(f"{spk}={gender}" for spk, gender in sorted(audio_gender_hints.items()))
             anchor_block = (
