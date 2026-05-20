@@ -391,12 +391,15 @@ def _call_openai_http(prompt: dict, api_key: Optional[str], model: Optional[str]
         ],
     }
     if uses_new_api:
-        # GPT-5/o-series: dịch là task không cần reasoning sâu — set
-        # reasoning_effort=minimal để model làm theo prompt examples +
-        # glossary thay vì over-think. Cải thiện quality VÀ speed.
-        # Cũng bump max_completion_tokens cho output đủ space.
-        payload["reasoning_effort"] = "minimal"
-        payload["max_completion_tokens"] = 8192
+        # GPT-5/o-series: prompt phim phức tạp (KINSHIP + POWER DYNAMICS +
+        # SUBJECT INFERENCE + Logic Review) — minimal reasoning bỏ qua
+        # rule, dịch như Google Translate. Dùng "medium" để model:
+        #   - Đọc đủ context window (10 lines)
+        #   - Apply KINSHIP/POWER rules vào từng câu
+        #   - Self-review BƯỚC 4 thực sự (không cào bằng "tôi/anh")
+        # Cost tăng nhẹ (~30% tokens) nhưng quality lên đáng kể.
+        payload["reasoning_effort"] = "medium"
+        payload["max_completion_tokens"] = 16384  # bump cho reasoning headroom
     else:
         # Older models: thấp temperature cho dịch chính xác hơn
         payload["temperature"] = 0.2
@@ -418,7 +421,9 @@ def _call_claude_http(prompt: dict, api_key: Optional[str], model: Optional[str]
     m = model or "claude-opus-4-5"
     payload = {
         "model": m,
-        "max_tokens": 4096,
+        # Bump 4096→8192: prompt phim có nhiều rule (KINSHIP + POWER +
+        # SUBJECT INFER) — output JSON cho batch 30+ segments cần room.
+        "max_tokens": 8192,
         "temperature": 0.2,
         "system": prompt["system"],
         "messages": [{"role": "user", "content": prompt["user"]}],
