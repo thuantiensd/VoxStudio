@@ -4681,11 +4681,20 @@ def _split_batch_into_segment_chunks(
     nhiên (silence trong full_track) → sync với scene/pause giọng gốc.
 
     Trả: list[{seg_id, start_time, audio}].
+
+    Algorithm V2 — silence-aware splitting (cải thiện so với char-proportion):
+      1. Detect silences trong batch_audio (RMS < threshold, kéo dài >= 150ms)
+      2. Cần N-1 split points cho N segments
+      3. Estimate vị trí split theo char proportion → snap về silence gần nhất
+      4. Chunks = audio giữa các split points
+      5. Place mỗi chunk tại seg["start"] gốc
+      6. Nếu chunk overflow vào slot kế (chunk_end > next_seg.start + 0.2s)
+         → trim trailing silence của chunk hoặc atempo nhẹ
     """
     if len(batch_audio) == 0 or not batch:
         return []
 
-    # Total chars trong batch (dùng để chia proportional)
+    # Total chars (fallback proportional)
     seg_chars = []
     for s in batch:
         txt = (s.get("speech_text") or s.get("translated_text") or "").strip()
@@ -4694,24 +4703,128 @@ def _split_batch_into_segment_chunks(
     if total_chars == 0:
         return []
 
-    chunks: list[dict] = []
-    char_cum = 0
     n_samples = len(batch_audio)
-    for i, s in enumerate(batch):
+    n_segs = sum(1 for c in seg_chars if c > 0)
+
+    # ── Step 1: detect silence regions (RMS-based, frame-by-frame) ──
+    # Tạo silence_mask: True = silent frame.
+    frame_ms = 20.0  # 20ms windows
+    frame_samples = int(sr * frame_ms / 1000)
+    silence_threshold = 0.015  # ~-36 dBFS (đủ ngưỡng cho TTS pauses)
+
+    def _find_silence_regions(audio: np.ndarray) -> list[tuple[int, int]]:
+        """Tìm các vùng im lặng, trả [(start_sample, end_sample), ...]."""
+        regions: list[tuple[int, int]] = []
+        n_frames = len(audio) // frame_samples
+        if n_frames < 2:
+            return regions
+        # RMS per frame
+        rms = np.array([
+            float(np.sqrt(np.mean(audio[i*frame_samples:(i+1)*frame_samples] ** 2)))
+            for i in range(n_frames)
+        ])
+        is_silent = rms < silence_threshold
+        # Group thành regions (>= 150ms = 7 frames @ 20ms)
+        i = 0
+        while i < n_frames:
+            if is_silent[i]:
+                j = i
+                while j < n_frames and is_silent[j]:
+                    j += 1
+                if (j - i) >= 7:
+                    regions.append((i * frame_samples, j * frame_samples))
+                i = j
+            else:
+                i += 1
+        return regions
+
+    silences = _find_silence_regions(batch_audio)
+
+    # ── Step 2: compute N-1 split points ──
+    # Estimate theo char proportion → snap về silence gần nhất (trong window ±300ms)
+    split_points: list[int] = []  # sample indices
+    char_cum = 0
+    snap_window = int(sr * 0.3)  # ±300ms
+
+    for i in range(len(batch) - 1):
         sc = seg_chars[i]
         if sc == 0:
             continue
-        # Audio slice tương ứng với portion char của segment này
-        audio_start = int(round(n_samples * char_cum / total_chars))
-        audio_end = int(round(n_samples * (char_cum + sc) / total_chars))
-        chunk_audio = batch_audio[audio_start:audio_end]
+        char_cum += sc
+        # Estimate vị trí end của segment i (proportional)
+        estimated = int(round(n_samples * char_cum / total_chars))
+
+        # Snap về silence gần nhất nếu có
+        best_split = estimated
+        best_dist = snap_window + 1
+        for (s_start, s_end) in silences:
+            # Center của silence region
+            s_mid = (s_start + s_end) // 2
+            d = abs(s_mid - estimated)
+            if d <= snap_window and d < best_dist:
+                best_split = s_mid
+                best_dist = d
+        split_points.append(best_split)
+
+    # ── Step 3: build chunks dùng split_points ──
+    chunks: list[dict] = []
+    prev_split = 0
+    idx = 0
+    for i, s in enumerate(batch):
+        if seg_chars[i] == 0:
+            continue
+        if idx < len(split_points):
+            chunk_end = split_points[idx]
+        else:
+            chunk_end = n_samples  # segment cuối
+        chunk_audio = batch_audio[prev_split:chunk_end]
         if len(chunk_audio) > 0:
             chunks.append({
                 "seg_id": s["id"],
                 "start_time": s["start"],
                 "audio": chunk_audio,
             })
-        char_cum += sc
+        prev_split = chunk_end
+        idx += 1
+
+    # ── Step 4: overflow handling per chunk ──
+    # Nếu chunk kéo dài quá next_seg.start + 200ms → trim trailing silence
+    for i, c in enumerate(chunks):
+        chunk_dur = len(c["audio"]) / sr
+        # Next seg start (giới hạn slot)
+        if i + 1 < len(chunks):
+            next_start = chunks[i + 1]["start_time"]
+        else:
+            next_start = c["start_time"] + chunk_dur + 5.0  # last chunk: no overflow check
+        chunk_end_time = c["start_time"] + chunk_dur
+        overflow = chunk_end_time - next_start
+        if overflow > 0.2:  # quá 200ms
+            # Trim trailing silence (~30dB threshold)
+            audio = c["audio"]
+            tail_window = int(sr * 0.05)  # check 50ms frames
+            target_dur = next_start - c["start_time"] + 0.1  # cho phép overlap 100ms
+            target_samples = int(target_dur * sr)
+            if target_samples < len(audio):
+                # Find rightmost non-silent sample within target
+                for end in range(min(len(audio), target_samples + tail_window),
+                                  target_samples - tail_window, -tail_window):
+                    if end >= len(audio):
+                        continue
+                    window_rms = float(np.sqrt(
+                        np.mean(audio[max(0, end-tail_window):end] ** 2)
+                    ))
+                    if window_rms < silence_threshold:
+                        # Tìm thấy silence end → trim tại đó
+                        c["audio"] = audio[:end]
+                        break
+                else:
+                    # Không thấy silence → hard trim với fade nhẹ
+                    fade_samples = min(int(0.03 * sr), target_samples // 4)
+                    trimmed = audio[:target_samples].copy()
+                    if fade_samples > 0:
+                        fade = np.linspace(1.0, 0.0, fade_samples, dtype=np.float32)
+                        trimmed[-fade_samples:] *= fade
+                    c["audio"] = trimmed
 
     return chunks
 

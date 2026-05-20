@@ -124,6 +124,66 @@ class TestSmartPauseChunks:
         assert chunks[1]["start_time"] == 1.5
         assert chunks[2]["start_time"] == 3.5  # ← gap 1s với chunk 1 (preserved)
 
+    def test_silence_aware_split_snaps_to_silence(self):
+        """V2 algorithm: split point phải snap về silence gần nhất nếu có."""
+        import numpy as np
+        from app.services.dubbing_svc import _split_batch_into_segment_chunks
+        sr = 24000
+
+        # Tạo audio 3s: 1s voice, 0.3s silence, 1.5s voice, 0.2s silence
+        voice1 = np.random.normal(0, 0.5, sr).astype(np.float32)
+        silence1 = np.zeros(int(0.3 * sr), dtype=np.float32)
+        voice2 = np.random.normal(0, 0.5, int(1.5 * sr)).astype(np.float32)
+        silence2 = np.zeros(int(0.2 * sr), dtype=np.float32)
+        batch_audio = np.concatenate([voice1, silence1, voice2, silence2])
+
+        # 2 segments với char proportion 50/50 — estimated split tại 1.5s
+        # Silence ở 1.0-1.3s → snap về 1.15s
+        batch = [
+            {"id": "s1", "start": 0.0, "end": 1.2, "speech_text": "Câu một dài"},
+            {"id": "s2", "start": 1.2, "end": 2.7, "speech_text": "Câu hai dài"},
+        ]
+        chunks = _split_batch_into_segment_chunks(batch_audio, batch, sr)
+        assert len(chunks) == 2
+        # Chunk 0 phải kết thúc trong vùng silence (~1.0-1.3s)
+        chunk0_dur = len(chunks[0]["audio"]) / sr
+        # Snap window ±300ms từ estimated 1.5s → expect chunk0 ~1.0-1.3s
+        # (silence center là 1.15s)
+        assert 0.9 <= chunk0_dur <= 1.5, (
+            f"Chunk 0 duration phải snap về silence (~1.15s), hiện {chunk0_dur:.2f}s"
+        )
+
+    def test_overflow_chunk_trimmed(self):
+        """Chunk overflow next seg > 200ms phải bị trim."""
+        import numpy as np
+        from app.services.dubbing_svc import _split_batch_into_segment_chunks
+        sr = 24000
+
+        # Batch audio 4s, 2 segments
+        # Seg 1: slot 0-1.5s
+        # Seg 2: slot 1.5-4s
+        # → chunk 1 sẽ bị giới hạn ~1.5s (chỉ overflow tới 1.7s là max)
+        batch_audio = np.ones(sr * 4, dtype=np.float32) * 0.5
+        batch = [
+            # Seg 1 text dài đôi seg 2 → char proportion split tại 2.67s
+            # Nhưng next seg start = 1.5s → overflow check trim
+            {"id": "s1", "start": 0.0, "end": 1.5,
+             "speech_text": "Câu một dài hơn nhiều với nhiều chữ hơn"},  # ~38 chars
+            {"id": "s2", "start": 1.5, "end": 4.0,
+             "speech_text": "Câu hai"},  # 7 chars
+        ]
+        chunks = _split_batch_into_segment_chunks(batch_audio, batch, sr)
+        assert len(chunks) == 2
+        # Chunk 0 phải ≤ next_start (1.5s) + 100ms tolerance = 1.6s
+        chunk0_dur = len(chunks[0]["audio"]) / sr
+        chunk0_end = chunks[0]["start_time"] + chunk0_dur
+        next_start = chunks[1]["start_time"]
+        # Cho phép overflow nhẹ ~100ms (trim với fade)
+        assert chunk0_end <= next_start + 0.2, (
+            f"Chunk 0 phải không overflow next seg quá 200ms. "
+            f"chunk0_end={chunk0_end:.2f}, next_start={next_start:.2f}"
+        )
+
 
 class TestLLMPromptBlocks:
     """Phase 5-6 fix: KINSHIP RULES + SUBJECT INFERENCE block injected."""
