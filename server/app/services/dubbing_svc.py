@@ -27,6 +27,370 @@ logger = logging.getLogger(__name__)
 
 # ── Helpers ─────────────────────────────────────────
 
+def _trim_np_silence(audio: np.ndarray, sr: int,
+                     threshold_db: float = -50.0,
+                     pad_ms: float = 80.0) -> np.ndarray:
+    """Trim leading/trailing silence from numpy audio array.
+
+    Applied AFTER all processing (EQ, normalize, atempo) and BEFORE fade/save
+    to remove OmniVoice's inherent 200-500ms silence at start.
+    """
+    if len(audio) == 0:
+        return audio
+    threshold = 10 ** (threshold_db / 20)
+    abs_audio = np.abs(audio)
+    above = np.where(abs_audio > threshold)[0]
+    if len(above) == 0:
+        return audio
+    pad_samples = int(pad_ms * sr / 1000)
+    start = max(0, above[0] - pad_samples)
+    end = min(len(audio), above[-1] + pad_samples + 1)
+    return audio[start:end]
+
+
+def _compress_internal_silences(audio: np.ndarray, sr: int,
+                                max_silence_ms: float = 200.0,
+                                threshold_db: float = -50.0,
+                                edge_margin_ms: float = 200.0) -> np.ndarray:
+    """Nén silence gaps nội bộ xuống max_silence_ms với crossfade mượt.
+
+    OmniVoice hay chèn 300-800ms silence tại dấu phẩy — chỉ nén những
+    khoảng lặng DÀI BẤT THƯỜNG. Giữ lại micro-pause ≤200ms (nhịp thở
+    tự nhiên) để giọng không bị vấp. Threshold -50dB chỉ cắt silence
+    thực sự, không ăn vào phụ âm yếu (s/f/th). Edge margin 200ms bảo
+    vệ fade-in/out của engine.
+    """
+    if len(audio) == 0:
+        return audio
+    threshold = 10 ** (threshold_db / 20)
+    max_silence_samples = int(max_silence_ms * sr / 1000)
+    edge_margin_samples = int(edge_margin_ms * sr / 1000)
+    xfade_samples = int(0.030 * sr)  # 30ms crossfade tại mối nối (mượt hơn 10ms)
+    chunk_samples = int(0.005 * sr)
+
+    rms_frames = []
+    for i in range(0, len(audio), chunk_samples):
+        chunk = audio[i:i + chunk_samples]
+        rms = np.sqrt(np.mean(chunk ** 2))
+        rms_frames.append(rms)
+
+    is_silent = [r < threshold for r in rms_frames]
+    gaps = []
+    in_gap = False
+    gap_start = 0
+    for idx, silent in enumerate(is_silent):
+        if silent:
+            if not in_gap:
+                gap_start = idx
+                in_gap = True
+        else:
+            if in_gap:
+                gap_start_sample = gap_start * chunk_samples
+                gap_end_sample = idx * chunk_samples
+                gap_duration = gap_end_sample - gap_start_sample
+                if gap_start_sample > edge_margin_samples and \
+                   (len(audio) - gap_end_sample) > edge_margin_samples and \
+                   gap_duration > max_silence_samples:
+                    gaps.append((gap_start_sample, gap_end_sample))
+                in_gap = False
+
+    if not gaps:
+        return audio
+
+    pieces = []
+    prev_end = 0
+    half_keep = max_silence_samples // 2
+    for gap_s, gap_e in gaps:
+        left_end = gap_s + half_keep
+        right_start = gap_e - half_keep
+        left_piece = audio[prev_end:left_end]
+        if xfade_samples > 0 and len(left_piece) >= xfade_samples and \
+           right_start + xfade_samples <= len(audio):
+            fade_out = np.linspace(1.0, 0.0, xfade_samples, dtype=audio.dtype)
+            fade_in = np.linspace(0.0, 1.0, xfade_samples, dtype=audio.dtype)
+            left_piece = left_piece.copy()
+            left_piece[-xfade_samples:] *= fade_out
+            right_xfade = audio[right_start:right_start + xfade_samples].copy()
+            right_xfade *= fade_in
+            left_piece[-xfade_samples:] += right_xfade
+            prev_end = right_start + xfade_samples
+        else:
+            prev_end = right_start
+        pieces.append(left_piece)
+    pieces.append(audio[prev_end:])
+    return np.concatenate(pieces)
+
+
+def _clean_whisper_text(text: str) -> str:
+    """Clean Whisper STT output: remove fullwidth chars, normalize punctuation."""
+    import unicodedata
+    out = []
+    for ch in text:
+        name = unicodedata.name(ch, "")
+        if "FULLWIDTH" in name:
+            ch = unicodedata.normalize("NFKC", ch)
+        out.append(ch)
+    return "".join(out).strip()
+
+
+def _recover_whisper_gaps(
+    segs: list[dict],
+    audio_path: str,
+    audio_dur: float,
+    language: str | None = None,
+    gap_threshold: float = 10.0,
+) -> list[dict]:
+    """Retry Whisper with VAD mode on gaps >gap_threshold seconds.
+
+    When Whisper misses long stretches of dialogue (common with Chinese dramas
+    + background music), extract the gap audio, re-transcribe with VAD enabled,
+    and merge recovered segments back — only if they don't overlap existing ones.
+    """
+    if not segs or audio_dur < 20:
+        return segs
+
+    gaps: list[tuple[float, float]] = []
+    first_start = segs[0].get("start", 0)
+    if first_start > gap_threshold:
+        gaps.append((0.0, first_start))
+    for i in range(1, len(segs)):
+        prev_end = segs[i - 1].get("end", 0)
+        cur_start = segs[i].get("start", 0)
+        if cur_start - prev_end > gap_threshold:
+            gaps.append((prev_end, cur_start))
+    last_end = segs[-1].get("end", 0)
+    if audio_dur - last_end > gap_threshold:
+        gaps.append((last_end, audio_dur))
+
+    if not gaps:
+        return segs
+
+    logger.info("Gap recovery: %d gaps >%.0fs detected — retrying with VAD", len(gaps), gap_threshold)
+    recovered: list[dict] = []
+
+    for gap_start, gap_end in gaps:
+        try:
+            pad = 1.0
+            clip_start = max(0, gap_start - pad)
+            clip_end = min(audio_dur, gap_end + pad)
+            clip_path = Path(audio_path).parent / f"_gap_{clip_start:.0f}_{clip_end:.0f}.wav"
+
+            (
+                ffmpeg.input(str(audio_path), ss=clip_start, to=clip_end)
+                .output(str(clip_path), acodec="pcm_s16le", ac=1, ar=16000)
+                .overwrite_output()
+                .run(quiet=True)
+            )
+
+            gap_result = gpu.transcribe_faster(str(clip_path), language=language)
+            clip_path.unlink(missing_ok=True)
+
+            gap_segs = gap_result.get("segments", [])
+            for gs in gap_segs:
+                gs["start"] = round(gs["start"] + clip_start, 2)
+                gs["end"] = round(gs["end"] + clip_start, 2)
+                text = (gs.get("text") or "").strip()
+                if not text or len(text) < 2:
+                    continue
+                overlap = any(
+                    max(0, min(gs["end"], s["end"]) - max(gs["start"], s["start"])) > 0.3
+                    for s in segs
+                )
+                if not overlap:
+                    recovered.append(gs)
+        except Exception as e:
+            logger.warning("Gap recovery [%.1f-%.1f] failed: %s", gap_start, gap_end, e)
+
+    if recovered:
+        logger.info("Gap recovery: +%d segments recovered from %d gaps", len(recovered), len(gaps))
+        merged = segs + recovered
+        merged.sort(key=lambda s: s.get("start", 0))
+        return merged
+    return segs
+
+
+def _detect_collapsed_diarization(segments: list[dict], min_segments: int = 6) -> dict | None:
+    """Detect when diarization collapsed — 1 speaker assigned to >80% of segments.
+
+    Returns {dominant_speaker, pct, total} if collapsed, None otherwise.
+    Downstream injects LLM warning to self-detect speakers from content.
+    """
+    if len(segments) < min_segments:
+        return None
+    from collections import Counter
+    speakers = Counter(s.get("speaker") for s in segments if s.get("speaker"))
+    if not speakers:
+        return None
+    dominant, count = speakers.most_common(1)[0]
+    total_with_speaker = sum(speakers.values())
+    pct = count / total_with_speaker
+    if pct >= 0.80:
+        return {"dominant_speaker": dominant, "pct": round(pct, 2), "total": total_with_speaker}
+    return None
+
+
+CONTEXT_SEPARATOR = "..."
+CONTEXT_SEARCH_WINDOW_LEFT_MS = 400
+CONTEXT_SEARCH_WINDOW_RIGHT_MS = 50
+OMNI_LONG_TEXT_THRESHOLD = 70
+OMNI_SPLIT_SILENCE_MS = 60
+
+
+def _find_silence_split(audio: np.ndarray, sr: int,
+                        estimated_split_sec: float,
+                        threshold_db: float = -40.0) -> int:
+    """Find best silence-based split point near estimated_split_sec.
+
+    Searches for the longest silence gap in a window biased left (-400ms/+50ms)
+    around the estimated split. Returns sample index of the split point.
+    Bias toward earlier split to avoid cutting into target text.
+    """
+    est_sample = int(estimated_split_sec * sr)
+    left_margin = int(CONTEXT_SEARCH_WINDOW_LEFT_MS * sr / 1000)
+    right_margin = int(CONTEXT_SEARCH_WINDOW_RIGHT_MS * sr / 1000)
+    search_start = max(0, est_sample - left_margin)
+    search_end = min(len(audio), est_sample + right_margin)
+
+    if search_start >= search_end:
+        return est_sample
+
+    threshold = 10 ** (threshold_db / 20)
+    window = np.abs(audio[search_start:search_end])
+
+    is_silent = window < threshold
+    if not np.any(is_silent):
+        return est_sample
+
+    best_start = 0
+    best_len = 0
+    cur_start = 0
+    cur_len = 0
+    for i, silent in enumerate(is_silent):
+        if silent:
+            if cur_len == 0:
+                cur_start = i
+            cur_len += 1
+        else:
+            if cur_len > best_len:
+                best_start = cur_start
+                best_len = cur_len
+            cur_len = 0
+    if cur_len > best_len:
+        best_start = cur_start
+        best_len = cur_len
+
+    split_in_window = best_start + best_len // 2
+    return search_start + split_in_window
+
+
+def _generate_with_context(
+    text: str,
+    context_text: str | None,
+    voice_prompt,
+    tts_kwargs: dict,
+    sr: int,
+) -> np.ndarray:
+    """Generate TTS with preceding context for natural prosody continuation.
+
+    Concatenates context_text + "..." + text, generates full audio, then finds
+    the silence split point at the "..." boundary and returns only the target
+    portion. Falls back to plain generation if context processing fails.
+    """
+    # OmniVoice postprocess_output=True thêm fade-out 100ms + pure silence
+    # 100ms. Dùng trim NHẸM (-55dB) chỉ cắt pure silence padding, GIỮ fade-out.
+    # -55dB threshold: fade-out (linear 1→0 over 100ms) hầu như toàn bộ trên
+    # -55dB → được giữ. Chỉ pure silence bị cắt → tiết kiệm ~200ms cho slot.
+    _OMNI_TRIM_DB = -55
+    _OMNI_TRIM_PAD = 80  # 80ms buffer sau fade-out
+
+    if not context_text or not context_text.strip():
+        waveform = gpu.generate_tts(text, voice_prompt=voice_prompt, **tts_kwargs)
+        waveform = trim_silence(waveform, sr, threshold_db=_OMNI_TRIM_DB, pad_ms=_OMNI_TRIM_PAD)
+        return _compress_internal_silences(waveform.cpu().numpy(), sr)
+
+    full_text = f"{context_text}{CONTEXT_SEPARATOR} {text}"
+    try:
+        waveform = gpu.generate_tts(full_text, voice_prompt=voice_prompt, **tts_kwargs)
+        waveform = trim_silence(waveform, sr, threshold_db=_OMNI_TRIM_DB, pad_ms=_OMNI_TRIM_PAD)
+        audio_full = waveform.cpu().numpy()
+
+        ctx_chars = len(context_text) + len(CONTEXT_SEPARATOR)
+        total_chars = len(full_text)
+        if total_chars == 0:
+            return audio_full
+        estimated_split_sec = (ctx_chars / total_chars) * (len(audio_full) / sr)
+
+        split_sample = _find_silence_split(audio_full, sr, estimated_split_sec)
+
+        target_audio = audio_full[split_sample:]
+        if len(target_audio) < int(0.1 * sr):
+            logger.warning("Context-aware TTS: target audio too short after split — fallback plain")
+            waveform = gpu.generate_tts(text, voice_prompt=voice_prompt, **tts_kwargs)
+            waveform = trim_silence(waveform, sr, threshold_db=_OMNI_TRIM_DB, pad_ms=_OMNI_TRIM_PAD)
+            return _compress_internal_silences(waveform.cpu().numpy(), sr)
+
+        return _compress_internal_silences(target_audio, sr)
+
+    except Exception as e:
+        logger.warning("Context-aware TTS failed (%s) — fallback plain generation", e)
+        waveform = gpu.generate_tts(text, voice_prompt=voice_prompt, **tts_kwargs)
+        waveform = trim_silence(waveform, sr, threshold_db=_OMNI_TRIM_DB, pad_ms=_OMNI_TRIM_PAD)
+        return waveform.cpu().numpy()
+
+
+def _split_text_for_tts(text: str) -> list[str]:
+    """Split text dài thành 2 phần tại dấu phẩy/chấm phẩy gần giữa nhất."""
+    if len(text) <= OMNI_LONG_TEXT_THRESHOLD:
+        return [text]
+    import re
+    mid = len(text) // 2
+    best_pos = -1
+    best_dist = len(text)
+    for m in re.finditer(r"[,;，；]\s*", text):
+        pos = m.end()
+        dist = abs(pos - mid)
+        if dist < best_dist:
+            best_dist = dist
+            best_pos = pos
+    if best_pos > 10 and best_pos < len(text) - 10:
+        return [text[:best_pos].strip(), text[best_pos:].strip()]
+    return [text]
+
+
+def _generate_long_text(
+    text: str,
+    voice_prompt,
+    tts_kwargs: dict,
+    sr: int,
+) -> np.ndarray:
+    """Generate TTS cho text dài: split → generate từng phần → nối với silence gap.
+
+    Dùng gentle trim (-55dB, 80ms pad) chỉ cắt pure silence padding của
+    OmniVoice, GIỮ fade-out → mượt cuối câu + tiết kiệm duration cho slot.
+    """
+    _OMNI_TRIM_DB = -55
+    _OMNI_TRIM_PAD = 80
+
+    parts = _split_text_for_tts(text)
+    if len(parts) == 1:
+        waveform = gpu.generate_tts(text, voice_prompt=voice_prompt, **tts_kwargs)
+        waveform = trim_silence(waveform, sr, threshold_db=_OMNI_TRIM_DB, pad_ms=_OMNI_TRIM_PAD)
+        return _compress_internal_silences(waveform.cpu().numpy(), sr)
+
+    chunks = []
+    silence_gap = np.zeros(int(OMNI_SPLIT_SILENCE_MS * sr / 1000), dtype=np.float32)
+    for i, part in enumerate(parts):
+        waveform = gpu.generate_tts(part, voice_prompt=voice_prompt, **tts_kwargs)
+        waveform = trim_silence(waveform, sr, threshold_db=_OMNI_TRIM_DB, pad_ms=_OMNI_TRIM_PAD)
+        chunk_np = _compress_internal_silences(waveform.cpu().numpy(), sr)
+        chunks.append(chunk_np)
+        if i < len(parts) - 1:
+            chunks.append(silence_gap)
+    logger.info("Long text split: %d parts, %d+%d chars",
+                len(parts), len(parts[0]), len(parts[1]) if len(parts) > 1 else 0)
+    return np.concatenate(chunks)
+
+
 def _has_env_gemini_key() -> bool:
     """Server có sẵn GEMINI_API_KEY trong env hay không. Nếu có → fallback
     chain có thể dùng gemini cho user không cung cấp key (free tier server)."""
@@ -937,13 +1301,15 @@ def _split_long_segment(seg: dict, max_duration: float = 12.0) -> list[dict]:
             left_text = "".join(w["word"] for w in left_words).strip()
             right_text = "".join(w["word"] for w in right_words).strip()
             if left_text and right_text:
-                left_seg = {
+                meta = {k: v for k, v in seg.items()
+                        if k not in ("start", "end", "text", "words")}
+                left_seg = {**meta,
                     "start": seg["start"],
                     "end": left_words[-1]["end"],
                     "text": left_text,
                     "words": left_words,
                 }
-                right_seg = {
+                right_seg = {**meta,
                     "start": right_words[0]["start"],
                     "end": seg["end"],
                     "text": right_text,
@@ -974,6 +1340,8 @@ def _split_long_segment(seg: dict, max_duration: float = 12.0) -> list[dict]:
 
     # Estimate timestamps proportional to character count
     total_chars = sum(len(p) for p in parts) or 1
+    meta = {k: v for k, v in seg.items()
+            if k not in ("start", "end", "text", "words")}
     subs = []
     cursor = seg["start"]
     for i, p in enumerate(parts):
@@ -981,7 +1349,7 @@ def _split_long_segment(seg: dict, max_duration: float = 12.0) -> list[dict]:
         sub_dur = duration * frac
         sub_start = cursor
         sub_end = seg["end"] if i == len(parts) - 1 else cursor + sub_dur
-        subs.append({
+        subs.append({**meta,
             "start": round(sub_start, 2),
             "end": round(sub_end, 2),
             "text": p,
@@ -1275,7 +1643,8 @@ def _dedup_repeated_text(segs: list[dict]) -> list[dict]:
             dropped += 1
             continue
         out.append(s)
-        last_norm = norm or last_norm
+        if norm:
+            last_norm = norm
     if dropped:
         logger.info("Dedup: dropped %d repeated-text segment(s) (Whisper hallucinate)", dropped)
     return out
@@ -1699,6 +2068,8 @@ def get_project(project_id: str) -> dict | None:
 
 def list_projects() -> list[dict]:
     projects = []
+    if not DUBBING_DIR.exists():
+        return projects
     for d in sorted(DUBBING_DIR.iterdir()):
         if d.is_dir():
             meta = _load_meta(d.name)
@@ -1974,6 +2345,12 @@ def transcribe_project(project_id: str) -> dict:
     # Phải làm TRƯỚC music filter + post-process để tránh nhân lên các bug.
     raw_segs = _dedup_repeated_text(raw_segs)
 
+    # ── Gap recovery: retry VAD mode cho gaps >10s ──
+    raw_segs = _recover_whisper_gaps(
+        raw_segs, audio_to_transcribe, audio_dur,
+        language=src_lang_norm, gap_threshold=10.0,
+    )
+
     # ── Punctuation + sentence-aware split (CapCut-style) ──
     # Whisper Chinese không có dấu chấm rõ → text chạy 1 dòng dài, post-process
     # merge/split sau đó cắt giữa câu → sub vụn.
@@ -2192,6 +2569,16 @@ def transcribe_project(project_id: str) -> dict:
             logger.warning("speaker_pipeline failed (%s) — segments without speaker info", e)
             logger.exception("speaker_pipeline full traceback:")
 
+    # ── Collapsed diarization detection ──
+    collapsed = _detect_collapsed_diarization(merged)
+    if collapsed:
+        logger.warning(
+            "Collapsed diarization: %s has %.0f%% of %d segments — "
+            "LLM will self-detect speakers from content",
+            collapsed["dominant_speaker"], collapsed["pct"] * 100, collapsed["total"],
+        )
+        project["collapsed_diarization"] = collapsed
+
     segments = []
     for i, seg in enumerate(merged):
         segments.append({
@@ -2199,7 +2586,7 @@ def transcribe_project(project_id: str) -> dict:
             "index": i,
             "start": round(seg["start"], 2),
             "end": round(seg["end"], 2),
-            "original_text": seg["text"],
+            "original_text": _clean_whisper_text(seg["text"]),
             "translated_text": "",
             "speech_text": "",
             "emotion": "neutral",
@@ -2333,6 +2720,23 @@ def translate_project(
         else:
             logger.info("Visual context: dùng cached từ trước")
 
+    # ── Voice gender hint: khi voice_count=1, suy gender từ voice_id ──
+    # voice_id convention: nu_ = nữ, nam_ = nam. Khi speaker pipeline bị
+    # skip (voice_count=1), đây là tín hiệu duy nhất về giới tính → inject
+    # vào project meta để Pass-0/Pass-1 dùng pronoun đúng.
+    _voice_count = int(project.get("voice_count") or 1)
+    _voice_id = project.get("voice_id") or ""
+    if _voice_count == 1 and _voice_id and not project.get("speaker_genders"):
+        _voice_gender = None
+        if _voice_id.startswith("nu_"):
+            _voice_gender = "female"
+        elif _voice_id.startswith("nam_"):
+            _voice_gender = "male"
+        if _voice_gender:
+            project["voice_gender_hint"] = _voice_gender
+            logger.info("Voice gender hint: %s (from voice_id=%s, voice_count=1)",
+                        _voice_gender, _voice_id)
+
     # ── Path A: Gemini — server-side context-aware (env key) ──
     # Giữ path cũ để backward-compat khi user KHÔNG truyền api_key (admin
     # set env GEMINI_API_KEY). Nếu user truyền key → đi path BYOK chung.
@@ -2345,6 +2749,7 @@ def translate_project(
             speaker_genders=project.get("speaker_genders") or {},
             film_genre=project.get("film_genre"),
             visual_context=project.get("visual_context") or None,
+            voice_gender_hint=project.get("voice_gender_hint"),
         )
         for seg, result in zip(project["segments"], results):
             if result.get("translated_text"):
@@ -2352,6 +2757,17 @@ def translate_project(
                 seg["speech_text"] = result["speech_text"] or result["translated_text"]
                 seg["emotion"] = result.get("emotion", "neutral")
         _apply_translation_post_fixes(project)
+        # Store Pass-0 relationships vào project JSON để debug + re-use
+        try:
+            from app.services.cloud_translate_svc import get_last_relationships
+            rels = get_last_relationships("gemini")
+            if rels:
+                project["speaker_relationships"] = rels
+                logger.info("Stored Pass-0 relationships: %d speakers, glossary=%s",
+                            len(rels.get("speakers", {})),
+                            bool(rels.get("glossary")))
+        except Exception:
+            pass
         method = "Gemini (env)"
         _save_meta(project)
         logger.info("Translated %d segs → %s (%s)",
@@ -2708,13 +3124,15 @@ def merge_segments(project_id: str, seg_ids: list[str]) -> dict:
         "start": to_merge[0]["start"],
         "end": to_merge[-1]["end"],
         "original_text": " ".join(s["original_text"] for s in to_merge),
-        "translated_text": " ".join(s["translated_text"] for s in to_merge if s["translated_text"]),
+        "translated_text": " ".join(s.get("translated_text", "") for s in to_merge if s.get("translated_text")),
         "speech_text": " ".join(s.get("speech_text", "") for s in to_merge if s.get("speech_text")),
         "emotion": to_merge[0].get("emotion", "neutral"),
         "voice_id": to_merge[0].get("voice_id"),
-        "volume": to_merge[0]["volume"],
-        "fade_in": to_merge[0]["fade_in"],
-        "fade_out": to_merge[-1]["fade_out"],
+        "speaker": to_merge[0].get("speaker"),
+        "speaker_gender": to_merge[0].get("speaker_gender"),
+        "volume": to_merge[0].get("volume", 1.0),
+        "fade_in": to_merge[0].get("fade_in", 0),
+        "fade_out": to_merge[-1].get("fade_out", 0),
         "status": "pending",
     }
 
@@ -2757,7 +3175,7 @@ def generate_segment(project_id: str, seg_id: str) -> dict:
         raise ValueError(f"Segment '{seg_id}' not found")
 
     # Use speech_text for TTS (has pauses/rewrites), fall back to translated_text
-    tts_text = (seg.get("speech_text") or seg["translated_text"] or "").strip()
+    tts_text = (seg.get("speech_text") or seg.get("translated_text") or "").strip()
     if not tts_text:
         raise ValueError("No translated text for this segment")
 
@@ -2867,24 +3285,45 @@ def generate_segment(project_id: str, seg_id: str) -> dict:
                 voice_prompt = None  # explicit — OmniVoice tự sinh giọng baseline
 
             from omnivoice import OmniVoiceGenerationConfig
-            # Match TTS preview params (no duration constraint, default guidance) —
-            # forcing `duration=` + high guidance_scale was producing choppy/muddy voice
+            # Dubbing cần quality cao hơn preview — flow-matching cần ≥16 steps
+            # cho audio mượt, 8 steps (DEV_MODE) gây vấp/stuttering. Dùng tối
+            # thiểu 16 steps cho dubbing kể cả trên MPS.
+            dub_steps = max(16, TTS_DEFAULT_STEPS)
             gen_config = OmniVoiceGenerationConfig(
-                num_step=TTS_DEFAULT_STEPS,
+                num_step=dub_steps,
                 guidance_scale=TTS_DEFAULT_GUIDANCE,
             )
             kwargs = {"generation_config": gen_config}
             if project["target_language"]:
                 kwargs["language"] = project["target_language"]
 
-            waveform = gpu.generate_tts(tts_text, voice_prompt=voice_prompt, **kwargs)
-            # Cắt khoảng lặng đầu/cuối — quan trọng cho dubbing vì nếu TTS có
-            # 0.3s im đầu, voice sẽ delay so với mouth movement của video gốc.
-            # Dubbing: trim hơi tight hơn TTS thường (-45dB / 50ms) vì cần align
-            # lip-sync với video — tránh delay 0.3s so với mouth movement.
-            waveform = trim_silence(waveform, gpu.sampling_rate, threshold_db=-45, pad_ms=50)
             sr = gpu.sampling_rate
-            audio_np = waveform.cpu().numpy()
+
+            # Context-aware TTS: lấy text câu trước (cùng speaker) làm context
+            context_text = None
+            seg_idx = seg.get("index", 0)
+            if seg_idx > 0:
+                all_segs = project.get("segments", [])
+                for prev_seg in reversed(all_segs[:seg_idx]):
+                    prev_text = (prev_seg.get("speech_text") or prev_seg.get("translated_text") or "").strip()
+                    if prev_text and seg.get("speaker") is not None and prev_seg.get("speaker") == seg.get("speaker"):
+                        context_text = prev_text
+                        break
+
+            if context_text:
+                audio_np = _generate_with_context(
+                    tts_text, context_text, voice_prompt, kwargs, sr,
+                )
+            elif len(tts_text) > OMNI_LONG_TEXT_THRESHOLD:
+                audio_np = _generate_long_text(
+                    tts_text, voice_prompt, kwargs, sr,
+                )
+            else:
+                waveform = gpu.generate_tts(tts_text, voice_prompt=voice_prompt, **kwargs)
+                # Gentle trim: -55dB chỉ cắt pure silence padding, GIỮ fade-out
+                # của OmniVoice → mượt cuối câu + tiết kiệm ~200ms cho slot.
+                waveform = trim_silence(waveform, sr, threshold_db=-55, pad_ms=80)
+                audio_np = _compress_internal_silences(waveform.cpu().numpy(), sr)
 
             # ── Tier 1.1 + 1.4: rate-aware auto-align ──
             # Atempo < 1.0 muddies voice → chỉ speedup, slowdown để silence fill.
@@ -2944,6 +3383,9 @@ def generate_segment(project_id: str, seg_id: str) -> dict:
                 logger.warning("Segment %s: studio chain failed (%s) — raw output",
                                seg_id, e)
 
+        # OmniVoice postprocess_output=True đã xử lý silence + fade-out.
+        # KHÔNG trim thêm — giữ nguyên fade edge để tránh giật cuối câu.
+
         # Apply volume
         if seg.get("volume", 1.0) != 1.0:
             audio_np = audio_np * seg["volume"]
@@ -2992,19 +3434,24 @@ def generate_all(project_id: str):
 def _generate_all_single(project_id: str, project: dict):
     """Original per-segment generation (for VoxLocal/OmniVoice)."""
     segments = [s for s in project["segments"]
-                if (s.get("speech_text") or s["translated_text"] or "").strip()]
+                if (s.get("speech_text") or s.get("translated_text") or "").strip()]
     total = len(segments)
+    error_count = 0
 
     for i, seg in enumerate(segments):
-        if seg["status"] == "done":
+        if seg.get("status") == "done":
             yield {"current": i + 1, "total": total, "segment_id": seg["id"], "status": "skipped"}
             continue
         try:
             generate_segment(project_id, seg["id"])
             yield {"current": i + 1, "total": total, "segment_id": seg["id"], "status": "done"}
         except Exception as e:
+            error_count += 1
+            logger.warning("TTS segment %s/%s failed: %s", seg["id"], project_id, e)
             yield {"current": i + 1, "total": total, "segment_id": seg["id"],
                    "status": "error", "error": str(e)}
+            if error_count > total * 0.5:
+                raise RuntimeError(f"Quá nhiều segment TTS lỗi ({error_count}/{total}): {e}")
 
 
 # ── Batch TTS Pipeline (Edge TTS) ─────────────────
@@ -3030,7 +3477,7 @@ def _group_segments_into_batches(segments: list[dict]) -> list[list[dict]]:
         return (s.get("speaker"), s.get("speaker_gender"))
 
     for seg in segments:
-        text = (seg.get("speech_text") or seg["translated_text"] or "").strip()
+        text = (seg.get("speech_text") or seg.get("translated_text") or "").strip()
         if not text:
             continue
 
@@ -3528,10 +3975,13 @@ def _load_existing_into_track(full_track: np.ndarray, batch: list[dict],
         wav_path = seg_dir / f"{s['id']}.wav"
         if wav_path.exists():
             audio, _ = sf.read(str(wav_path))
+            if audio.ndim > 1:
+                audio = audio.mean(axis=1)
             start = int(s["start"] * sr)
-            end = start + len(audio)
-            if end <= len(full_track):
-                full_track[start:end] += audio
+            end = min(start + len(audio), len(full_track))
+            seg_len = end - start
+            if seg_len > 0:
+                full_track[start:end] += audio[:seg_len]
 
 
 def get_segment_audio_path(project_id: str, seg_id: str) -> Path | None:
@@ -3571,15 +4021,12 @@ def _apply_ducking(bgm: np.ndarray, dubbed: np.ndarray, sr: int,
     # Create voice presence envelope from dubbed audio
     envelope = np.abs(dubbed).astype(np.float64)
 
-    # Smooth with attack/release follower
-    attack_coeff = np.exp(-1.0 / (sr * max(attack, 0.001)))
+    # Smooth envelope: attack/release follower via block processing
     release_coeff = np.exp(-1.0 / (sr * max(release, 0.01)))
-    smoothed = np.zeros_like(envelope)
-    for i in range(1, len(envelope)):
-        if envelope[i] > smoothed[i - 1]:
-            smoothed[i] = attack_coeff * smoothed[i - 1] + (1 - attack_coeff) * envelope[i]
-        else:
-            smoothed[i] = release_coeff * smoothed[i - 1] + (1 - release_coeff) * envelope[i]
+    from scipy.signal import lfilter
+    b_rel = [1 - release_coeff]
+    a_rel = [1, -release_coeff]
+    smoothed = lfilter(b_rel, a_rel, envelope)
 
     # Normalize envelope to 0-1
     peak = np.max(smoothed)
@@ -3685,14 +4132,33 @@ def export_video(project_id: str, keep_original_audio: bool = False,
                         fade_edges_fn = _fe
                     except Exception as e:
                         logger.warning("fade_edges import failed (%s) — TTS edges có thể click/pop", e)
-                for seg in project["segments"]:
+                all_segs = project["segments"]
+                for si, seg in enumerate(all_segs):
                     seg_audio_path = _segments_dir(project_id) / f"{seg['id']}.wav"
                     if not seg_audio_path.exists():
                         continue
-                    seg_audio, _ = sf.read(str(seg_audio_path), dtype="float32")
+                    seg_audio, seg_sr = sf.read(str(seg_audio_path), dtype="float32")
+                    if seg_audio.ndim > 1:
+                        seg_audio = seg_audio.mean(axis=1)
+                    if seg_sr != sr:
+                        from scipy.signal import resample as _scipy_resample
+                        seg_audio = _scipy_resample(
+                            seg_audio, int(len(seg_audio) * sr / seg_sr)
+                        ).astype(np.float32)
                     if fade_edges_fn is not None:
                         seg_audio = fade_edges_fn(seg_audio, sr, fade_ms=30.0)
                     start_sample = int(seg["start"] * sr)
+                    slot_end_sample = int(seg["end"] * sr)
+                    max_end = slot_end_sample
+                    if si + 1 < len(all_segs):
+                        next_start = int(all_segs[si + 1]["start"] * sr)
+                        max_end = min(max_end, next_start)
+                    max_samples = max_end - start_sample
+                    if len(seg_audio) > max_samples > 0:
+                        fade_out_n = min(int(0.03 * sr), max_samples // 2)
+                        seg_audio = seg_audio[:max_samples].copy()
+                        if fade_out_n > 0:
+                            seg_audio[-fade_out_n:] *= np.linspace(1, 0, fade_out_n)
                     end_sample = start_sample + len(seg_audio)
                     end_sample = min(end_sample, total_samples)
                     seg_len = end_sample - start_sample
@@ -3721,9 +4187,17 @@ def export_video(project_id: str, keep_original_audio: bool = False,
                 bg_path = accomp_path if accomp_path.exists() else orig_audio_path
                 if bg_path.exists():
                     bg_audio, bg_sr = sf.read(str(bg_path), dtype="float32")
+                    if bg_audio.ndim > 1:
+                        bg_audio = bg_audio.mean(axis=1)
+                    if bg_sr != sr:
+                        from scipy.signal import resample as _scipy_resample
+                        new_len = int(len(bg_audio) * sr / bg_sr)
+                        bg_audio = _scipy_resample(bg_audio, new_len).astype(np.float32)
                     if len(bg_audio) != total_samples:
-                        from scipy.signal import resample
-                        bg_audio = resample(bg_audio, total_samples).astype(np.float32)
+                        if len(bg_audio) > total_samples:
+                            bg_audio = bg_audio[:total_samples]
+                        else:
+                            bg_audio = np.pad(bg_audio, (0, total_samples - len(bg_audio)))
 
                     if enable_ducking and accomp_path.exists():
                         # Pro mix: voice EQ + sidechain compressor + LUFS normalize.
@@ -3901,7 +4375,9 @@ def generate_srt(project_id: str, use_translated: bool = True) -> str:
 
     lines = []
     for i, seg in enumerate(project["segments"]):
-        text = seg["translated_text"] if use_translated and seg["translated_text"].strip() else seg["original_text"]
+        trans = seg.get("translated_text") or ""
+        orig = seg.get("original_text") or ""
+        text = trans if use_translated and trans.strip() else orig
         if not text.strip():
             continue
         start = _fmt_time(seg["start"]).replace(".", ",")
@@ -3925,7 +4401,9 @@ def generate_vtt(project_id: str, use_translated: bool = True) -> str:
 
     lines = ["WEBVTT", ""]
     for seg in project["segments"]:
-        text = seg["translated_text"] if use_translated and seg["translated_text"].strip() else seg["original_text"]
+        trans = seg.get("translated_text") or ""
+        orig = seg.get("original_text") or ""
+        text = trans if use_translated and trans.strip() else orig
         if not text.strip():
             continue
         start = _fmt_time(seg["start"])
@@ -4282,7 +4760,9 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         sub_cues.extend(_split_segment_for_subtitle(seg, max_chars=50))
 
     for seg in sub_cues:
-        text = seg["translated_text"] if use_translated and seg["translated_text"].strip() else seg["original_text"]
+        trans = seg.get("translated_text") or ""
+        orig = seg.get("original_text") or ""
+        text = trans if use_translated and trans.strip() else orig
         if not text.strip():
             continue
         start = _fmt_time(seg["start"])

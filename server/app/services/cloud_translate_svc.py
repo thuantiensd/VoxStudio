@@ -57,12 +57,30 @@ class FatalAuthError(ValueError):
 import threading as _threading
 _llm_genders_lock = _threading.Lock()
 _last_llm_genders: dict = {}
+_last_relationships: dict = {}
 
 
 def _store_llm_genders(engine: str, genders: dict) -> None:
     """Engine functions gọi sau khi parse output → store gender LLM tự suy."""
     with _llm_genders_lock:
         _last_llm_genders[engine] = dict(genders or {})
+
+
+def store_relationships(engine: str, relationships: dict) -> None:
+    """Store Pass-0 relationships để dubbing_svc ghi lại vào project JSON."""
+    with _llm_genders_lock:
+        _last_relationships[engine] = dict(relationships or {})
+
+
+def get_last_relationships(engine: str | None = None) -> dict:
+    """Đọc relationships Pass-0 đã store."""
+    with _llm_genders_lock:
+        if engine:
+            return dict(_last_relationships.get(engine, {}))
+        for v in _last_relationships.values():
+            if v:
+                return dict(v)
+        return {}
 
 
 def get_last_llm_genders(engine: str | None = None) -> dict:

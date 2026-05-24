@@ -34,6 +34,7 @@ def translate_segments(
     speaker_genders: dict | None = None,
     film_genre: str | None = None,
     visual_context: dict | None = None,
+    voice_gender_hint: str | None = None,
 ) -> list[dict]:
     """Translate film dialogue segments — 3-pass cinematic.
 
@@ -51,6 +52,7 @@ def translate_segments(
             return _translate_uncached(
                 uncached, target_language, source_language,
                 topic_hint, glossary, film_genre, visual_context,
+                voice_gender_hint=voice_gender_hint,
             )
 
         return cached_translate_segments(
@@ -66,6 +68,7 @@ def translate_segments(
         return _translate_uncached(
             segments, target_language, source_language,
             topic_hint, glossary, film_genre, visual_context,
+            voice_gender_hint=voice_gender_hint,
         )
 
 
@@ -77,6 +80,7 @@ def _translate_uncached(
     glossary: list[tuple[str, str]] | None,
     film_genre: str | None,
     visual_context: dict | None = None,
+    voice_gender_hint: str | None = None,
 ) -> list[dict]:
     """Internal — gọi 3-pass thực sự (sau cache miss)."""
     from app.services.llm import run_analyze, run_translate, run_edit
@@ -86,6 +90,19 @@ def _translate_uncached(
     glossary_block = glossary_svc.format_for_prompt(glossary) if glossary else None
     topic_block = glossary_svc.format_topic_hint_for_prompt(topic_hint) if topic_hint else None
 
+    # ── Inject voice gender hint vào visual_context để Pass-0 dùng ──
+    # Khi voice_count=1 + voice nữ/nam → đây là tín hiệu giới tính mạnh
+    # mà Pass-0 nên dùng khi text không rõ gender.
+    effective_visual = visual_context
+    if voice_gender_hint and not visual_context:
+        gender_vn = "nữ" if voice_gender_hint == "female" else "nam"
+        effective_visual = {
+            "voice_gender_hint": voice_gender_hint,
+            "scene_summary": f"User chọn giọng {gender_vn} cho tất cả nhân vật → "
+                             f"ưu tiên suy luận nhân vật là {gender_vn} khi text không rõ giới tính.",
+        }
+        logger.info("Injected voice_gender_hint=%s into visual context", voice_gender_hint)
+
     # ── Pass-0: analyze speaker relationships (1 call cho cả phim) ──
     relationships: dict = {}
     try:
@@ -94,28 +111,44 @@ def _translate_uncached(
             segments=segments,
             source_lang=source_language,
             film_genre=film_genre,
-            visual_context=visual_context,
+            visual_context=effective_visual,
         )
         # Backward-compat: store FULL info (character_name, age, role) cho
         # dubbing_svc đọc lại — TTS routing + UI hiển thị nhân vật.
-        if relationships and relationships.get("speakers"):
+        if relationships:
             try:
-                from app.services.cloud_translate_svc import _store_llm_genders
-                full_info = {
-                    spk_id: {
-                        "gender": info.get("gender", "unsure"),
-                        "evidence": info.get("evidence", ""),
-                        "character_name": info.get("character_name", ""),
-                        "age": info.get("age", "adult"),
-                        "role": info.get("role", ""),
+                from app.services.cloud_translate_svc import (
+                    _store_llm_genders, store_relationships,
+                )
+                store_relationships(ENGINE, relationships)
+                if relationships.get("speakers"):
+                    full_info = {
+                        spk_id: {
+                            "gender": info.get("gender", "unsure"),
+                            "evidence": info.get("evidence", ""),
+                            "character_name": info.get("character_name", ""),
+                            "age": info.get("age", "adult"),
+                            "role": info.get("role", ""),
+                        }
+                        for spk_id, info in relationships["speakers"].items()
                     }
-                    for spk_id, info in relationships["speakers"].items()
-                }
-                _store_llm_genders(ENGINE, full_info)
+                    _store_llm_genders(ENGINE, full_info)
             except Exception:
                 pass
     except Exception as e:
         logger.warning("Gemini Pass-0 fail: %s — Pass-1/2 chạy không anchor", e)
+
+    # ── Voice gender hint fallback: inject vào relationships nếu Pass-0 thiếu ──
+    if voice_gender_hint and (not relationships or not relationships.get("speakers")):
+        gender_vn = "nữ" if voice_gender_hint == "female" else "nam"
+        relationships = relationships or {}
+        relationships["voice_gender_hint"] = voice_gender_hint
+        relationships.setdefault("scene_context",
+            f"User chọn giọng {gender_vn} → nhân vật chính có thể là {gender_vn}.")
+        logger.info("Pass-0 empty/fail → injected voice_gender_hint=%s into relationships",
+                     voice_gender_hint)
+    elif voice_gender_hint and relationships.get("speakers"):
+        relationships["voice_gender_hint"] = voice_gender_hint
 
     # ── Pass-1 + Pass-2: ADAPTIVE BATCH + PARALLEL DISPATCH ──
     # Với phim dài, sequential batch quá lâu. Parallel 3-6 batch song song

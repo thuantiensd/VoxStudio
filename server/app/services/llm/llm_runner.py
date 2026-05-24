@@ -142,19 +142,18 @@ def run_analyze(
     visual_context: Optional[dict] = None,
     entity_registry: Optional[dict] = None,
 ) -> dict:
-    """Pass-0: speaker relationship analysis. Skip nếu 1 speaker.
+    """Pass-0: speaker/scene analysis — LUÔN CHẠY.
+
+    Kể cả khi segments không có speaker tag (voice_count=1, diarization skip),
+    LLM vẫn phân tích NỘI DUNG TEXT để suy ra: bao nhiêu người nói, quan hệ
+    gì, register, scene context. Output này inject vào Pass-1 để dịch đúng
+    pronoun + tone.
 
     Nếu có visual_context (từ Pass-(-1) VLM) → inject làm ground truth.
     entity_registry: từ Python scan toàn file → name anchor authoritative.
 
-    Returns {} nếu skip/fail (caller phải fallback Pass-1 không anchor).
+    Returns {} nếu fail (caller phải fallback Pass-1 không anchor).
     """
-    spks = {s.get("speaker") for s in segments if s.get("speaker")}
-    spks.discard(None)
-    spks.discard("")
-    if len(spks) < MIN_SPEAKERS_FOR_ANALYZE:
-        return {}
-
     prompt = build_speaker_analysis_prompt(
         segments=segments, source_lang=source_lang,
         film_genre=film_genre, visual_context=visual_context,
@@ -201,7 +200,12 @@ def run_translate(
         engine=engine,
     )
     raw = _call_llm(engine, prompt, api_key=api_key, model=model)
-    return parse_translator_response(raw, len(segments))
+    result = parse_translator_response(raw, len(segments))
+    non_empty = sum(1 for r in result if r.get("translated_text"))
+    if non_empty == 0 and len(segments) > 0:
+        logger.error("Pass-1 (%s): 0/%d parsed — raw response[:500]: %s",
+                     engine, len(segments), raw[:500] if raw else "(empty)")
+    return result
 
 
 def run_visual_analyze(
@@ -310,11 +314,18 @@ def _call_gemini_sdk(prompt: dict, model: Optional[str] = None) -> str:
 
     full_prompt = prompt["system"] + "\n\n" + prompt["user"]
     result_q: _queue.Queue = _queue.Queue()
+    logger.info("[gemini] calling %s (prompt=%d chars)",
+                model or "gemini-2.5-pro", len(full_prompt))
 
     def _worker():
         try:
-            cfg = genai.types.GenerationConfig(temperature=0.2)
+            cfg = genai.types.GenerationConfig(
+                temperature=0.2,
+                response_mime_type="application/json",
+            )
             r = m.generate_content(full_prompt, generation_config=cfg)
+            logger.info("[gemini] response: %d chars, first 200: %s",
+                        len(r.text), r.text[:200])
             result_q.put(("ok", r.text))
         except Exception as e:
             result_q.put(("err", e))
@@ -380,7 +391,7 @@ def _call_openai_http(prompt: dict, api_key: Optional[str], model: Optional[str]
         # reasoning_effort=minimal để model làm theo prompt examples +
         # glossary thay vì over-think. Cải thiện quality VÀ speed.
         # Cũng bump max_completion_tokens cho output đủ space.
-        payload["reasoning_effort"] = "minimal"
+        payload["reasoning_effort"] = "medium"
         payload["max_completion_tokens"] = 8192
     else:
         # Older models: thấp temperature cho dịch chính xác hơn
@@ -389,11 +400,18 @@ def _call_openai_http(prompt: dict, api_key: Optional[str], model: Optional[str]
     # batch lớn (>30 segments) vì có reasoning tokens trước output.
     timeout = TIMEOUT_REASONING_S if uses_new_api else TIMEOUT_S
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+    logger.info("[openai] calling %s (system=%d chars, user=%d chars, reasoning=%s)",
+                m, len(prompt["system"]), len(prompt["user"]),
+                payload.get("reasoning_effort", "n/a"))
     with httpx.Client(timeout=timeout) as c:
         r = c.post("https://api.openai.com/v1/chat/completions",
                     json=payload, headers=headers)
         _check_llm_http_response("openai", r)
-    return r.json()["choices"][0]["message"]["content"]
+    body = r.json()
+    content = body["choices"][0]["message"]["content"]
+    logger.info("[openai] response: %d chars, first 200: %s",
+                len(content), content[:200])
+    return content
 
 
 def _call_claude_http(prompt: dict, api_key: Optional[str], model: Optional[str]) -> str:
@@ -403,7 +421,7 @@ def _call_claude_http(prompt: dict, api_key: Optional[str], model: Optional[str]
     m = model or "claude-opus-4-5"
     payload = {
         "model": m,
-        "max_tokens": 4096,
+        "max_tokens": 8192,
         "temperature": 0.2,
         "system": prompt["system"],
         "messages": [{"role": "user", "content": prompt["user"]}],
@@ -413,7 +431,7 @@ def _call_claude_http(prompt: dict, api_key: Optional[str], model: Optional[str]
         "anthropic-version": "2023-06-01",
         "Content-Type": "application/json",
     }
-    with httpx.Client(timeout=TIMEOUT_S) as c:
+    with httpx.Client(timeout=TIMEOUT_REASONING_S) as c:
         r = c.post("https://api.anthropic.com/v1/messages",
                     json=payload, headers=headers)
         _check_llm_http_response("claude", r)

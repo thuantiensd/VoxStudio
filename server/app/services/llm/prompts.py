@@ -688,6 +688,20 @@ OUTPUT JSON duy nhất:
 
 QUY TẮC: mỗi SPEAKER có 1 entry, tiếng Việt, không đủ evidence → "unsure".
 character_name + age là field bắt buộc. age default = "adult" nếu không chắc.
+
+⚠️ KHI TẤT CẢ LINE ĐỀU ĐÁNH DẤU "?" (không có speaker tag):
+
+Hệ thống chưa phân biệt được ai nói line nào. BẠN PHẢI:
+1. Đọc NỘI DUNG TEXT để nhận ra bao nhiêu NHÂN VẬT riêng biệt đang nói
+2. Gán ID tạm: SPEAKER_A, SPEAKER_B, SPEAKER_C...
+3. Tìm BẰNG CHỨNG: vocative (gọi ai?), đại từ xưng hô, câu hỏi-đáp,
+   giọng nói (đe doạ vs sợ hãi), ngữ cảnh scene
+4. Xây dựng speaker map ĐÚNG CÁCH — pronoun + address + role + gender
+
+VÍ DỤ: nếu text có pattern "cậu giết người" ↔ "cậu báo cảnh sát" → 2 người
+đang cãi nhau, suy ra quan hệ + giới tính từ cách nói.
+
+Output vẫn dùng format {"speakers": {"SPEAKER_A": {...}, "SPEAKER_B": {...}}}
 """
     user_input = "HỘI THOẠI:\n\n" + "\n".join(sample_lines)
     return {"system": system, "user": user_input}
@@ -1189,10 +1203,12 @@ def build_translator_prompt(
     # Build seg lines với anchor
     has_rels = bool(speaker_relationships and speaker_relationships.get("speakers"))
     seg_lines = []
+    local_idx = 0
     for seg in segments:
         text = (seg.get("original_text") or "").strip()
         if not text:
             continue
+        local_idx += 1
         budget = _max_chars(seg)
         if has_rels and seg.get("speaker"):
             anchor = _per_segment_anchor(seg, speaker_relationships)
@@ -1200,13 +1216,57 @@ def build_translator_prompt(
                      else f'[{seg["speaker"]}, max {budget} chars]'
         else:
             prefix = f'[max {budget} chars]'
-        seg_lines.append(f'{seg["index"] + 1}. {prefix} {text}')
+        seg_lines.append(f'{local_idx}. {prefix} {text}')
+
+    # Detect collapsed diarization: if 1 speaker has >80% of segments in this batch
+    _speakers_in_batch = [s.get("speaker") for s in segments if s.get("speaker")]
+    _collapsed_warn = ""
+    if _speakers_in_batch and len(set(_speakers_in_batch)) <= 1 and len(segments) >= 6:
+        _collapsed_warn = """
+⚠️ CẢNH BÁO: DIARIZATION CÓ THỂ SAI — HẦU HẾT LINES GÁN CHO 1 SPEAKER.
+Rất có thể có NHIỀU người nói nhưng hệ thống nhận diện sai. BẠN PHẢI:
+1. ĐỌC NỘI DUNG TEXT để tự phát hiện ai nói line nào (vocative, hỏi-đáp, tone)
+2. DÙNG PRONOUN KHÁC NHAU cho mỗi người nói thực sự
+3. KHÔNG tin speaker tag — tag chỉ có 1 giá trị, nhưng thực tế có nhiều người
+4. Ưu tiên tín hiệu NỘI DUNG hơn tag SPEAKER
+"""
+
+    # Detect: có speaker analysis từ Pass-0 nhưng segments không có speaker tag
+    # (voice_count=1 / diarization skip) → inject speaker info + hướng dẫn tự suy luận
+    has_speaker_tags = any(s.get("speaker") for s in segments)
 
     anchor_block = ""
     if has_rels:
         anchor_block = "\n" + _format_speaker_anchor_block(speaker_relationships) + "\n"
+        if _collapsed_warn:
+            anchor_block += _collapsed_warn
+        if not has_speaker_tags and is_vn:
+            anchor_block += """
+⚠️ SEGMENTS KHÔNG CÓ SPEAKER TAG — TỰ SUY LUẬN AI NÓI LINE NÀO:
+Hệ thống đã phân tích nhân vật ở trên, nhưng KHÔNG gán được speaker cho
+từng line. BẠN PHẢI đọc nội dung text để tự xác định ai đang nói, rồi
+áp đúng pronoun từ speaker map. Dùng vocative + pattern hỏi-đáp + tone
+để suy luận.
+"""
     elif is_vn:
-        anchor_block = """
+        # Voice gender hint: khi user chọn giọng nữ/nam, inject vào prompt
+        _vg_hint = ""
+        if speaker_relationships and speaker_relationships.get("voice_gender_hint"):
+            _vgh = speaker_relationships["voice_gender_hint"]
+            _gender_vn = "NỮ" if _vgh == "female" else "NAM"
+            _vg_hint = f"""
+🔊 GỢI Ý GIỚI TÍNH (từ giọng TTS user chọn): {_gender_vn}
+User chọn giọng {_gender_vn.lower()} cho video → các nhân vật chính RẤT CÓ THỂ
+là {_gender_vn.lower()}. Khi text không có tín hiệu giới tính rõ ràng (你/我 là
+trung tính), ƯU TIÊN suy luận nhân vật là {_gender_vn.lower()} và dùng xưng hô
+phù hợp ({_gender_vn.lower()}).
+"""
+        # Scene context from Pass-0 (if available but no speakers)
+        _scene_ctx = ""
+        if speaker_relationships and speaker_relationships.get("scene_context"):
+            _scene_ctx = f"\n📌 Bối cảnh: {speaker_relationships['scene_context']}\n"
+
+        anchor_block = f"""{_vg_hint}{_scene_ctx}
 🎭 KHÔNG CÓ SPEAKER MAP — TỰ SUY LUẬN (CỰC QUAN TRỌNG):
 
 Batch này KHÔNG có tag SPEAKER_XX → bạn PHẢI tự xác định người nói cho mỗi line
@@ -1417,6 +1477,15 @@ hệ, câu word-for-word). ĐÂY LÀ LỖI LỚN NHẤT. Cần tránh tuyệt đ
    Cách dịch: ĐỌC HIỂU ý → DIỄN ĐẠT lại bằng tiếng Việt tự nhiên,
    KHÔNG translate từng từ.
 
+   TEST: đọc TO câu dịch — nếu nghe NGANG / GIẢ TẠO / không giống người
+   Việt nói → VIẾT LẠI theo cách người Việt thực sự diễn đạt.
+
+   Dấu hiệu câu dịch ngang:
+   • Quá nhiều liên từ / trợ từ lặp (lại...lại, còn...còn, vì...mà)
+   • Trật tự câu giữ nguyên cấu trúc nguồn thay vì đảo lại tự nhiên
+   • Câu dài lê thê khi tiếng Việt nói ngắn gọn hơn
+   • Dùng từ sách vở khi ngữ cảnh đang nói chuyện bình thường
+
 ⚡ PRONOUN — NGUYÊN TẮC UNIVERSAL (áp dụng cho MỌI thể loại):
 
 1. THEO SPEAKER MAP nếu có — đó là DEFAULT tuyệt đối.
@@ -1496,6 +1565,28 @@ LỖI C: 小X/阿X/大X = TÊN THÂN MẬT → Tiểu X/A X/Đại X (Hán-Việ
 
 📏 BUDGET: mỗi line có [max N chars] = số char TỐI ĐA. Cắt filler, từ ngắn.
    Việt dài hơn Trung ~30% nếu literal → phải rút gọn.
+
+🏛️ VIỆT HÓA DANH TỪ CHUNG (QUAN TRỌNG):
+
+Hán-Việt CHỈ dùng cho TÊN RIÊNG (người/địa danh). Mọi thứ khác — danh từ
+chung, cơ quan, chức danh, đồ vật, khái niệm — PHẢI dịch sang từ Việt mà
+NGƯỜI VIỆT THỰC SỰ NÓI trong đời thường.
+
+TEST ĐƠN GIẢN: đọc to từ dịch — nếu người Việt bình thường KHÔNG BAO GIỜ
+nói từ đó ngoài đời → SAI → tìm từ phổ thông thay thế.
+
+3 loại lỗi hay gặp:
+1. PHIÊN ÂM thay vì DỊCH NGHĨA: âm gốc → chữ Việt (vd onomatopoeia,
+   tên sản phẩm bình dân) → phải dịch NGHĨA, không phiên ÂM.
+2. HÁN-VIỆT LẠNH cho từ có từ Việt phổ biến hơn: nếu từ Hán-Việt chỉ
+   xuất hiện trong sách vở / văn bản hành chính mà không ai nói miệng
+   → dùng từ thuần Việt / từ thông dụng.
+3. XƯNG HÔ / CHỨC DANH văn hoá nguồn: mỗi nước có cách xưng hô riêng
+   trong cơ quan (vd Trung Quốc gọi cảnh sát là "đồng chí") → chuyển
+   sang cách xưng hô tương đương VĂN HOÁ VIỆT, không dịch sát.
+
+⚠️ GIỮ Hán-Việt nếu từ ĐÃ thành tiếng Việt thông dụng (ngân hàng, bệnh
+   viện, đại học, cảnh sát...). Chỉ thay khi từ Hán-Việt nghe LẠ / GIẢ TẠO.
 
 🚨🚨🚨 KHÔNG ĐƯỢC BỎ SÓT (CRITICAL CHO LỒNG TIẾNG):
 
@@ -1802,8 +1893,7 @@ def build_editor_prompt(
 
     # Build item lines: # | speaker(role) | original | literal | max
     item_lines = []
-    for it in items:
-        idx = it["index"]
+    for local_idx, it in enumerate(items, 1):
         spk = it.get("speaker") or ""
         role = role_map.get(spk, "")
         spk_label = f"{spk}({role})" if role else (spk or "?")
@@ -1811,7 +1901,7 @@ def build_editor_prompt(
         lit = (it.get("literal") or "").strip()
         max_c = it.get("max_chars", 50)
         item_lines.append(
-            f"{idx + 1}. [{spk_label}, max {max_c}] gốc: {orig!r} | literal: {lit!r}"
+            f"{local_idx}. [{spk_label}, max {max_c}] gốc: {orig!r} | literal: {lit!r}"
         )
 
     scene_block = ""
@@ -1919,6 +2009,11 @@ GIỮ pronoun NHẤT QUÁN xuyên suốt cho mỗi speaker.
 ❌ "Quá" lặp nhiều: "nhiều việc quá" → "nhiều việc lắm"
 ❌ Câu reo mừng mà phẳng: "Ba ơi, ba về rồi!" → "Ba! Ba về rồi à!"
 ❌ Ra lệnh thay vì mềm: "ba ôm cái nào!" → "lại đây ba ôm nào!"
+
+🏛️ VIỆT HÓA TỪ DỊCH NGANG (literal hay mắc):
+Đọc to mỗi câu — nếu có từ nào người Việt KHÔNG BAO GIỜ nói ngoài đời
+(Hán-Việt lạnh, phiên âm thay vì dịch nghĩa, xưng hô theo văn hoá nước
+khác) → thay bằng từ Việt phổ thông tương đương.
 
 🎭 NÊN DÙNG (Việt phim mượt):
 • Tiểu từ cuối câu: nhỉ/thế/đấy/lắm/cơ/chứ/mà

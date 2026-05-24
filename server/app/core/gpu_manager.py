@@ -63,23 +63,134 @@ def _expand_acronyms_for_tts(text: str) -> str:
     return re.sub(r"\b[A-Z]{2,6}\b", _repl, text)
 
 
+_VN_NUMBER_WORDS = {
+    0: "không", 1: "một", 2: "hai", 3: "ba", 4: "bốn",
+    5: "năm", 6: "sáu", 7: "bảy", 8: "tám", 9: "chín", 10: "mười",
+}
+
+
+def _number_to_vietnamese(n: int) -> str:
+    if n < 0:
+        return "âm " + _number_to_vietnamese(-n)
+    if n <= 10:
+        return _VN_NUMBER_WORDS[n]
+    if n < 20:
+        return "mười " + ("" if n == 10 else
+                          "một" if n == 11 else
+                          "lăm" if n == 15 else _VN_NUMBER_WORDS[n % 10])
+    if n < 100:
+        tens = n // 10
+        ones = n % 10
+        result = _VN_NUMBER_WORDS[tens] + " mươi"
+        if ones == 0:
+            return result
+        if ones == 1:
+            return result + " mốt"
+        if ones == 5:
+            return result + " lăm"
+        if ones == 4 and tens >= 2:
+            return result + " tư"
+        return result + " " + _VN_NUMBER_WORDS[ones]
+    if n < 1000:
+        hundreds = n // 100
+        remainder = n % 100
+        result = _VN_NUMBER_WORDS[hundreds] + " trăm"
+        if remainder == 0:
+            return result
+        if remainder < 10:
+            return result + " lẻ " + _VN_NUMBER_WORDS[remainder]
+        return result + " " + _number_to_vietnamese(remainder)
+    if n < 1_000_000:
+        thousands = n // 1000
+        remainder = n % 1000
+        result = _number_to_vietnamese(thousands) + " nghìn"
+        if remainder == 0:
+            return result
+        if remainder < 100:
+            return result + " không trăm " + _number_to_vietnamese(remainder)
+        return result + " " + _number_to_vietnamese(remainder)
+    if n < 1_000_000_000:
+        millions = n // 1_000_000
+        remainder = n % 1_000_000
+        result = _number_to_vietnamese(millions) + " triệu"
+        if remainder == 0:
+            return result
+        return result + " " + _number_to_vietnamese(remainder)
+    return str(n)
+
+
+def _expand_numbers_for_tts(text: str) -> str:
+    import re
+
+    def _repl(m: re.Match) -> str:
+        num_str = m.group(0)
+        try:
+            n = int(num_str)
+        except ValueError:
+            return num_str
+        if n > 999_999_999:
+            return num_str
+        return _number_to_vietnamese(n)
+
+    return re.sub(r"\b\d{1,9}\b", _repl, text)
+
+
+def _clean_punctuation_for_tts(text: str) -> str:
+    import re
+    out = text
+    out = re.sub(r"^\d+\)\s*", "", out)
+    out = re.sub(r",{2,}", ",", out)
+    out = re.sub(r"\.{3,}", "...", out)
+    out = re.sub(r"!{2,}", "!", out)
+    out = re.sub(r"\?{2,}", "?", out)
+    out = re.sub(r"[""„]", '"', out)
+    out = re.sub(r"[''‚]", "'", out)
+    out = re.sub(r"[「」『』【】]", "", out)
+    out = re.sub(r"[（）\(\)]", "", out)
+    out = re.sub(r"\s*[—–]\s*", ", ", out)
+    out = re.sub(r"(\w)/(\w)", r"\1 hay \2", out)
+    return out
+
+
+def _insert_breath_marks(text: str) -> str:
+    """Chèn dấu phẩy tại các điểm hơi tự nhiên để TTS không nuốt từ."""
+    import re
+    out = text
+    # Trước tên riêng Hán-Việt 2 âm tiết liền nhau (Tòng An, Diệp Thần...)
+    # nếu chưa có dấu câu trước đó
+    _VN_UPPER = r"[A-ZÀÁẢÃẠĂẰẮẲẴẶÂẦẤẨẪẬÈÉẺẼẸÊỀẾỂỄỆÌÍỈĨỊÒÓỎÕỌÔỒỐỔỖỘƠỜỚỞỠỢÙÚỦŨỤƯỪỨỬỮỰỲÝỶỸỴĐĐ]"
+    _VN_LOWER = r"[a-zàáảãạăằắẳẵặâầấẩẫậèéẻẽẹêềếểễệìíỉĩịòóỏõọôồốổỗộơờớởỡợùúủũụưừứửữựỳýỷỹỵđ]"
+    out = re.sub(
+        rf"(\b{_VN_LOWER}+)\s+({_VN_UPPER}{_VN_LOWER}{{1,4}}\s+{_VN_UPPER}{_VN_LOWER}{{1,4}}\b)",
+        r"\1, \2",
+        out,
+    )
+    return out
+
+
 def preprocess_tts_text(text: str) -> str:
     """Pre-process text trước khi đưa vào OmniVoice TTS.
 
-    1. Expand acronym IN HOA → tên chữ tiếng Việt (AI → "a i")
-    2. Trim whitespace dư thừa
+    Pipeline:
+      1. Clean punctuation (collapse doubles, normalize quotes/dashes)
+      2. Expand numbers → chữ tiếng Việt
+      3. Expand acronym IN HOA → tên chữ tiếng Việt
+      4. Insert breath marks trước tên riêng
+      5. Trim whitespace dư thừa
     """
     if not text:
         return text
-    out = _expand_acronyms_for_tts(text)
-    # Collapse multiple spaces / newlines
+    out = _clean_punctuation_for_tts(text)
+    out = _expand_numbers_for_tts(out)
+    out = _expand_acronyms_for_tts(out)
+    out = _insert_breath_marks(out)
     out = " ".join(out.split())
     return out
 
 
 class GPUManager:
     def __init__(self):
-        self._lock = threading.Lock()        # TTS + Whisper
+        self._lock = threading.RLock()       # TTS + Whisper (RLock: reentrant for create_voice_prompt → transcribe)
         self._llm_lock = threading.Lock()    # LLM riêng, không block TTS/Whisper
         self.tts_model: Optional["OmniVoice"] = None  # type: ignore
         self.whisper_pipe = None
@@ -352,8 +463,8 @@ class GPUManager:
             self._llm_loaded = False
             import gc
             gc.collect()
+            self._clear_cache()
             if torch.cuda.is_available():
-                torch.cuda.empty_cache()
                 torch.cuda.synchronize()
             self._log_vram("after unload_llm")
 
@@ -367,8 +478,8 @@ class GPUManager:
             self.tts_model = None
             import gc
             gc.collect()
+            self._clear_cache()
             if torch.cuda.is_available():
-                torch.cuda.empty_cache()
                 torch.cuda.synchronize()
             self._log_vram("after unload_tts")
 
@@ -385,8 +496,8 @@ class GPUManager:
             self._ready = False  # will reload on next transcribe call
             import gc
             gc.collect()
+            self._clear_cache()
             if torch.cuda.is_available():
-                torch.cuda.empty_cache()
                 torch.cuda.synchronize()
             self._log_vram("after unload_whisper")
 
@@ -397,6 +508,7 @@ class GPUManager:
                 self._load_faster_whisper()
             elif not self._use_faster_whisper and self.whisper_pipe is None:
                 self._load_hf_whisper()
+            self._ready = True
 
     def create_voice_prompt(self, ref_audio: str, ref_text: str = None,
                             preprocess_prompt: bool = True):
@@ -438,6 +550,8 @@ class GPUManager:
         acronym (AI/USA/CEO) → đọc letter-by-letter bằng tên chữ Việt.
         """
         text = preprocess_tts_text(text)
+        if not text or not text.strip():
+            return torch.zeros(1)
         with self._lock:
             self._ensure_tts()
             self._clear_cache()
@@ -494,6 +608,9 @@ class GPUManager:
             logger.info("LLM loaded on %s.", DEVICE)
         except Exception as e:
             logger.error("Failed to load LLM: %s", e)
+            self._llm_model = None
+            self._llm_tokenizer = None
+            self._llm_loaded = False
             raise
         finally:
             self._llm_loading = False

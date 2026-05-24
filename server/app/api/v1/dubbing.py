@@ -708,7 +708,7 @@ async def download_export(
     if not path:
         raise HTTPException(status_code=404, detail="Export not found")
     project = dubbing_svc.get_project(project_id)
-    filename = project["video_filename"].rsplit(".", 1)[0] + "_dubbed.mp4" if project else "dubbed.mp4"
+    filename = (project.get("video_filename") or "dubbed").rsplit(".", 1)[0] + "_dubbed.mp4" if project else "dubbed.mp4"
     return FileResponse(str(path), media_type="video/mp4", filename=filename)
 
 
@@ -952,8 +952,7 @@ async def create_project_from_url(
     source_language: str = Body("auto", embed=True),
     enable_dubbing: bool = Body(True, embed=True),
     enable_subtitle: bool = Body(False, embed=True),
-    user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_session),
+    ctx: dict = Depends(require_quota("dubbing")),
 ):
     """Tạo project bằng cách tải video từ URL qua yt-dlp. Stream SSE progress.
 
@@ -961,6 +960,8 @@ async def create_project_from_url(
     """
     import asyncio
     import threading
+    user: User = ctx["user"]
+    db: AsyncSession = ctx["db"]
 
     async def event_generator():
         loop = asyncio.get_running_loop()
