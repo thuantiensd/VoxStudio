@@ -306,7 +306,7 @@ def _generate_with_context(
     if not context_text or not context_text.strip():
         waveform = gpu.generate_tts(text, voice_prompt=voice_prompt, **tts_kwargs)
         waveform = trim_silence(waveform, sr, threshold_db=_OMNI_TRIM_DB, pad_ms=_OMNI_TRIM_PAD)
-        return _compress_internal_silences(waveform.cpu().numpy(), sr)
+        return waveform.cpu().numpy()
 
     full_text = f"{context_text}{CONTEXT_SEPARATOR} {text}"
     try:
@@ -327,9 +327,9 @@ def _generate_with_context(
             logger.warning("Context-aware TTS: target audio too short after split — fallback plain")
             waveform = gpu.generate_tts(text, voice_prompt=voice_prompt, **tts_kwargs)
             waveform = trim_silence(waveform, sr, threshold_db=_OMNI_TRIM_DB, pad_ms=_OMNI_TRIM_PAD)
-            return _compress_internal_silences(waveform.cpu().numpy(), sr)
+            return waveform.cpu().numpy()
 
-        return _compress_internal_silences(target_audio, sr)
+        return target_audio
 
     except Exception as e:
         logger.warning("Context-aware TTS failed (%s) — fallback plain generation", e)
@@ -375,14 +375,14 @@ def _generate_long_text(
     if len(parts) == 1:
         waveform = gpu.generate_tts(text, voice_prompt=voice_prompt, **tts_kwargs)
         waveform = trim_silence(waveform, sr, threshold_db=_OMNI_TRIM_DB, pad_ms=_OMNI_TRIM_PAD)
-        return _compress_internal_silences(waveform.cpu().numpy(), sr)
+        return waveform.cpu().numpy()
 
     chunks = []
     silence_gap = np.zeros(int(OMNI_SPLIT_SILENCE_MS * sr / 1000), dtype=np.float32)
     for i, part in enumerate(parts):
         waveform = gpu.generate_tts(part, voice_prompt=voice_prompt, **tts_kwargs)
         waveform = trim_silence(waveform, sr, threshold_db=_OMNI_TRIM_DB, pad_ms=_OMNI_TRIM_PAD)
-        chunk_np = _compress_internal_silences(waveform.cpu().numpy(), sr)
+        chunk_np = waveform.cpu().numpy()
         chunks.append(chunk_np)
         if i < len(parts) - 1:
             chunks.append(silence_gap)
@@ -3310,6 +3310,9 @@ def generate_segment(project_id: str, seg_id: str) -> dict:
                         context_text = prev_text
                         break
 
+            # ── GENERATE VOICE TỰ NHIÊN ──
+            # Ưu tiên chất lượng: generate 100% natural, KHÔNG compress
+            # internal silences (giữ nhịp thở). Chỉ gentle trim padding.
             if context_text:
                 audio_np = _generate_with_context(
                     tts_text, context_text, voice_prompt, kwargs, sr,
@@ -3320,42 +3323,37 @@ def generate_segment(project_id: str, seg_id: str) -> dict:
                 )
             else:
                 waveform = gpu.generate_tts(tts_text, voice_prompt=voice_prompt, **kwargs)
-                # Gentle trim: -55dB chỉ cắt pure silence padding, GIỮ fade-out
-                # của OmniVoice → mượt cuối câu + tiết kiệm ~200ms cho slot.
                 waveform = trim_silence(waveform, sr, threshold_db=-55, pad_ms=80)
-                audio_np = _compress_internal_silences(waveform.cpu().numpy(), sr)
+                audio_np = waveform.cpu().numpy()
 
-            # ── Tier 1.1 + 1.4: rate-aware auto-align ──
-            # Atempo < 1.0 muddies voice → chỉ speedup, slowdown để silence fill.
-            # Strict cap MAX_SPEED_FACTOR (1.10x) thay vì 1.3x để tránh chipmunk.
+            # ── TIME-STRETCH KHỚP TIMING (trong giới hạn cho phép) ──
+            # Dùng librosa phase vocoder (pitch-preserving) thay ffmpeg atempo.
+            # Cap 1.15x cho Vox Premium — giữ voice tự nhiên, chấp nhận overflow
+            # nếu vượt giới hạn (bleed vào silence gap giữa segments).
+            _VOX_MAX_STRETCH = 1.15  # speedup tối đa cho Vox Premium
             actual_dur = len(audio_np) / sr
             if auto_pace and target_duration > 0 and actual_dur > target_duration:
-                speed_factor, reason = _compute_target_speed(
-                    seg, target_duration, tts_text, actual_dur,
-                )
-                # Speed factor luôn trong [MIN, MAX]. Nếu reason=overflow_clamped
-                # → segment sẽ overflow nhẹ vào silence kế (chấp nhận được).
-                if speed_factor > 1.0 + 0.03:
-                    logger.info("[dub] Vox Premium speed-match: actual=%.2fs target=%.2fs "
-                                "speed=%.2fx reason=%s",
-                                actual_dur, target_duration, speed_factor, reason)
-                    seg_dir = _segments_dir(project_id)
-                    raw_wav = seg_dir / f"{seg_id}_raw.wav"
-                    stretched_wav = seg_dir / f"{seg_id}_stretched.wav"
-                    sf.write(str(raw_wav), audio_np, sr)
-                    try:
-                        _atempo_stretch(raw_wav, stretched_wav, speed_factor)
-                        audio_np, sr = sf.read(str(stretched_wav))
-                    finally:
-                        raw_wav.unlink(missing_ok=True)
-                        stretched_wav.unlink(missing_ok=True)
-                if reason == "overflow_clamped":
-                    logger.warning("[dub] Vox Premium segment %s overflow: clamped to "
-                                   "%.2fx — dub will be %.0fms longer than slot",
-                                   seg.get("id", "?"), MAX_SPEED_FACTOR,
-                                   (actual_dur / MAX_SPEED_FACTOR - target_duration) * 1000)
-            elif actual_dur < target_duration * 0.9:
-                logger.info("Vox Premium short-fill: actual=%.2fs target=%.2fs (silence padding)",
+                stretch_ratio = actual_dur / target_duration
+                if stretch_ratio <= 1.03:
+                    # Lệch < 3% → giữ nguyên, không stretch
+                    logger.info("[dub] Vox natural: %.2fs vs slot %.2fs (within 3%%, keep natural)",
+                                actual_dur, target_duration)
+                elif stretch_ratio <= _VOX_MAX_STRETCH:
+                    # Stretch trong giới hạn → librosa time_stretch
+                    audio_np = _time_stretch_quality(audio_np, sr, rate=stretch_ratio)
+                    new_dur = len(audio_np) / sr
+                    logger.info("[dub] Vox stretch: %.2fs → %.2fs (rate=%.2fx, target=%.2fs)",
+                                actual_dur, new_dur, stretch_ratio, target_duration)
+                else:
+                    # Vượt giới hạn → stretch tối đa 1.15x, chấp nhận overflow
+                    audio_np = _time_stretch_quality(audio_np, sr, rate=_VOX_MAX_STRETCH)
+                    new_dur = len(audio_np) / sr
+                    overflow_ms = (new_dur - target_duration) * 1000
+                    logger.warning("[dub] Vox overflow: %.2fs → %.2fs (capped %.2fx, "
+                                   "overflow %.0fms into next gap)",
+                                   actual_dur, new_dur, _VOX_MAX_STRETCH, overflow_ms)
+            elif actual_dur < target_duration * 0.85:
+                logger.info("[dub] Vox short-fill: actual=%.2fs target=%.2fs (silence padding)",
                             actual_dur, target_duration)
 
         # Tier 1.2: Insert internal pauses để giữ rhythm gốc
@@ -3558,6 +3556,22 @@ def _trim_trailing_silence(audio: np.ndarray, sr: int, threshold_db: float = -40
     end = (last_voiced + 1) * win
     end = min(end + int(min_keep_sec * sr), len(audio))  # giữ thêm 50ms cho âm cuối
     return audio[:end]
+
+
+def _time_stretch_quality(audio: np.ndarray, sr: int, rate: float) -> np.ndarray:
+    """Pitch-preserving time-stretch bằng librosa phase vocoder.
+
+    rate > 1.0 = speedup (nén thời gian), rate < 1.0 = slowdown.
+    Chất lượng tốt hơn ffmpeg atempo cho speech vì:
+    - Phase vocoder giữ formant tốt hơn WSOLA ở ratio cao
+    - Không cần write/read file tạm (in-memory)
+    """
+    if abs(rate - 1.0) < 0.01:
+        return audio
+    import librosa
+    # librosa time_stretch: rate > 1 = faster (shorter), rate < 1 = slower
+    stretched = librosa.effects.time_stretch(audio.astype(np.float32), rate=rate)
+    return stretched
 
 
 def _atempo_stretch(in_path: Path, out_path: Path, tempo: float):
